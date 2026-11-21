@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-p004-lan-local-ip"
+description = "Enables the p004_lan_local_ip command without any pre-configured scope."
+commands.allow = ["p004_lan_local_ip"]
+
+[[permission]]
+identifier = "deny-p004-lan-local-ip"
+description = "Denies the p004_lan_local_ip command without any pre-configured scope."
+commands.deny = ["p004_lan_local_ip"]

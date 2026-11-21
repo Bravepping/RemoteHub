@@ -62,6 +62,8 @@ pub struct Stats {
     pub pli_requests: u32,
     pub fir_requests: u32,
     pub resources_released: bool,
+    pub rejected_udp_rx: u64,
+    pub rejected_udp_tx: u64,
     pub error: Option<String>,
 }
 
@@ -112,6 +114,8 @@ impl PeerConnectionEventHandler for Handler {
 }
 
 pub struct Session {
+    network: crate::scope::NetworkScope,
+    socket_counters: Arc<crate::pinned_runtime::SocketCounters>,
     seconds: u32,
     shared: Arc<Shared>,
     started: AtomicBool,
@@ -120,10 +124,21 @@ pub struct Session {
 }
 impl Session {
     pub fn new(seconds: u32) -> Result<Arc<Self>, String> {
+        Self::with_network(seconds, crate::scope::NetworkScope::Loopback)
+    }
+    pub fn new_lan(seconds: u32, scope: crate::scope::LanScope) -> Result<Arc<Self>, String> {
+        Self::with_network(seconds, crate::scope::NetworkScope::Lan(scope))
+    }
+    fn with_network(
+        seconds: u32,
+        network: crate::scope::NetworkScope,
+    ) -> Result<Arc<Self>, String> {
         if !(5..=30).contains(&seconds) {
             return Err("INVALID_DURATION_5_TO_30".into());
         }
         Ok(Arc::new(Self {
+            network,
+            socket_counters: Arc::new(Default::default()),
             seconds,
             shared: Arc::new(Shared {
                 stats: Mutex::new(Stats {
@@ -151,6 +166,8 @@ impl Session {
         if !stats.resources_released {
             stats.elapsed_ms = self.shared.created.elapsed().as_millis() as u64;
         }
+        stats.rejected_udp_rx = self.socket_counters.rejected_rx.load(Ordering::Relaxed);
+        stats.rejected_udp_tx = self.socket_counters.rejected_tx.load(Ordering::Relaxed);
         stats
     }
     pub fn cancel(&self) {
@@ -159,7 +176,11 @@ impl Session {
 
     pub async fn signal(self: &Arc<Self>, offer: String) -> Result<String, String> {
         // Validate before starting any sockets or media. Only the native window owner calls this.
-        let negotiation = validate_offer(&offer)?;
+        let negotiation = if self.network.is_lan() {
+            crate::signaling::validate_description(&offer, self.network, false)?
+        } else {
+            validate_offer(&offer)?
+        };
         let (tx, rx) = oneshot::channel();
         {
             let mut slot = self.task.lock().unwrap_or_else(|p| p.into_inner());
@@ -283,7 +304,7 @@ impl Session {
                 Feedback::new(self.shared.clone()),
             );
         let settings = SettingEngineBuilder::new()
-            .with_include_loopback_candidate(true)
+            .with_include_loopback_candidate(!self.network.is_lan())
             .with_network_types(vec![NetworkType::Udp4])
             .with_multicast_dns_mode(MulticastDnsMode::Disabled)
             .with_ice_timeouts(
@@ -292,7 +313,7 @@ impl Session {
                 Some(Duration::from_secs(1)),
             )
             .build();
-        let pc = PeerConnectionBuilder::new()
+        let mut builder = PeerConnectionBuilder::new()
             .with_media_engine(engine)
             .with_interceptor_registry(registry)
             .with_setting_engine(settings)
@@ -302,10 +323,16 @@ impl Session {
                     .build(),
             )
             .with_handler(Arc::new(Handler(self.shared.clone())))
-            .with_udp_addrs(vec!["127.0.0.1:0"])
-            .build()
-            .await
-            .map_err(|e| e.to_string())?;
+            .with_udp_addrs(vec![format!("{}:0", self.network.local())]);
+        if let crate::scope::NetworkScope::Lan(scope) = self.network {
+            builder = builder.with_runtime(Arc::new(crate::pinned_runtime::PinnedRuntime {
+                inner: webrtc::runtime::default_runtime().ok_or("NO_ASYNC_RUNTIME")?,
+                local: scope.local.into(),
+                peer: scope.peer.into(),
+                counters: self.socket_counters.clone(),
+            }));
+        }
+        let pc = builder.build().await.map_err(|e| e.to_string())?;
         Ok(Arc::new(pc))
     }
 
@@ -366,16 +393,23 @@ impl Session {
             .filter(|l| l.starts_with("a=candidate:"))
             .collect();
         if candidates.is_empty()
-            || candidates
-                .iter()
-                .any(|c| !c.contains(" 127.0.0.1 ") || !c.contains(" typ host"))
+            || candidates.iter().any(|c| {
+                !c.contains(&format!(" {} ", self.network.local())) || !c.contains(" typ host")
+            })
         {
             return Err("NATIVE_ICE_NOT_LOOPBACK".into());
         }
         self.shared.update(|s| {
             s.native_candidates = candidates
                 .iter()
-                .map(|_| "host/127.0.0.1/udp".into())
+                .map(|_| {
+                    if self.network.is_lan() {
+                        "host/pinned-lan/udp"
+                    } else {
+                        "host/127.0.0.1/udp"
+                    }
+                    .into()
+                })
                 .collect()
         });
         if let Some(tx) = answer_tx.take() {
@@ -628,6 +662,23 @@ mod tests {
         assert_eq!(stats.error.as_deref(), Some("ICE_CONNECT_TIMEOUT"));
         native.stop().await.unwrap();
         pc.close().await.unwrap();
+        // Apply the LAN answer policy to a real library-generated answer, using loopback
+        // only as the no-capture transport fixture. No SDP/ICE credentials are printed.
+        let scope = crate::scope::NetworkScope::Lan(crate::scope::LanScope {
+            local: "127.0.0.2".parse().unwrap(),
+            peer: "127.0.0.1".parse().unwrap(),
+        });
+        let checked = crate::signaling::validate_description(&answer, scope, true);
+        assert!(
+            checked.is_ok(),
+            "real answer rejected: {:?}; candidate components {:?}",
+            checked.err(),
+            answer
+                .lines()
+                .filter_map(|line| line.strip_prefix("a=candidate:"))
+                .map(|line| line.split_whitespace().nth(1).unwrap_or("?"))
+                .collect::<Vec<_>>()
+        );
     }
     #[tokio::test]
     async fn fourth_au_backpressure_is_an_explicit_failure() {

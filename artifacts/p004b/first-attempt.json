@@ -1,0 +1,75 @@
+﻿{
+    "attempt":  "v1-first-failure",
+    "sender":  {
+                   "authenticated":  true,
+                   "elapsed_ms":  10286,
+                   "error":  "SIGNAL_DISCONNECTED",
+                   "messages_received":  0,
+                   "receiver_samples":  [
+
+                                        ],
+                   "resources_released":  true,
+                   "role":  "sender",
+                   "source":  {
+                                  "backpressure_failures":  0,
+                                  "elapsed_ms":  43,
+                                  "error":  null,
+                                  "fir_requests":  0,
+                                  "first_au_ms":  null,
+                                  "first_connected_ms":  null,
+                                  "frames_sent":  0,
+                                  "ignored_constraint_set5":  false,
+                                  "last_rtp_timestamp":  null,
+                                  "native_candidates":  [
+                                                            "host/pinned-lan/udp",
+                                                            "host/pinned-lan/udp"
+                                                        ],
+                                  "native_connection_state":  "connecting",
+                                  "native_ice_state":  "checking",
+                                  "negotiation":  {
+                                                      "candidate_types":  [
+
+                                                                          ],
+                                                      "fmtp":  "level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f",
+                                                      "payload_type":  102
+                                                  },
+                                  "pli_requests":  0,
+                                  "rejected_udp_rx":  0,
+                                  "rejected_udp_tx":  0,
+                                  "remote_packets_lost":  null,
+                                  "resources_released":  true,
+                                  "rtcp_packets_received":  0,
+                                  "rtcp_round_trip_time":  null,
+                                  "rtp_bytes_sent":  null,
+                                  "rtp_packets_sent":  null,
+                                  "rtp_packets_written":  0,
+                                  "rtp_payload_bytes":  0,
+                                  "source_sps_profile_level_id":  null,
+                                  "state":  "stopped",
+                                  "stream":  {
+                                                 "bytes_encoded":  0,
+                                                 "desktop_updates":  0,
+                                                 "encoder":  "",
+                                                 "first_pts_100ns":  null,
+                                                 "frames_encoded":  0,
+                                                 "frames_input":  0,
+                                                 "hardware":  false,
+                                                 "idr_frames":  0,
+                                                 "keyframe_rejections":  0,
+                                                 "keyframe_requests":  0,
+                                                 "last_pts_100ns":  null,
+                                                 "media_wall_ms":  0.0,
+                                                 "missed_ticks":  0,
+                                                 "reused_frames":  0,
+                                                 "setup_ms":  0.0,
+                                                 "source_height":  0,
+                                                 "source_width":  0,
+                                                 "stopped":  false
+                                             }
+                              },
+                   "state":  "failed"
+               },
+    "senderBrowserClosed":  true,
+    "receiverErrorReportedByUser":  "OFF_HOST_ICE_REJECTED",
+    "realVideoPassed":  false
+}

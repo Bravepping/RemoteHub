@@ -1678,11 +1678,14 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
+ "hmac",
  "hub-encode-win",
  "rtc",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tokio",
+ "uuid",
  "webrtc",
 ]
 

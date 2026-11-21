@@ -10,6 +10,8 @@ P0-03 采用真实 MF MFT，AMD 硬件异步事件驱动与 Microsoft 软件同�
 
 P0-04a 采用 webrtc/rtc 0.21.1 的新异步 driver API + StaticRTP，3 AU队列，Windows线程持有COM，90kHz以原MF PTS整数换算。只绑定127 UDP，拒绝外机SDP；原生MessageBox本轮授权；feature默认关闭。真实WebView2 157.0.4341.60已通过450/900帧视频与主动停止/关窗。P004父任务仍需双机。见ADR0003/P004_FORMAT。
 
+P0-04b新增默认关闭p004-lan、短时指定RFC1918两端scope和原生双向IP socket过滤；每轮双端原生确认及随机码HMAC认证信令，120秒等待、3秒心跳租约，复用标准WebRTC媒体。v2双机900帧全接收/解码/呈现与两端停止/接收端关窗/拔线通过。基线录屏未留存（约定不保存画面），P004父项仍doing。见ADR0004/P004B报告。此实验授权不替代正式身份/ACL。
+
 ## Convention Capture
 
 Rust fmt、TS strict、Vue/TS Prettier。模块依赖 Tauri -> hub-capture-win -> windows。输出样本放 artifacts/private 并排除 Git/打包。正确：测试返回值可来自 fixture；错误：产品显示固定假测量。每次以 artifacts 和当前实测结果更新 TASKS，不继承未实测的成功。
@@ -23,5 +25,7 @@ P003 raw Annex B 的 ffprobe r_frame_rate 是估计值，本机报告 60/1，不
 ## Glossary
 
 AMD MFT SPS 42041f 的 constraint_set5 对 profile66 不适用；标准要求解码器忽略，不能逐字节等同42001f或暗改SPS。初始严格比较导致真实失败，已加回归。浏览器过滤host/mDNS候选后的空candidate offer可在本机经Rust127答案形成prflx，实测成功不等于跨机穿透。stop后异步授权/统计结果迟到必须撤销/忽略。私有真实MF测试的环境变量需绝对目录；普通cargo test保留ignored，不假报通过。未经有效测量计数不得把库RTT默认0当作实测0ms。
+
+webrtc0.21.1真实应答即使有rtcp-mux仍附component2 RTCP host候选。只在answer+rtcp-mux时兼容同一指定IP/UDP的component2；offer仍仅component1。认证控制连接回传的统计每秒采样，断线后最后解码数不等于停止瞬间最终数；不要用发送与最后回传差值声称丢帧。原生错误必须返回真实固定错误码，不能统一用oneshot掉线吞成LAN_SIGNAL_FAILED。
 
 观察 FPS：收到 DXGI 桌面更新的计数/实验总秒数，不能等同视频编码/传输/解码 FPS。首轮交付完成不等于 Phase 0 退出条件满足。

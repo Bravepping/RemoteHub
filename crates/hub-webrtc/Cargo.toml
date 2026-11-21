@@ -11,6 +11,9 @@ serde.workspace = true
 serde_json.workspace = true
 webrtc = "=0.21.1"
 rtc = { version = "=0.21.1", default-features = false }
-tokio = { version = "=1.54.1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "sync", "time", "macros", "net", "io-util"] }
 async-trait = "=0.1.92"
 bytes = "=1.12.2"
+hmac = "=0.12.1"
+sha2 = "=0.10.9"
+uuid = { version = "=1.29.3", features = ["v4"] }

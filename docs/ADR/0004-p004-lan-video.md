@@ -1,6 +1,6 @@
 # ADR 0004：P0-04b 指定两台 PC 的有界局域网视频实验
 
-日期：2026-11-21，基线5fb0867。状态：实施中，双机未实测前不标完成。
+日期：2026-11-21，基线5fb0867。状态：已实施并完成P004b双机实测；P004基线录屏未留存，父项仍保留证据差异。
 
 用户已确认两台物理Windows电脑处于同一有线局域网且均可操作。当前机继续发送，第二台只接收；Windows10专业版22H2/x64、i5-11260H、16GB。不收集截图中的设备ID/产品ID，不把具体IP或设备身份写入公开证据。
 
@@ -27,3 +27,7 @@
 先测IP/SDP白名单、MAC篡改/重放/方向、长度/超时、UDP双向过滤与取消；再原生同机回归和双机10–30秒运动、两端停止/关窗/断线，记录实际selected pair、帧数及释放。新依赖仅提升已锁定的hmac/sha2/uuid为直接依赖，核对官方API和许可；全workspace及all-feature检查。回退为关闭p004-lan feature，原P004a与CLI仍可独立运行。
 
 参考：[webrtc0.21.1 Runtime接口](https://docs.rs/webrtc/0.21.1/webrtc/)、[RustCrypto hmac0.12.1](https://docs.rs/hmac/0.12.1/hmac/)。
+
+## 首轮互通修正
+
+首轮真实对端已通过认证，但接收端对库生成的应答报 OFF_HOST_ICE_REJECTED，发送端随之 SIGNAL_DISCONNECTED；0帧，资源释放。根因是库即使协商 rtcp-mux 仍在应答附加 component2 RTCP host 候选，初始校验仅接受 component1。v2仅在应答明确协商 rtcp-mux 时接受 component2，仍逐条限制相同指定IP/UDP/host；offer不放宽。真实库生成应答回归先复现失败、修复后通过，并覆盖其他IP/无mux/offer的负例。接收端原生协商错误同时直接传回界面，避免统一掩盖为 LAN_SIGNAL_FAILED。

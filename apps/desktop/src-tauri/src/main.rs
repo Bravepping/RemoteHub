@@ -2,6 +2,8 @@
 
 #[cfg(feature = "p004-probe")]
 mod p004;
+#[cfg(feature = "p004-lan")]
+mod p004_lan;
 
 use hub_capture_win::ProbeReport;
 use serde::Serialize;
@@ -28,6 +30,7 @@ struct RuntimeInfo {
     capture_backend: &'static str,
     remote_access_enabled: bool,
     p004_enabled: bool,
+    p004_lan_enabled: bool,
 }
 
 #[tauri::command]
@@ -39,11 +42,13 @@ fn get_runtime_info() -> RuntimeInfo {
         capture_backend: "DXGI Desktop Duplication (probe on demand)",
         remote_access_enabled: false,
         p004_enabled: cfg!(feature = "p004-probe"),
+        p004_lan_enabled: cfg!(feature = "p004-lan"),
     }
 }
 
 #[tauri::command]
 async fn run_capture_probe(
+    window: tauri::WebviewWindow,
     consent: bool,
     state: tauri::State<'_, std::sync::Arc<ProbeState>>,
 ) -> Result<ProbeReport, String> {
@@ -54,6 +59,24 @@ async fn run_capture_probe(
         return Err("CAPTURE_BUSY: 已有采集实验正在进行".into());
     }
     let shared = state.inner().clone();
+    let lease = ProbeLease(&shared.0);
+    #[cfg(feature = "p004-probe")]
+    {
+        use tauri::Manager;
+        if window.state::<std::sync::Arc<p004::P004State>>().busy() {
+            return Err("CAPTURE_BUSY".into());
+        }
+    }
+    #[cfg(feature = "p004-lan")]
+    {
+        use tauri::Manager;
+        if window.state::<std::sync::Arc<p004_lan::LanState>>().busy() {
+            return Err("CAPTURE_BUSY".into());
+        }
+    }
+    let _ = window;
+    // Hand the already reserved lease to the blocking capture task.
+    std::mem::forget(lease);
     tauri::async_runtime::spawn_blocking(move || {
         let _lease = ProbeLease(&shared.0);
         // The first frame is discarded when returning. UI never receives raw desktop pixels.
@@ -72,7 +95,7 @@ fn main() {
         get_runtime_info,
         run_capture_probe
     ]);
-    #[cfg(feature = "p004-probe")]
+    #[cfg(all(feature = "p004-probe", not(feature = "p004-lan")))]
     let builder = builder
         .manage(std::sync::Arc::new(p004::P004State::default()))
         .setup(|app| {
@@ -92,6 +115,34 @@ fn main() {
             p004::p004_save_report
         ])
         .on_window_event(p004::on_window_event);
+    #[cfg(feature = "p004-lan")]
+    let builder = builder
+        .manage(std::sync::Arc::new(p004::P004State::default()))
+        .manage(std::sync::Arc::new(p004_lan::LanState::default()))
+        .setup(|app| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_title("RemoteHub · P0-04b 双机视频实验 v2")?;
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_runtime_info,
+            run_capture_probe,
+            p004::p004_start_loopback_probe,
+            p004::p004_signal,
+            p004::p004_get_stats,
+            p004::p004_stop_loopback_probe,
+            p004::p004_save_report,
+            p004_lan::p004_lan_local_ip,
+            p004_lan::p004_lan_start,
+            p004_lan::p004_lan_signal,
+            p004_lan::p004_lan_stats,
+            p004_lan::p004_lan_metrics,
+            p004_lan::p004_lan_stop,
+            p004_lan::p004_lan_save
+        ])
+        .on_window_event(p004_lan::on_window_event);
     builder
         .run(tauri::generate_context!())
         .expect("RemoteHub desktop startup failed");

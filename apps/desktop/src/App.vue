@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
 import LoopbackVideoProbe from './features/p004/LoopbackVideoProbe.vue';
+import LanVideoProbe from './features/p004/LanVideoProbe.vue';
 import {
   errorMessage,
   getRuntimeInfo,
@@ -51,7 +52,10 @@ onMounted(refresh);
       <div class="brand"><span class="brand-icon">▣</span> RemoteHub</div>
       <div class="nav-item">◈ <span>技术验证</span></div>
       <div class="side-note">自托管 · Windows<br />Phase 0 / 首次工程</div>
-      <div class="access-state"><span class="dot"></span>远程访问关闭</div>
+      <div class="access-state">
+        <span class="dot"></span
+        >{{ runtime?.p004_lan_enabled ? '仅本次指定对端' : '远程访问关闭' }}
+      </div>
     </aside>
     <main>
       <header>
@@ -61,8 +65,15 @@ onMounted(refresh);
         </div>
         <span class="badge">Phase 0</span>
       </header>
-      <p class="intro">当前验证本机窗口与主屏采集，尚未开放设备连接。</p>
-      <LoopbackVideoProbe v-if="runtime?.p004_enabled" />
+      <p class="intro">
+        {{
+          runtime?.p004_lan_enabled
+            ? '两台电脑明确确认后，验证局域网实时视频。'
+            : '当前验证本机窗口与主屏采集，尚未开放设备连接。'
+        }}
+      </p>
+      <LanVideoProbe v-if="runtime?.p004_lan_enabled" />
+      <LoopbackVideoProbe v-else-if="runtime?.p004_enabled" />
       <template v-if="!runtime?.p004_enabled">
         <section class="runtime-card">
           <div class="monitor">▣</div>

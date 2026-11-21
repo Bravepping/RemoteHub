@@ -7,6 +7,7 @@ export interface RuntimeInfo {
   capture_backend: string;
   remote_access_enabled: boolean;
   p004_enabled?: boolean;
+  p004_lan_enabled?: boolean;
 }
 
 export interface ProbeReport {

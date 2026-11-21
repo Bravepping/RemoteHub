@@ -61,7 +61,7 @@ impl Drop for StartingLease<'_> {
     }
 }
 
-fn origin(window: &WebviewWindow) -> Result<(), String> {
+pub(crate) fn origin(window: &WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|_| "WINDOW_URL_UNAVAILABLE")?;
     origin_url(window.label(), &url)
 }
@@ -78,6 +78,17 @@ fn origin_url(label: &str, url: &tauri::Url) -> Result<(), String> {
     Ok(())
 }
 impl P004State {
+    pub(crate) fn busy(&self) -> bool {
+        self.starting.load(Ordering::Acquire)
+            || self
+                .active
+                .lock()
+                .map(|a| {
+                    a.as_ref()
+                        .is_some_and(|a| !a.session.stats().resources_released)
+                })
+                .unwrap_or(true)
+    }
     fn reserve(&self) -> Result<StartingLease<'_>, String> {
         if self.starting.swap(true, Ordering::AcqRel) {
             return Err("BUSY".into());
@@ -117,6 +128,15 @@ pub async fn p004_start_loopback_probe(
 ) -> Result<Started, String> {
     origin(&window)?;
     config.validate()?;
+    let gate = window.state::<Arc<crate::ProbeState>>();
+    if gate.0.swap(true, Ordering::AcqRel) {
+        return Err("CAPTURE_BUSY".into());
+    }
+    let _gate = crate::ProbeLease(&gate.0);
+    #[cfg(feature = "p004-lan")]
+    if window.state::<Arc<crate::p004_lan::LanState>>().busy() {
+        return Err("LAN_BUSY".into());
+    }
     let _lease = state.reserve()?;
     let hwnd = window.hwnd().map_err(|_| "NATIVE_WINDOW_REQUIRED")?.0 as usize;
     let seconds = config.seconds;
@@ -288,6 +308,22 @@ fn report_directory() -> Result<std::path::PathBuf, String> {
         .join("artifacts/private/p004"))
 }
 
+#[cfg(feature = "p004-lan")]
+pub(crate) async fn close_for_lan(state: &P004State) -> bool {
+    state.closing.store(true, Ordering::Release);
+    let session = state
+        .active
+        .lock()
+        .ok()
+        .and_then(|s| s.as_ref().map(|a| a.session.clone()));
+    if let Some(session) = session {
+        session.stop().await.is_ok() && session.stats().resources_released
+    } else {
+        true
+    }
+}
+
+#[cfg(not(feature = "p004-lan"))]
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         let state = window.state::<Arc<P004State>>();

@@ -1,0 +1,12 @@
+﻿{
+    "date":  "2026-11-21",
+    "defaultVerify":  "artifacts/p004b/v2-preflight/verification.json",
+    "rustAllFeaturesPassed":  36,
+    "rustPrivateMfIgnored":  1,
+    "frontendPassed":  8,
+    "edgePreviewPassed":  1,
+    "allFeaturesClippyExit":  0,
+    "realDualPcVideo":  "pending",
+    "v2BinarySha256":  "0ea5f7db0f73f9a39ae126c7f00342ef6e9a5d56a5b9b7cfca8bf242563064c8",
+    "v2UpdateZipSha256":  "5bb154779a4b748c765b019bd73068d1328630c4124433476bac9c0f65fdbdb9"
+}

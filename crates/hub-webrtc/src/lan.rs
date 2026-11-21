@@ -1,0 +1,584 @@
+use crate::{
+    lan_wire::{self, Codec, Key},
+    scope::{LanScope, NetworkScope},
+    session::{Session, Stats},
+    signaling::validate_description,
+};
+use serde::Serialize;
+use serde_json::Value;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant},
+};
+use tokio::{
+    net::{TcpListener, TcpSocket, TcpStream},
+    sync::{mpsc, oneshot},
+    task::JoinHandle,
+    time::{sleep, timeout},
+};
+
+#[derive(Clone, Serialize)]
+pub struct LanStatus {
+    pub role: String,
+    pub state: String,
+    pub elapsed_ms: u64,
+    pub authenticated: bool,
+    pub messages_received: u32,
+    pub source: Option<Stats>,
+    pub receiver_samples: Vec<Value>,
+    pub resources_released: bool,
+    pub error: Option<String>,
+}
+pub struct LanSession {
+    scope: LanScope,
+    seconds: u32,
+    port: u16,
+    role: &'static str,
+    created: Instant,
+    cancelled: AtomicBool,
+    started: AtomicBool,
+    key: Mutex<Option<Arc<Key>>>,
+    source: Mutex<Option<Arc<Session>>>,
+    status: Mutex<LanStatus>,
+    task: Mutex<Option<JoinHandle<()>>>,
+    stop_lock: tokio::sync::Mutex<()>,
+    latest_metrics: Mutex<Option<String>>,
+}
+impl LanSession {
+    fn new(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        role: &'static str,
+        key: Key,
+    ) -> Result<Arc<Self>, String> {
+        if !(5..=30).contains(&seconds) || port < 1024 {
+            return Err("INVALID_LAN_CONFIG".into());
+        }
+        Ok(Arc::new(Self {
+            scope,
+            seconds,
+            port,
+            role,
+            created: Instant::now(),
+            cancelled: AtomicBool::new(false),
+            started: AtomicBool::new(false),
+            key: Mutex::new(Some(Arc::new(key))),
+            source: Mutex::new(None),
+            status: Mutex::new(LanStatus {
+                role: role.into(),
+                state: "waiting".into(),
+                elapsed_ms: 0,
+                authenticated: false,
+                messages_received: 0,
+                source: None,
+                receiver_samples: vec![],
+                resources_released: false,
+                error: None,
+            }),
+            task: Mutex::new(None),
+            stop_lock: tokio::sync::Mutex::new(()),
+            latest_metrics: Mutex::new(None),
+        }))
+    }
+    pub async fn host(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+    ) -> Result<(Arc<Self>, String), String> {
+        let key = Key::generate();
+        let display = key.display();
+        let this = Self::new(scope, seconds, port, "sender", key)?;
+        let listener = TcpListener::bind((scope.local, port))
+            .await
+            .map_err(|_| "LAN_LISTEN_FAILED")?;
+        this.started.store(true, Ordering::Release);
+        let owner = this.clone();
+        let task = tokio::spawn(async move {
+            let result = owner.host_main(listener).await;
+            owner.finish(result).await;
+        });
+        *this.task.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);
+        Ok((this, display))
+    }
+    pub fn receiver(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        code: &str,
+    ) -> Result<Arc<Self>, String> {
+        Self::new(scope, seconds, port, "receiver", Key::parse(code)?)
+    }
+    fn update(&self, f: impl FnOnce(&mut LanStatus)) {
+        let mut s = self.status.lock().unwrap_or_else(|p| p.into_inner());
+        s.elapsed_ms = self.created.elapsed().as_millis() as u64;
+        f(&mut s);
+    }
+    fn secret(&self) -> Result<Arc<Key>, String> {
+        self.key
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+            .ok_or("AUTH_EXPIRED".into())
+    }
+    pub fn stats(&self) -> LanStatus {
+        let mut s = self
+            .status
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        if let Some(source) = self
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+        {
+            s.source = Some(source.stats());
+        }
+        if !s.resources_released {
+            s.elapsed_ms = self.created.elapsed().as_millis() as u64;
+        }
+        s
+    }
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        if let Some(source) = self
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_ref()
+        {
+            source.cancel();
+        }
+    }
+    async fn cancelled(&self) {
+        while !self.cancelled.load(Ordering::Acquire) {
+            sleep(Duration::from_millis(30)).await;
+        }
+    }
+    pub async fn stop(&self) -> Result<(), String> {
+        let _guard = self.stop_lock.lock().await;
+        self.cancel();
+        let task = self.task.lock().unwrap_or_else(|p| p.into_inner()).take();
+        if let Some(mut task) = task {
+            match timeout(Duration::from_secs(12), &mut task).await {
+                Err(_) => {
+                    *self.task.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);
+                    return Err("LAN_CLEANUP_PENDING".into());
+                }
+                Ok(Err(_)) => return Err("LAN_TASK_FAILED".into()),
+                Ok(Ok(())) => (),
+            }
+        } else if !self.started.load(Ordering::Acquire) {
+            self.update(|s| {
+                s.state = "stopped".into();
+                s.resources_released = true;
+            });
+            self.key.lock().unwrap_or_else(|p| p.into_inner()).take();
+        }
+        if !self.stats().resources_released {
+            return Err("LAN_CLEANUP_PENDING".into());
+        }
+        Ok(())
+    }
+    async fn finish(&self, result: Result<(), String>) {
+        self.cancel();
+        let source = self
+            .source
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone();
+        let clean = if let Some(source) = source {
+            source.stop().await.is_ok() && source.stats().resources_released
+        } else {
+            true
+        };
+        self.key.lock().unwrap_or_else(|p| p.into_inner()).take();
+        self.update(|s| {
+            if let Err(error) = result {
+                if error != "CANCELLED" {
+                    s.error = Some(error);
+                }
+            }
+            if !clean {
+                s.error = Some("LAN_CLEANUP_PENDING".into());
+            }
+            s.resources_released = clean;
+            s.state = if s.error.is_some() {
+                "failed"
+            } else {
+                "stopped"
+            }
+            .into();
+        });
+    }
+    async fn host_main(&self, listener: TcpListener) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let mut accepted = None;
+        let mut attempts = 0;
+        while Instant::now() < deadline && !self.cancelled.load(Ordering::Acquire) && attempts < 5 {
+            let result = tokio::select! {v=timeout(deadline.saturating_duration_since(Instant::now()),listener.accept())=>v.map_err(|_|"LAN_WAIT_EXPIRED")?.map_err(|_|"LAN_ACCEPT_FAILED")?,_=self.cancelled()=>return Ok(())};
+            let (mut socket, address) = result;
+            attempts += 1;
+            if address.ip() != std::net::IpAddr::V4(self.scope.peer) {
+                continue;
+            }
+            let frame = tokio::select! {r=timeout(Duration::from_secs(5),lan_wire::read(&mut socket))=>match r{Ok(Ok(f))=>f,_=>continue},_=self.cancelled()=>return Ok(())};
+            let mut codec = match Codec::new(self.secret()?, frame.nonce.clone(), true) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+            let (kind, offer) = match codec.accept(frame) {
+                Ok(value) => value,
+                Err(_) => continue,
+            };
+            if kind != "offer" {
+                continue;
+            }
+            validate_description(&offer, NetworkScope::Lan(self.scope), false)?;
+            accepted = Some((socket, codec, offer));
+            break;
+        }
+        drop(listener);
+        if self.cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let (mut socket, mut codec, offer) = accepted.ok_or("LAN_WAIT_EXPIRED_OR_AUTH_REJECTED")?;
+        self.update(|s| {
+            s.state = "negotiating".into();
+            s.authenticated = true;
+        });
+        let source = Session::new_lan(self.seconds, self.scope)?;
+        *self.source.lock().unwrap_or_else(|p| p.into_inner()) = Some(source.clone());
+        let answer = source.signal(offer).await?;
+        lan_wire::write(&mut socket, codec.encode("answer", answer)?).await?;
+        self.control(socket, codec).await
+    }
+    pub async fn signal_receiver(self: &Arc<Self>, offer: String) -> Result<String, String> {
+        if self.role != "receiver" || self.cancelled.load(Ordering::Acquire) {
+            return Err("INVALID_RECEIVER_SESSION".into());
+        }
+        // The receiver's own offer must only advertise its explicitly selected interface.
+        validate_description(
+            &offer,
+            NetworkScope::Lan(LanScope {
+                local: self.scope.peer,
+                peer: self.scope.local,
+            }),
+            false,
+        )?;
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut slot = self.task.lock().unwrap_or_else(|p| p.into_inner());
+            if self.cancelled.load(Ordering::Acquire) {
+                return Err("CANCELLED".into());
+            }
+            if self.started.swap(true, Ordering::AcqRel) {
+                return Err("ALREADY_SIGNALED".into());
+            }
+            let owner = self.clone();
+            *slot = Some(tokio::spawn(async move {
+                let mut response = Some(tx);
+                let result = owner.receiver_main(offer, &mut response).await;
+                if let (Err(error), Some(response)) = (&result, response.take()) {
+                    let _ = response.send(Err(error.clone()));
+                }
+                owner.finish(result).await;
+            }));
+        }
+        timeout(Duration::from_secs(15), rx)
+            .await
+            .map_err(|_| "LAN_SIGNAL_TIMEOUT")?
+            .map_err(|_| "LAN_SIGNAL_FAILED")?
+    }
+    async fn receiver_main(
+        &self,
+        offer: String,
+        response: &mut Option<oneshot::Sender<Result<String, String>>>,
+    ) -> Result<(), String> {
+        let socket = TcpSocket::new_v4().map_err(|_| "LAN_SOCKET_FAILED")?;
+        socket
+            .bind((self.scope.local, 0).into())
+            .map_err(|_| "LAN_LOCAL_BIND_FAILED")?;
+        let mut socket = tokio::select! {r=timeout(Duration::from_secs(5),socket.connect((self.scope.peer,self.port).into()))=>r.map_err(|_|"LAN_CONNECT_TIMEOUT")?.map_err(|_|"LAN_CONNECT_FAILED")?,_=self.cancelled()=>return Err("CANCELLED".into())};
+        let mut codec = Codec::new(self.secret()?, uuid::Uuid::new_v4().to_string(), false)?;
+        lan_wire::write(&mut socket, codec.encode("offer", offer)?).await?;
+        let frame = tokio::select! {result=timeout(Duration::from_secs(10),lan_wire::read(&mut socket))=>result.map_err(|_|"LAN_ANSWER_TIMEOUT")??,_=self.cancelled()=>return Err("CANCELLED".into())};
+        let (kind, answer) = codec.accept(frame)?;
+        if kind != "answer" {
+            return Err("EXPECTED_AUTHENTICATED_ANSWER".into());
+        }
+        validate_description(&answer, NetworkScope::Lan(self.scope), true)?;
+        self.update(|s| {
+            s.state = "connected".into();
+            s.authenticated = true;
+        });
+        response
+            .take()
+            .ok_or("RECEIVER_VIEW_CLOSED")?
+            .send(Ok(answer))
+            .map_err(|_| "RECEIVER_VIEW_CLOSED")?;
+        self.control(socket, codec).await
+    }
+    pub fn metrics(&self, data: Value) -> Result<(), String> {
+        if self.role != "receiver" || self.cancelled.load(Ordering::Acquire) {
+            return Err("RECEIVER_STOPPED".into());
+        }
+        validate_metrics(&data)?;
+        self.update(|s| {
+            s.receiver_samples.push(data.clone());
+            if s.receiver_samples.len() > 60 {
+                s.receiver_samples.remove(0);
+            }
+        });
+        let text = serde_json::to_string(&data).map_err(|_| "METRICS_INVALID")?;
+        *self
+            .latest_metrics
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some(text);
+        Ok(())
+    }
+    async fn control(&self, socket: TcpStream, mut codec: Codec) -> Result<(), String> {
+        let (mut read, mut write) = socket.into_split();
+        let (tx, mut rx) = mpsc::channel(2);
+        let reader = tokio::spawn(async move {
+            loop {
+                let frame = timeout(Duration::from_secs(3), lan_wire::read(&mut read))
+                    .await
+                    .unwrap_or_else(|_| Err("LAN_LEASE_EXPIRED".into()));
+                let end = frame.is_err();
+                if tx.send(frame).await.is_err() || end {
+                    break;
+                }
+            }
+        });
+        let result=async {
+   let mut beat=tokio::time::interval(Duration::from_secs(1));let end=Instant::now()+Duration::from_secs(self.seconds as u64+15);let mut finishing=None;
+   loop{
+    if self.cancelled.load(Ordering::Acquire){let _=timeout(Duration::from_millis(300),lan_wire::write(&mut write,codec.encode("stop",String::new())?)).await;return Ok(());}
+    if Instant::now()>end{return Err("LAN_SESSION_DEADLINE".into());}
+    let source=self.source.lock().unwrap_or_else(|p|p.into_inner()).clone();
+    if let Some(source)=source{let stats=source.stats();if stats.resources_released {
+     if finishing.is_none(){lan_wire::write(&mut write,codec.encode("finish",String::new())?).await?;finishing=Some(Instant::now());}
+     let decoded=self.stats().receiver_samples.last().and_then(|data|data["framesDecoded"].as_u64()).unwrap_or(0);
+     if decoded>=stats.frames_sent as u64||finishing.is_some_and(|start:Instant|start.elapsed()>Duration::from_secs(2))||stats.error.is_some(){
+      lan_wire::write(&mut write,codec.encode("stop",String::new())?).await?;return if let Some(e)=stats.error{Err(e)}else{Ok(())};
+     }
+    }}
+    tokio::select!{
+     frame=rx.recv()=>{
+      let frame=frame.ok_or("SIGNAL_DISCONNECTED")??;let(kind,payload)=codec.accept(frame)?;
+      self.update(|s|s.messages_received+=1);
+      match kind.as_str(){"beat" if payload.is_empty()=>(),"stop" if payload.is_empty()=>return Ok(()),"finish" if self.role=="receiver"&&payload.is_empty()=>self.update(|s|s.state="finishing".into()),"metrics" if self.role=="sender"=>{
+       let data:Value=serde_json::from_str(&payload).map_err(|_|"METRICS_INVALID")?;validate_metrics(&data)?;
+       self.update(|s|{s.receiver_samples.push(data);if s.receiver_samples.len()>60{s.receiver_samples.remove(0);}});
+      },_=>return Err("UNEXPECTED_CONTROL_MESSAGE".into())}
+     },
+     _=beat.tick()=>{
+      let metric=self.latest_metrics.lock().unwrap_or_else(|p|p.into_inner()).take();
+      let(kind,payload)=if let Some(data)=metric{("metrics",data)}else{("beat",String::new())};
+      timeout(Duration::from_secs(2),lan_wire::write(&mut write,codec.encode(kind,payload)?)).await.map_err(|_|"CONTROL_WRITE_TIMEOUT")??;
+     },
+     _=sleep(Duration::from_millis(30))=>(),
+    }
+   }
+  }.await;
+        reader.abort();
+        let _ = reader.await;
+        use tokio::io::AsyncWriteExt;
+        let _ = write.shutdown().await;
+        result
+    }
+}
+
+pub fn validate_metrics(data: &Value) -> Result<(), String> {
+    let object = data.as_object().ok_or("METRICS_INVALID")?;
+    let allowed = [
+        "elapsedMs",
+        "framesDecoded",
+        "framesReceived",
+        "packetsReceived",
+        "packetsLost",
+        "bytesReceived",
+        "videoWidth",
+        "videoHeight",
+        "framesRendered",
+        "currentTime",
+        "firstFrameMs",
+        "connectionState",
+        "iceState",
+        "codec",
+        "fmtp",
+        "selectedRemoteLoopback",
+        "localCandidateType",
+        "remoteCandidateType",
+        "freezeCount",
+        "totalFreezesDuration",
+        "peerMatches",
+        "decoderImplementation",
+    ];
+    if object.keys().any(|k| !allowed.contains(&k.as_str()))
+        || serde_json::to_vec(data)
+            .map_err(|_| "METRICS_INVALID")?
+            .len()
+            > 4096
+    {
+        return Err("METRICS_INVALID".into());
+    }
+    if data["peerMatches"].as_bool() == Some(false) {
+        return Err("BROWSER_SELECTED_OFF_PEER".into());
+    }
+    if data["framesDecoded"].as_u64().unwrap_or(0) > 0
+        && data["peerMatches"].as_bool() != Some(true)
+    {
+        return Err("BROWSER_PEER_UNVERIFIED".into());
+    }
+    for value in object.values() {
+        if value.as_str().is_some_and(|s| s.len() > 256) {
+            return Err("METRICS_INVALID".into());
+        }
+    }
+    for key in [
+        "framesDecoded",
+        "framesReceived",
+        "packetsReceived",
+        "bytesReceived",
+        "videoWidth",
+        "videoHeight",
+        "framesRendered",
+        "freezeCount",
+    ] {
+        if !data[key].is_null() && !data[key].is_u64() {
+            return Err("METRICS_INVALID_NUMBER".into());
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[tokio::test]
+    async fn receiver_returns_the_actual_authenticated_answer_validation_error() {
+        let listener = TcpListener::bind("127.0.0.2:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let key = Arc::new(Key::generate());
+        let code = key.display();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let frame = lan_wire::read(&mut socket).await.unwrap();
+            let mut codec = Codec::new(key, frame.nonce.clone(), true).unwrap();
+            codec.accept(frame).unwrap();
+            lan_wire::write(
+                &mut socket,
+                codec.encode("answer", "invalid-sdp".into()).unwrap(),
+            )
+            .await
+            .unwrap();
+        });
+        let receiver = LanSession::new(
+            LanScope {
+                local: "127.0.0.1".parse().unwrap(),
+                peer: "127.0.0.2".parse().unwrap(),
+            },
+            5,
+            port,
+            "receiver",
+            Key::parse(&code).unwrap(),
+        )
+        .unwrap();
+        let offer=format!("v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=recvonly\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\na=fingerprint:sha-256 {}\r\n",["AA";32].join(":"));
+        assert_eq!(
+            receiver.signal_receiver(offer).await.unwrap_err(),
+            "SINGLE_RECVONLY_VIDEO_REQUIRED"
+        );
+        receiver.stop().await.unwrap();
+        server.await.unwrap();
+        assert!(receiver.stats().resources_released);
+    }
+    #[tokio::test]
+    async fn off_peer_tcp_creates_no_source_and_cancel_releases_the_listener() {
+        let probe = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = probe.local_addr().unwrap().port();
+        drop(probe);
+        // Loopback transport fixture only; the public UI validates RFC1918 addresses.
+        let scope = LanScope {
+            local: "127.0.0.1".parse().unwrap(),
+            peer: "127.0.0.2".parse().unwrap(),
+        };
+        let (session, _) = LanSession::host(scope, 5, port).await.unwrap();
+        let socket = TcpStream::connect((scope.local, port)).await.unwrap();
+        sleep(Duration::from_millis(40)).await;
+        assert!(session.stats().source.is_none());
+        assert!(!session.stats().authenticated);
+        session.stop().await.unwrap();
+        drop(socket);
+        assert!(session.stats().resources_released);
+        assert!(session.secret().is_err());
+        assert!(TcpListener::bind((scope.local, port)).await.is_ok());
+    }
+    #[tokio::test]
+    async fn silent_control_peer_expires_lease_and_releases_without_capture() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let (server, _) = listener.accept().await.unwrap();
+        drop(listener);
+        let key = Key::generate();
+        let code = key.display();
+        let session = LanSession::new(
+            LanScope {
+                local: "127.0.0.1".parse().unwrap(),
+                peer: "127.0.0.2".parse().unwrap(),
+            },
+            5,
+            48604,
+            "receiver",
+            Key::parse(&code).unwrap(),
+        )
+        .unwrap();
+        let codec = Codec::new(
+            session.secret().unwrap(),
+            uuid::Uuid::new_v4().to_string(),
+            false,
+        )
+        .unwrap();
+        let result = timeout(Duration::from_secs(5), session.control(client, codec))
+            .await
+            .unwrap();
+        assert_eq!(result.as_ref().unwrap_err(), "LAN_LEASE_EXPIRED");
+        session.finish(result).await;
+        drop(server);
+        assert!(session.stats().resources_released);
+        assert!(session.stats().source.is_none());
+    }
+    #[tokio::test]
+    async fn stopped_receiver_cannot_be_signaled_or_keep_its_secret() {
+        let scope = LanScope::new(
+            "192.168.10.2".parse().unwrap(),
+            "192.168.10.3".parse().unwrap(),
+        )
+        .unwrap();
+        let receiver = LanSession::receiver(scope, 10, 48604, &Key::generate().display()).unwrap();
+        receiver.stop().await.unwrap();
+        receiver.stop().await.unwrap();
+        assert!(receiver.secret().is_err());
+        assert!(receiver.signal_receiver(String::new()).await.is_err());
+        assert!(receiver.stats().resources_released);
+    }
+    #[test]
+    fn metrics_never_accept_an_unverified_playing_peer_or_extra_payload() {
+        assert!(
+            validate_metrics(&serde_json::json!({"framesDecoded":1,"peerMatches":null})).is_err()
+        );
+        assert!(
+            validate_metrics(&serde_json::json!({"framesDecoded":1,"peerMatches":true})).is_ok()
+        );
+        assert!(validate_metrics(&serde_json::json!({"sdp":"secret"})).is_err());
+        assert!(validate_metrics(&serde_json::json!({"framesDecoded":-1})).is_err());
+    }
+}

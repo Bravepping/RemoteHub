@@ -8,6 +8,7 @@ license.workspace = true
 [features]
 custom-protocol = ["tauri/custom-protocol"]
 p004-probe = ["dep:hub-webrtc", "dep:tokio", "dep:uuid", "dep:windows", "dep:serde_json"]
+p004-lan = ["p004-probe"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.6", features = [] }
