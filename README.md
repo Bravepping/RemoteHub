@@ -1,8 +1,23 @@
 # RemoteHub · Phase 0 首次工程
 
-这是已生成并在本机编译测试的 Windows 原型：**最小 Tauri 客户端 + 实际 DXGI 主屏采集实验**。目前不能连接另一台电脑。H.264、WebRTC、DataChannel、配对与服务端还没有实现，整个 Phase 0 尚未完成。
+这是已生成并在本机编译测试的 Windows 原型：**最小 Tauri 客户端 + DXGI 主屏采集 + Media Foundation 720p30 H.264 本机编码实验**。目前不能连接另一台电脑。WebRTC、DataChannel、配对与服务端还没有实现，整个 Phase 0 尚未完成。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
+
+P0-03 新实测见 `docs/PHASE0_P003_TEST_REPORT.md`：AMD 硬件 MFT，10 秒 1280×720 / 300 帧 / 零丢帧，标准解码与八色条检查通过。原始裸流不能自带容器 PTS，请用 sidecar 中的 MF 时间戳；开发验证生成的 MP4 已检查为 30fps、10 秒。
+
+## P0-03 本机编码 probe
+
+以下命令在源码根目录执行，编译后也可直接运行 `target/release/encode-probe.exe`。默认不采集，只有显式 `--consent` 才采集；输出限定在 `artifacts/private/NAME` 的新目录。
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+. ./scripts/use-toolchain.ps1
+cargo build -p hub-encode-win --bin encode-probe --release --locked
+./target/release/encode-probe.exe --consent --seconds 10 --encoder auto --name my-local-test
+```
+
+`--encoder software` 可独立验证软件回退；`--stop-after-ms 2000` 用于主动停止测试，控制台 Ctrl+C 也请求正常停止并 drain。最长 30 秒，不覆盖已有样本。运动源复现、独立 FFmpeg 解码和统计口径见 P0-03 报告；FFmpeg 只用于开发验收，不是客户端运行依赖。原有 Tauri 采集窗口没有接入新编码器，本轮无需操作该窗口。
 
 ## 使用已编译程序
 

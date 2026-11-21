@@ -3,7 +3,7 @@ $ErrorActionPreference = 'Stop'
 Push-Location (Split-Path $PSScriptRoot -Parent)
 try {
   node scripts/checks.mjs
-  if ($LASTEXITCODE -ne 0) { throw 'RemoteHub verification failed; see artifacts/verification.txt' }
+  if ($LASTEXITCODE -ne 0) { throw 'RemoteHub verification failed; see verification.txt in the selected evidence directory' }
 } finally {
   Pop-Location
 }

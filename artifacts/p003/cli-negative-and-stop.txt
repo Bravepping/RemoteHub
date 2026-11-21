@@ -1,0 +1,48 @@
+CONSENT_REQUIRED: local desktop encoding requires explicit consent
+NO_CONSENT_EXIT=1
+INVALID_ARGUMENT: probe requires 1280x720@30, 100kbps..20Mbps, 1..30 seconds
+INVALID_DURATION_EXIT=1
+INVALID_ARGUMENT: name must be 1..64 ASCII letters/digits/-/_
+INVALID_NAME_EXIT=1
+INVALID_ARGUMENT: output directory already exists
+EXISTING_OUTPUT_EXIT=1
+encoder=H264 Encoder MFT hardware=false frames=60 wall_fps=30.279 missed_ticks=0 stopped=false
+Private sample: artifacts/private/p003-software/desktop.h264
+SOFTWARE_EXIT=0
+encoder=AMDh264Encoder hardware=true frames=43 wall_fps=30.131 missed_ticks=0 stopped=true
+Private sample: artifacts/private/p003-stop/desktop.h264
+STOP_EXIT=0
+DENIED_OUTPUT_EXISTS=False
+INVALID_OUTPUT_EXISTS=False
+{
+    "encoder":  "H264 Encoder MFT",
+    "hardware":  false,
+    "candidates":  [
+                       {
+                           "name":  "H264 Encoder MFT",
+                           "hardware":  false,
+                           "result":  "actual DXGI-frame encoding preflight passed"
+                       }
+                   ],
+    "encoded_frames":  60,
+    "video_duration_ms":  2000.0,
+    "stopped":  false,
+    "missed_ticks":  0
+}
+p003-software_DECODE_EXIT=0
+{
+    "encoder":  "AMDh264Encoder",
+    "hardware":  true,
+    "candidates":  [
+                       {
+                           "name":  "AMDh264Encoder",
+                           "hardware":  true,
+                           "result":  "actual DXGI-frame encoding preflight passed"
+                       }
+                   ],
+    "encoded_frames":  43,
+    "video_duration_ms":  1433.3333,
+    "stopped":  true,
+    "missed_ticks":  0
+}
+p003-stop_DECODE_EXIT=0

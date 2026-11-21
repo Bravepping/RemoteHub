@@ -15,6 +15,6 @@
 | Playwright | https://github.com/microsoft/playwright | Apache-2.0 |
 | jsdom / Prettier | https://github.com/jsdom/jsdom / https://github.com/prettier/prettier | MIT |
 
-精确版本由 Cargo.lock 和 pnpm-lock.yaml 固定。锁文件含全部传递依赖，分发前仍需按最终二进制和全部传递依赖生成完整 SBOM/许可附件；本文不是完整分发法律审查。H.264 使用尚未在本轮实现。
+精确版本由 Cargo.lock 和 pnpm-lock.yaml 固定。锁文件含全部传递依赖，分发前仍需按最终二进制和全部传递依赖生成完整 SBOM/许可附件；本文不是完整分发法律审查。P0-03 已通过系统 Media Foundation 编码 H.264，不随产品附带外部编码器；FFmpeg 只作为本机开发解码/封装验证工具，不作为客户端运行依赖打包。
 
 开发工具不打包分发：Rust 官方工具链，Microsoft MSVC / Windows SDK；其自身适用对应许可。项目内临时准备工具脚本参考 https://gist.github.com/mmozeiko/7f3162ec2988e81e56d5c4e22cde9977 ，从 Microsoft 清单下载并逐文件 SHA-256 校验，仅用于本机 `.tools` 目录，排除于交付。此脚本不是产品运行依赖。

@@ -1,0 +1,140 @@
+RemoteHub verification 2026-11-21T03:17:48.361Z
+
+$ pnpm lint
+Checking formatting...
+All matched files use Prettier code style!
+$ prettier --check apps/desktop/src apps/desktop/*.ts scripts/*.mjs
+
+EXIT=0
+
+$ pnpm typecheck
+$ pnpm --filter @remotehub/desktop typecheck
+$ vue-tsc --noEmit
+
+EXIT=0
+
+$ pnpm test
+
+ RUN  v5.1.1 C:/Users/Administrator/Documents/ChatGPT/远程项目/RemoteHub/apps/desktop
+
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  11:17:51
+   Duration  731ms (environment 81%, import 11%, tests 6%, transform 2%, worker 1%)
+
+$ pnpm --filter @remotehub/desktop test
+$ vitest run
+
+EXIT=0
+
+$ pnpm build
+vite v8.3.8 building client environment for production...
+transforming...
+✓ 15 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.39 kB │ gzip:  0.28 kB
+dist/assets/index-qMovxnMk.css   7.28 kB │ gzip:  2.41 kB
+dist/assets/index-DPLWhIAm.js   68.62 kB │ gzip: 27.61 kB
+
+✓ built in 118ms
+$ pnpm --filter @remotehub/desktop build
+$ vue-tsc --noEmit && vite build
+
+EXIT=0
+
+$ cargo fmt --all -- --check
+
+EXIT=0
+
+$ cargo clippy --workspace --all-targets --locked -- -D warnings
+    Checking windows v0.62.2
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+    Checking hub-capture-win v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-capture-win)
+    Checking webview2-com-sys v0.39.1
+    Checking tao v0.37.3
+    Checking hub-encode-win v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-encode-win)
+    Checking webview2-com v0.39.1
+    Checking tauri-runtime v2.12.4
+    Checking wry v0.57.3
+    Checking tauri-runtime-wry v2.12.5
+    Checking tauri v2.12.7
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 38.76s
+
+EXIT=0
+
+$ cargo test --workspace --locked
+
+running 6 tests
+test tests::rejects_unbounded_capture ... ok
+test tests::refuses_capture_before_native_api_without_consent ... ok
+test tests::rejects_short_buffers_bad_stride_and_dimensions ... ok
+test tests::removes_gpu_row_padding_without_mixing_rows ... ok
+test tests::bmp_rejects_oversized_and_incomplete_frames ... ok
+test tests::bmp_is_top_down_bgra_and_never_overwrites ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 11 tests
+test color::tests::rejects_truncation_odd_output_and_overflow ... ok
+test color::tests::resize_respects_stride_and_uv_order ... ok
+test color::tests::reference_black_white_and_red_vectors ... ok
+test h264::tests::annex_b_and_avcc_have_identical_nals ... ok
+test h264::tests::avcc_configuration_retains_parameter_sets_and_rejects_truncation ... ok
+test lifecycle::tests::bounded_pacer_reuses_a_real_frame_for_short_stalls_and_reports_long_stalls ... ok
+test lifecycle::tests::consent_limits_repeated_start_stop_and_cleanup ... ok
+test lifecycle::tests::fractional_frame_clock_never_drifts_or_reorders ... ok
+test probe::tests::capture_access_lost_and_resize_failures_propagate_and_release_probe_lease ... ok
+test h264::tests::rejects_empty_corrupt_and_truncated_nals ... ok
+test mf::tests::no_mft_failure_releases_thread_com_runtime ... ok
+
+test result: ok. 11 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling windows v0.62.2
+   Compiling hub-capture-win v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-capture-win)
+   Compiling webview2-com-sys v0.39.1
+   Compiling tao v0.37.3
+   Compiling hub-encode-win v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-encode-win)
+   Compiling webview2-com v0.39.1
+   Compiling tauri-runtime v2.12.4
+   Compiling wry v0.57.3
+   Compiling tauri-runtime-wry v2.12.5
+   Compiling tauri v2.12.7
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 47.69s
+     Running unittests src\lib.rs (target\debug\build\hub-capture-win/34f6e724baf34430\out\hub_capture_win-34f6e724baf34430.exe)
+     Running unittests src\bin\capture-probe.rs (target\debug\build\hub-capture-win/5c1f88b2df3f51e9\out\capture_probe-5c1f88b2df3f51e9.exe)
+     Running unittests src\lib.rs (target\debug\build\hub-encode-win/00533ee770fd900f\out\hub_encode_win-00533ee770fd900f.exe)
+     Running unittests src\bin\encode-probe.rs (target\debug\build\hub-encode-win/8a0d8a207c0c5432\out\encode_probe-8a0d8a207c0c5432.exe)
+     Running unittests src\main.rs (target\debug\build\remotehub-desktop/463904173a9f2f71\out\remotehub_desktop-463904173a9f2f71.exe)
+   Doc-tests hub_capture_win
+   Doc-tests hub_encode_win
+
+EXIT=0

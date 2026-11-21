@@ -1,5 +1,6 @@
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { join } from 'node:path';
 
 const steps = [
   ['pnpm', ['lint']],
@@ -21,9 +22,10 @@ const steps = [
   ],
   ['cargo', ['test', '--workspace', '--locked']],
 ];
-mkdirSync('artifacts', { recursive: true });
+const evidenceDir = process.env.REMOTEHUB_VERIFY_DIR ?? 'artifacts';
+mkdirSync(evidenceDir, { recursive: true });
 writeFileSync(
-  'artifacts/verification.txt',
+  join(evidenceDir, 'verification.txt'),
   `RemoteHub verification ${new Date().toISOString()}\n`,
 );
 const results = [];
@@ -37,14 +39,14 @@ for (const [command, args] of steps) {
   });
   const output = `\n$ ${title}\n${result.stdout ?? ''}${result.stderr ?? ''}\nEXIT=${result.status}\n`;
   process.stdout.write(output);
-  appendFileSync('artifacts/verification.txt', output);
+  appendFileSync(join(evidenceDir, 'verification.txt'), output);
   results.push({
     command: title,
     exit_code: result.status,
     error: result.error?.message,
   });
   writeFileSync(
-    'artifacts/verification.json',
+    join(evidenceDir, 'verification.json'),
     JSON.stringify(results, null, 2),
   );
   if (result.status !== 0) {

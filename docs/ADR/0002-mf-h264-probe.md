@@ -15,7 +15,7 @@
 ## 契约
 
 - 1280×720，30fps，默认 4Mbps，Baseline profile，目标 GOP 60；具体生效参数记录在报告。
-- 单调 100ns PTS 与 duration，CFR 30Hz；无新桌面更新时复用最近真实帧，分别计数 desktop updates、repeats、missed ticks 和 encoded frames。超过帧周期不积压帧，跳过旧 tick 并记录丢帧。
+- 单调 100ns PTS 与 duration，CFR 30Hz；无新桌面更新时复用最近真实帧，分别计数 desktop updates、repeats、missed ticks 和 encoded frames。允许最多一个 tick 的短暂延迟；落后半个周期时复用最近 NV12，避免继续增加转换负载；超过两个 tick 的落后跳过旧 tick 并记录丢帧，不形成无界队列。首段运动实测出现过 4 个丢帧，必须保留失败证据，修正后再验收。
 - 缩放采用 CPU 双线性 BGRA，色彩转换为 BT.601 limited-range NV12，显式设置色彩属性；输出有界，NV12 stride=width，Y 后接交错 UV。颜色和缓冲边界有独立向量测试。
 - `EncodedVideoFrame` 保存标准化 Annex B AU、PTS、duration、NAL 类型与 IDR 标志；支持 Annex B 和明确长度字段的 AVCC 解析，拒绝截断、过大或无效数据，不靠猜测吞掉坏帧。
 - CLI 必须 `--consent`；输出只能位于 `artifacts/private/` 的新目录；样本、像素和原始 NAL 不进入日志、Git 或网络。

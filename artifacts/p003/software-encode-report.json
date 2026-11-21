@@ -1,0 +1,1117 @@
+{
+  "encoder": "H264 Encoder MFT",
+  "hardware": false,
+  "candidates": [
+    {
+      "name": "H264 Encoder MFT",
+      "hardware": false,
+      "result": "actual DXGI-frame encoding preflight passed"
+    }
+  ],
+  "codec_properties": [
+    "gop_60: accepted",
+    "low_latency: accepted",
+    "b_frames_0: accepted"
+  ],
+  "source_framing": "AnnexB",
+  "exported_framing": "Annex B",
+  "input_format": "NV12 (Y + interleaved UV, stride=width)",
+  "conversion": "CPU bilinear BGRA resize + BT.601 limited-range",
+  "width": 1280,
+  "height": 720,
+  "requested_fps": 30,
+  "requested_bitrate": 4000000,
+  "adapter": "AMD Radeon RX 6750 GRE 10GB",
+  "source_width": 2560,
+  "source_height": 1440,
+  "desktop_updates": 51,
+  "distinct_desktop_images": 50,
+  "repeated_frames": 10,
+  "repeated_due_to_lateness": 0,
+  "missed_ticks": 0,
+  "encoded_frames": 60,
+  "wall_ms": 1981.5425,
+  "setup_ms": 165.629,
+  "video_duration_ms": 2000.0,
+  "encoded_fps_wall": 30.279441394772004,
+  "actual_bitrate_bps": 4255660.0,
+  "encoded_bytes": 1063915,
+  "stopped": false,
+  "capture_time": {
+    "samples": 60,
+    "p50_ms": 3.6618000000000004,
+    "p95_ms": 4.5639,
+    "max_ms": 6.6495
+  },
+  "conversion_time": {
+    "samples": 50,
+    "p50_ms": 6.2968,
+    "p95_ms": 12.809600000000001,
+    "max_ms": 14.273
+  },
+  "encode_submission_time": {
+    "samples": 60,
+    "p50_ms": 2.7463,
+    "p95_ms": 3.9497000000000004,
+    "max_ms": 7.6889
+  },
+  "encode_completion_time": {
+    "samples": 60,
+    "p50_ms": 2.4297,
+    "p95_ms": 3.5422000000000002,
+    "max_ms": 7.3413
+  },
+  "cpu_seconds": 1.09375,
+  "cpu_one_core_percent": 55.19689837588646,
+  "cpu_machine_percent": 3.449806148492904,
+  "peak_working_set_bytes": 126451712,
+  "gpu": {
+    "status": "PDH process GPU Engine counters",
+    "samples": 2,
+    "video_encode_avg_percent": 0.0,
+    "video_encode_max_percent": 0.0,
+    "process_engine_sum_avg_percent": 1.786272979907269,
+    "per_engine_type_average_percent": {
+      "3D": 1.786272979907269,
+      "Compute 0": 0.0,
+      "Compute 1": 0.0,
+      "Compute 3": 0.0,
+      "Copy": 0.0,
+      "High Priority 3D": 0.0,
+      "High Priority Compute": 0.0,
+      "Security 1": 0.0,
+      "Timer 0": 0.0,
+      "True Audio 0": 0.0,
+      "True Audio 1": 0.0,
+      "Video Codec 0": 0.0,
+      "Video Decode 1": 0.0,
+      "Video JPEG 0": 0.0
+    }
+  },
+  "frames": [
+    {
+      "pts_100ns": 0,
+      "duration_100ns": 333333,
+      "bytes": 55945,
+      "nal_types": [
+        9,
+        7,
+        8,
+        6,
+        6,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5,
+        5
+      ],
+      "idr": true,
+      "encode_elapsed_ms": 7.3413
+    },
+    {
+      "pts_100ns": 333333,
+      "duration_100ns": 333333,
+      "bytes": 1219,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4621999999999997
+    },
+    {
+      "pts_100ns": 666666,
+      "duration_100ns": 333334,
+      "bytes": 13375,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 3.0623
+    },
+    {
+      "pts_100ns": 1000000,
+      "duration_100ns": 333333,
+      "bytes": 26358,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 3.0887000000000002
+    },
+    {
+      "pts_100ns": 1333333,
+      "duration_100ns": 333333,
+      "bytes": 26662,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.9985
+    },
+    {
+      "pts_100ns": 1666666,
+      "duration_100ns": 333334,
+      "bytes": 19891,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5254000000000003
+    },
+    {
+      "pts_100ns": 2000000,
+      "duration_100ns": 333333,
+      "bytes": 18349,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.3971999999999998
+    },
+    {
+      "pts_100ns": 2333333,
+      "duration_100ns": 333333,
+      "bytes": 304,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.321
+    },
+    {
+      "pts_100ns": 2666666,
+      "duration_100ns": 333334,
+      "bytes": 19760,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.473
+    },
+    {
+      "pts_100ns": 3000000,
+      "duration_100ns": 333333,
+      "bytes": 13025,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.1805000000000003
+    },
+    {
+      "pts_100ns": 3333333,
+      "duration_100ns": 333333,
+      "bytes": 21945,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.8513
+    },
+    {
+      "pts_100ns": 3666666,
+      "duration_100ns": 333334,
+      "bytes": 25036,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.9506000000000001
+    },
+    {
+      "pts_100ns": 4000000,
+      "duration_100ns": 333333,
+      "bytes": 14023,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.7939
+    },
+    {
+      "pts_100ns": 4333333,
+      "duration_100ns": 333333,
+      "bytes": 261,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.4565
+    },
+    {
+      "pts_100ns": 4666666,
+      "duration_100ns": 333334,
+      "bytes": 11467,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 3.25
+    },
+    {
+      "pts_100ns": 5000000,
+      "duration_100ns": 333333,
+      "bytes": 17300,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 3.4421
+    },
+    {
+      "pts_100ns": 5333333,
+      "duration_100ns": 333333,
+      "bytes": 29609,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 4.0967
+    },
+    {
+      "pts_100ns": 5666666,
+      "duration_100ns": 333334,
+      "bytes": 21649,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 3.5422000000000002
+    },
+    {
+      "pts_100ns": 6000000,
+      "duration_100ns": 333333,
+      "bytes": 17516,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 3.4844
+    },
+    {
+      "pts_100ns": 6333333,
+      "duration_100ns": 333333,
+      "bytes": 380,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.8389
+    },
+    {
+      "pts_100ns": 6666666,
+      "duration_100ns": 333334,
+      "bytes": 12717,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.4587
+    },
+    {
+      "pts_100ns": 7000000,
+      "duration_100ns": 333333,
+      "bytes": 20584,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.4965
+    },
+    {
+      "pts_100ns": 7333333,
+      "duration_100ns": 333333,
+      "bytes": 23438,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.952
+    },
+    {
+      "pts_100ns": 7666666,
+      "duration_100ns": 333334,
+      "bytes": 21488,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.7086
+    },
+    {
+      "pts_100ns": 8000000,
+      "duration_100ns": 333333,
+      "bytes": 16652,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.8993
+    },
+    {
+      "pts_100ns": 8333333,
+      "duration_100ns": 333333,
+      "bytes": 305,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.4919
+    },
+    {
+      "pts_100ns": 8666666,
+      "duration_100ns": 333334,
+      "bytes": 13364,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4254
+    },
+    {
+      "pts_100ns": 9000000,
+      "duration_100ns": 333333,
+      "bytes": 20935,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5408000000000004
+    },
+    {
+      "pts_100ns": 9333333,
+      "duration_100ns": 333333,
+      "bytes": 23675,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5155
+    },
+    {
+      "pts_100ns": 9666666,
+      "duration_100ns": 333334,
+      "bytes": 21753,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.6502000000000003
+    },
+    {
+      "pts_100ns": 10000000,
+      "duration_100ns": 333333,
+      "bytes": 17151,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5596
+    },
+    {
+      "pts_100ns": 10333333,
+      "duration_100ns": 333333,
+      "bytes": 293,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.5418
+    },
+    {
+      "pts_100ns": 10666666,
+      "duration_100ns": 333334,
+      "bytes": 12964,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.1246
+    },
+    {
+      "pts_100ns": 11000000,
+      "duration_100ns": 333333,
+      "bytes": 20662,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5396
+    },
+    {
+      "pts_100ns": 11333333,
+      "duration_100ns": 333333,
+      "bytes": 23816,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5109
+    },
+    {
+      "pts_100ns": 11666666,
+      "duration_100ns": 333334,
+      "bytes": 23287,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4399
+    },
+    {
+      "pts_100ns": 12000000,
+      "duration_100ns": 333333,
+      "bytes": 17589,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.2246
+    },
+    {
+      "pts_100ns": 12333333,
+      "duration_100ns": 333333,
+      "bytes": 300,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.2528000000000001
+    },
+    {
+      "pts_100ns": 12666666,
+      "duration_100ns": 333334,
+      "bytes": 14366,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.1575
+    },
+    {
+      "pts_100ns": 13000000,
+      "duration_100ns": 333333,
+      "bytes": 20463,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.6315
+    },
+    {
+      "pts_100ns": 13333333,
+      "duration_100ns": 333333,
+      "bytes": 23409,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4610000000000003
+    },
+    {
+      "pts_100ns": 13666666,
+      "duration_100ns": 333334,
+      "bytes": 22919,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.457
+    },
+    {
+      "pts_100ns": 14000000,
+      "duration_100ns": 333333,
+      "bytes": 16055,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.6045000000000003
+    },
+    {
+      "pts_100ns": 14333333,
+      "duration_100ns": 333333,
+      "bytes": 288,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.2765
+    },
+    {
+      "pts_100ns": 14666666,
+      "duration_100ns": 333334,
+      "bytes": 18500,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.291
+    },
+    {
+      "pts_100ns": 15000000,
+      "duration_100ns": 333333,
+      "bytes": 15552,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.3636
+    },
+    {
+      "pts_100ns": 15333333,
+      "duration_100ns": 333333,
+      "bytes": 22329,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4565
+    },
+    {
+      "pts_100ns": 15666666,
+      "duration_100ns": 333334,
+      "bytes": 18350,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.2599
+    },
+    {
+      "pts_100ns": 16000000,
+      "duration_100ns": 333333,
+      "bytes": 12739,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.1801
+    },
+    {
+      "pts_100ns": 16333333,
+      "duration_100ns": 333333,
+      "bytes": 538,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.4755
+    },
+    {
+      "pts_100ns": 16666666,
+      "duration_100ns": 333334,
+      "bytes": 21254,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.3614
+    },
+    {
+      "pts_100ns": 17000000,
+      "duration_100ns": 333333,
+      "bytes": 24936,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.6092
+    },
+    {
+      "pts_100ns": 17333333,
+      "duration_100ns": 333333,
+      "bytes": 21897,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5079
+    },
+    {
+      "pts_100ns": 17666666,
+      "duration_100ns": 333334,
+      "bytes": 22054,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4297
+    },
+    {
+      "pts_100ns": 18000000,
+      "duration_100ns": 333333,
+      "bytes": 16422,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4209
+    },
+    {
+      "pts_100ns": 18333333,
+      "duration_100ns": 333333,
+      "bytes": 301,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.4105
+    },
+    {
+      "pts_100ns": 18666666,
+      "duration_100ns": 333334,
+      "bytes": 14703,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.9669
+    },
+    {
+      "pts_100ns": 19000000,
+      "duration_100ns": 333333,
+      "bytes": 20211,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.4334000000000002
+    },
+    {
+      "pts_100ns": 19333333,
+      "duration_100ns": 333333,
+      "bytes": 80344,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 2.5676
+    },
+    {
+      "pts_100ns": 19666666,
+      "duration_100ns": 333334,
+      "bytes": 11238,
+      "nal_types": [
+        9,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "idr": false,
+      "encode_elapsed_ms": 1.2893
+    }
+  ]
+}

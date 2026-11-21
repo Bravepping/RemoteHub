@@ -1,5 +1,7 @@
 # 首次交付清单
 
+历史首次交付内容如下。P0-03 后续交付另见 `PHASE0_P003_TEST_REPORT.md`，新增独立 `encode-probe.exe` 与源码/非画面验证证据；没有更新首次交付 ZIP 或声称 WebRTC 已完成。
+
 - `RemoteHub.exe`：Windows x64 release 原生测试客户端，双击打开。
 - `capture-probe.exe`：独立本机 DXGI 实验工具；仅开发验证使用，客户端无需启动此工具。
 - `RemoteHub-source.zip`：本轮完整源代码、锁文件、原交付设计、任务状态、ADR、测试报告与非画面证据。

@@ -1332,6 +1332,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hub-encode-win"
+version = "0.1.0"
+dependencies = [
+ "hub-capture-win",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "windows",
+]
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
