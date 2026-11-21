@@ -1,0 +1,15 @@
+[package]
+name = "hub-turn-credentials"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+# Server-only module. Never add as a desktop/hub-webrtc dependency.
+[dependencies]
+hmac = "=0.12.1"
+sha1 = "=0.10.7"
+base64 = "=0.22.1"
+zeroize = "=1.9.2"
+uuid = "=1.29.3"

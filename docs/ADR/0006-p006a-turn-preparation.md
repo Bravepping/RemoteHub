@@ -8,7 +8,7 @@
 
 RelayOnly区别物理TURN服务器端点与逻辑对端relay候选：物理UDP仅允许批准的服务器IP:3478，逻辑SDP只允许指定relay公网IP和批准端口范围、relay类型/UDP，仍限制video/control m-line、BUNDLE、DTLS指纹和消息长度。不是把LAN peer改成服务器。新策略单独使用真实RTCIceTransportPolicy::Relay；WebView2工厂用iceTransportPolicy:'relay'。DirectPreferred未来用All并另设计动态对端权限，不能直接删除socket/SDP校验。
 
-本地锁定webrtc/rtc0.21.1源码核对：RTCIceServer{urls,username,credential}；RTCConfigurationBuilder.with_ice_servers/with_ice_transport_policy；PeerConnectionEventHandler.on_ice_candidate；pc.sctp()->dtls_transport()->ice_transport()->get_selected_candidate_pair或get_stats的Transport.selectedCandidatePairId；RTCIceCandidatePair.local()/remote()。无有效选择时诊断null，不因配置了TURN显示relay。
+本地锁定webrtc/rtc0.21.1源码核对：RTCIceServer{urls,username,credential}；RTCConfigurationBuilder.with_ice_servers/with_ice_transport_policy；PeerConnectionEventHandler.on_ice_candidate；pc.sctp()->transport()->ice_transport()->get_selected_candidate_pair或get_stats的Transport.selectedCandidatePairId；RTCIceCandidatePair.local()/remote()。无有效选择时诊断null，不因配置了TURN显示relay。
 
 重要限制：该版本webrtc/src/peer_connection/transport/turn_relayer.rs gather明确跳过is_secure()与非udp。P006a只允许turn:IPv4:port?transport=udp，拒绝turns/TCP/域名自动解析。coturn模板UDP起步，TCP/TLS仅说明后续能力验证与证书条件，不能假称客户端支持。WebRTC本身DTLS/SRTP不关闭验证。
 

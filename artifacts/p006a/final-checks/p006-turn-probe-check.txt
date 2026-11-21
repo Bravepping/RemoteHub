@@ -1,0 +1,15 @@
+$ cargo check -p remotehub-desktop --features p006-turn-probe --locked --offline
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+    Checking hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
+warning: unused dependency `hub-webrtc`
+  --> apps\desktop\src-tauri\Cargo.toml:22:1
+   |
+22 | hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_dependencies` is set to `warn` by default
+help: consider removing the dependency on `hub-webrtc`
+warning: `remotehub-desktop` (manifest) generated 1 warning
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.51s
+
+EXIT=0

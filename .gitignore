@@ -14,3 +14,5 @@
 **/playwright-report/
 **/src-tauri/gen/
 .ai-memory/*/
+/deploy/coturn/private/
+__pycache__/

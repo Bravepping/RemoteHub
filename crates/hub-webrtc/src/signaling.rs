@@ -18,18 +18,95 @@ pub fn validate_description(
     scope: crate::scope::NetworkScope,
     answer: bool,
 ) -> Result<Negotiation, String> {
-    validate_policy(sdp, scope, answer, false)
+    validate_policy(sdp, DescriptionScope::Existing(scope), answer, false)
 }
 pub fn validate_control_description(
     sdp: &str,
     scope: crate::scope::NetworkScope,
     answer: bool,
 ) -> Result<Negotiation, String> {
-    validate_policy(sdp, scope, answer, true)
+    validate_policy(sdp, DescriptionScope::Existing(scope), answer, true)
+}
+enum DescriptionScope {
+    Existing(crate::scope::NetworkScope),
+    #[cfg(feature = "p006-turn-probe")]
+    Relay(crate::ice_policy::RelayTarget),
+}
+impl DescriptionScope {
+    fn requires_fingerprint(&self) -> bool {
+        match self {
+            Self::Existing(scope) => scope.is_lan(),
+            #[cfg(feature = "p006-turn-probe")]
+            Self::Relay(_) => true,
+        }
+    }
+    fn permits_peer(&self, ip: IpAddr) -> bool {
+        match self {
+            Self::Existing(scope) => scope.permits_peer(ip),
+            #[cfg(feature = "p006-turn-probe")]
+            Self::Relay(target) => ip == IpAddr::V4(target.relay),
+        }
+    }
+    fn candidate(&self, ip: IpAddr, port: u16, kind: &str) -> bool {
+        match self {
+            Self::Existing(scope) => kind == "host" && scope.permits_peer(ip) && port > 0,
+            #[cfg(feature = "p006-turn-probe")]
+            Self::Relay(target) => {
+                kind == "relay"
+                    && match ip {
+                        IpAddr::V4(ip) => {
+                            ip == target.relay
+                                && (target.port_min..=target.port_max).contains(&port)
+                        }
+                        _ => false,
+                    }
+            }
+        }
+    }
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Existing(scope) => {
+                if scope.is_lan() {
+                    "host/pinned-lan/udp"
+                } else {
+                    "host/loopback/udp"
+                }
+            }
+            #[cfg(feature = "p006-turn-probe")]
+            Self::Relay(_) => "relay/approved-range/udp",
+        }
+    }
+}
+#[cfg(feature = "p006-turn-probe")]
+pub fn validate_relay_description(
+    sdp: &str,
+    grant: &crate::ice_policy::RelayGrant,
+    now: u64,
+    answer: bool,
+) -> Result<Negotiation, String> {
+    if !grant.is_current(now) {
+        return Err("RELAY_APPROVAL_EXPIRED".into());
+    }
+    if sdp.len() > 64 * 1024 {
+        return Err("SDP_SIZE_OR_ENCODING".into());
+    }
+    let mut count = 0;
+    for line in sdp.lines() {
+        if line.starts_with("m=") {
+            count = 0;
+        }
+        if line.starts_with("a=candidate:") {
+            count += 1;
+            if count > 16 || line.split_whitespace().count() > 32 {
+                return Err("RELAY_CANDIDATE_LIMIT".into());
+            }
+        }
+    }
+    validate_policy(sdp, DescriptionScope::Relay(grant.target()), answer, true)
 }
 fn validate_policy(
     sdp: &str,
-    scope: crate::scope::NetworkScope,
+    scope: DescriptionScope,
     answer: bool,
     control: bool,
 ) -> Result<Negotiation, String> {
@@ -46,7 +123,7 @@ fn validate_policy(
         return Err("SINGLE_RECVONLY_VIDEO_REQUIRED".into());
     }
     if control {
-        if !scope.is_lan() {
+        if !scope.requires_fingerprint() {
             return Err("CONTROL_LAN_SCOPE_REQUIRED".into());
         }
         let app = sdp
@@ -149,27 +226,20 @@ fn validate_policy(
             if fields.len() < 8
                 || !fields[2].eq_ignore_ascii_case("udp")
                 || fields[6] != "typ"
-                || fields[7] != "host"
                 || !(fields[1] == "1"
                     || (answer && fields[1] == "2" && lines.contains(&"a=rtcp-mux")))
                 || !fields[4]
                     .parse::<IpAddr>()
-                    .is_ok_and(|ip| scope.permits_peer(ip))
-                || !fields[5].parse::<u16>().is_ok_and(|port| port > 0)
+                    .ok()
+                    .zip(fields[5].parse::<u16>().ok())
+                    .is_some_and(|(ip, port)| scope.candidate(ip, port, fields[7]))
             {
                 return Err("OFF_HOST_ICE_REJECTED".into());
             }
-            candidates.push(
-                if scope.is_lan() {
-                    "host/pinned-lan/udp"
-                } else {
-                    "host/loopback/udp"
-                }
-                .into(),
-            );
+            candidates.push(scope.label().into());
         }
     }
-    if scope.is_lan() {
+    if scope.requires_fingerprint() {
         let fingerprints: Vec<_> = lines
             .iter()
             .filter_map(|line| line.strip_prefix("a=fingerprint:sha-256 "))
@@ -223,6 +293,35 @@ fn validate_policy(
 mod tests {
     use super::*;
     const OFFER: &str = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=recvonly\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\n";
+    #[cfg(feature = "p006-turn-probe")]
+    #[test]
+    fn relay_sdp_is_separate_from_lan_and_rejects_scope_expiry_and_tamper() {
+        let (grant, _) = crate::ice_policy::tests::fixture();
+        let good=format!("v=0\r\na=group:BUNDLE 0 1\r\na=fingerprint:sha-256 {}\r\n{}a=mid:0\r\na=rtcp-mux\r\na=candidate:r 1 udp 1 8.8.8.8 49160 typ relay\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:1\r\na=sctp-port:5000\r\na=max-message-size:16384\r\n",["AB";32].join(":"),OFFER.strip_prefix("v=0\r\n").unwrap());
+        assert!(validate_relay_description(&good, &grant, 1000, false).is_ok());
+        assert!(validate_offer(&good).is_err());
+        assert!(validate_control_description(
+            &good,
+            crate::scope::NetworkScope::Lan(crate::scope::LanScope {
+                local: "10.0.0.2".parse().unwrap(),
+                peer: "10.0.0.3".parse().unwrap()
+            }),
+            false
+        )
+        .is_err());
+        for bad in [
+            good.replace("49160 typ relay", "49260 typ relay"),
+            good.replace("8.8.8.8 49160", "8.8.4.4 49160"),
+            good.replace("typ relay", "typ host"),
+            good.replace("AB:AB", "AB:ZZ"),
+            good.clone() + "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
+            good.clone() + &"a=candidate:r 1 udp 1 8.8.8.8 49160 typ relay\r\n".repeat(17),
+        ] {
+            assert!(validate_relay_description(&bad, &grant, 1000, false).is_err());
+        }
+        assert!(validate_relay_description(&good, &grant, 1600, false).is_err());
+        assert!(validate_relay_description(&"x".repeat(65537), &grant, 1000, false).is_err());
+    }
     #[test]
     fn control_policy_is_explicit_and_rejects_extra_media_missing_bundle_and_bad_sctp() {
         use crate::scope::{LanScope, NetworkScope};

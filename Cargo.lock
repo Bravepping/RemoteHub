@@ -1673,6 +1673,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hub-turn-credentials"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "hmac",
+ "sha1",
+ "uuid",
+ "zeroize",
+]
+
+[[package]]
 name = "hub-webrtc"
 version = "0.1.0"
 dependencies = [
@@ -1687,6 +1698,7 @@ dependencies = [
  "tokio",
  "uuid",
  "webrtc",
+ "zeroize",
 ]
 
 [[package]]

@@ -7,3 +7,5 @@
 5. 完整fmt/clippy/typecheck/build/test及旧feature检查，审查/README/TASKS/报告和G1–G8矩阵。G6真实云Allocate/STUN与负例为blocked，其余通过仅implementation-ready。Git上传/源码配置测试交付包核验后停止。
 
 影响面：新server-only crate、hub-webrtc新ICE/probe模块与共享SDP校验的明确policy入口；Tauri独立feature声明，无UI公网页面；TS工厂/测试；deploy/coturn、scripts/docs/artifacts。旧NetworkScope/PinnedRuntime/媒体/控制消息语义不变，无DB、无实际输入、无云变更。依赖只提升锁定已有版本；新增直接许可记录，不声称完整RustSec。风格沿用Rust fmt+strictTS/Prettier。A1–A10覆盖如上；B2/3/5/6/9/10命中，DB/破坏迁移N/A。输入与手动测试同样受限，无管理员豁免。每波记handoff；恢复为关闭新feature，Git基线保留。
+
+收口：步骤1–5离线实现/验证/文档完成，17组检查达预期、54 Rust/13前端/3Edge/3Python通过；source-audit覆盖所有保护路径与依赖隔离。G1–5/G7/G8 implementation-ready，G6真实云功能blocked，不属于本轮未经授权可执行内容。完整SELF-AUDIT范围/对称RX-TX/期限-撤销/协议形态/调用方与未知输入负例、源码引用/日志/依赖复核见测试报告与原始输出；无破坏迁移、无云部署、无新增UI/HTTP入口。交付Git与归档完成后停止等待审查。

@@ -1,0 +1,29 @@
+# Review actual binary path/account before installing a dedicated unit.
+# This file neither enables nor replaces any existing coturn service.
+[Unit]
+Description=RemoteHub bounded TURN experiment
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=turnserver
+Group=turnserver
+ExecStart=/usr/bin/turnserver -c /etc/remotehub-turn/turnserver.conf
+NoNewPrivileges=true
+CapabilityBoundingSet=
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_INET AF_UNIX
+RuntimeDirectory=remotehub-turn
+WorkingDirectory=/run/remotehub-turn
+UMask=0077
+MemoryMax=256M
+TasksMax=64
+LimitNOFILE=4096
+Restart=no
+TimeoutStopSec=10
+
+[Install]
+WantedBy=multi-user.target

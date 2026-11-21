@@ -1,0 +1,44 @@
+# RemoteHub P006a template, NOT a directly runnable configuration.
+# Render only into a private directory after verifying the actual host inventory.
+listening-port=3478
+listening-ip=${TURN_LISTEN_IP}
+relay-ip=${TURN_RELAY_IP}
+${TURN_EXTERNAL_IP_LINE}
+min-port=49160
+max-port=49259
+fingerprint
+use-auth-secret
+static-auth-secret=${TURN_SHARED_SECRET}
+realm=${TURN_REALM}
+user-quota=4
+total-quota=8
+max-bps=1000000
+bps-capacity=4000000
+stale-nonce=600
+max-allocate-lifetime=600
+max-allocate-timeout=15
+# Initial native webrtc 0.21.1 probe supports UDP TURN only.
+no-tcp
+no-tcp-relay
+no-tls
+no-dtls
+no-cli
+no-multicast-peers
+# Initial template does not persist IP/username traffic logs.
+no-stdout-log
+log-file=/dev/null
+# Never add allowed-peer-ip overrides to this baseline.
+denied-peer-ip=0.0.0.0-0.255.255.255
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=100.64.0.0-100.127.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+denied-peer-ip=169.254.0.0-169.254.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.0.0.0-192.0.0.255
+denied-peer-ip=192.0.2.0-192.0.2.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=198.18.0.0-198.19.255.255
+denied-peer-ip=198.51.100.0-198.51.100.255
+denied-peer-ip=203.0.113.0-203.0.113.255
+denied-peer-ip=224.0.0.0-255.255.255.255
+denied-peer-ip=::-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff

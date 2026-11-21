@@ -1,0 +1,10 @@
+{
+  "ice": {
+    "mode": "relay_only",
+    "ice_servers": [{"urls": ["turn:APPROVED_PUBLIC_IPV4:3478?transport=udp"], "username": "EXPIRY_UNIX:SESSION_UUID", "credential": "SHORT_TERM_CREDENTIAL_ONLY"}],
+    "expires_at": 0,
+    "session_id": "SESSION_UUID"
+  },
+  "target": {"local": "LOCAL_ASSIGNED_IPV4", "turn": "APPROVED_PUBLIC_IPV4:3478", "relay": "APPROVED_RELAY_IPV4", "port_min": 49160, "port_max": 49259},
+  "approval_expires_at": 0
+}

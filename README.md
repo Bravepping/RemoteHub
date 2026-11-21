@@ -34,7 +34,28 @@ AMD 驱动实际 SPS 标识为 `42041f`，其中不适用约束位按 H.264 解�
 
 两台真实Windows10有线PC，两轮30秒视频+100模拟事件，发送/Rust接收/ACK写入/B确认全为100、序号连续、异常0，720p视频同时正常播放。两端主动停止、接收端关窗/拔线清理通过。43 Rust/11前端/2Edge及受限SDP/权限/大小/限流/重放负例通过；本机SCTP自动测试与双机实测分别记录。
 
-操作见 [P005双机步骤](docs/P005_RUNBOOK.md)，协议见 [control.v1](docs/CONTROL_V1.md)，实测与限制见 [P005测试报告](docs/PHASE0_P005_TEST_REPORT.md)。新feature默认关闭，旧P004a/04b保持视频-only范围。统计位于程序目录artifacts/private/p005；不记录坐标、完整SDP、配对码或画面。P005完成后停止扩展，等待审查，不进入P006或Phase1。
+操作见 [P005双机步骤](docs/P005_RUNBOOK.md)，协议见 [control.v1](docs/CONTROL_V1.md)，实测与限制见 [P005测试报告](docs/PHASE0_P005_TEST_REPORT.md)。新feature默认关闭，旧P004a/04b保持视频-only范围。统计位于程序目录artifacts/private/p005；不记录坐标、完整SDP、配对码或画面。P005已获阶段性审查通过，本轮按新任务仅推进P006a。
+
+## P0-06a TURN/ICE 准备
+
+状态为 **implementation-ready**：新增隔离的RelayOnly策略、server-only短期TURN票据模块、离线认证信令验证器、安全coturn模板与手工部署/回滚说明，以及默认关闭的Allocate检查CLI。没有部署阿里云、没有开放公网桌面会话，也没有进行真实云Allocate/STUN或双机relay验收；G6仍blocked，P006父项未完成。
+
+原生webrtc/rtc仍锁定0.21.1，其当前TURN实现只支持UDP。本轮严格拒绝TCP/turns/DNS和DirectPreferred执行，不以配置字符串冒充实际relay。旧Loopback/LAN PinnedRuntime、视频、control.v1及原生授权入口不变。TURN共享密钥只属于独立服务端模块，不链接进桌面应用；REST票据在有效期内可复用且不能单票即时撤销，完整身份/ACL/WSS服务尚未实现。
+
+完整说明见 [ADR0006](docs/ADR/0006-p006a-turn-preparation.md)、[ICE与信令契约](docs/P006_ICE_CONTRACT.md)、[coturn操作说明](deploy/coturn/README.md)、[测试与验收矩阵](docs/PHASE0_P006A_TEST_REPORT.md)。54 Rust/13前端/3Edge/3Python通过；Edge仅检查真实relay属性，没有连接云端。
+
+在已有工具链和依赖缓存的工程目录可复现离线检查：
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+. ./scripts/use-toolchain.ps1
+$env:REMOTEHUB_PYTHON=(Get-Command python).Source
+# 使用本机 Git Bash 的真实路径；不要误用 WSL 或 Windows Store Python 别名
+$env:REMOTEHUB_BASH=(Get-Command bash).Source
+node scripts/p006a-checks.mjs
+```
+
+CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、默认拒绝和无法解析的占位模板，不连接公网。普通启动无采集或网络探测；真实目标的`--approved-target PRIVATE_JSON`只能在另获端点测试授权后使用。没有给默认客户端增加新公网页面或IPC。本轮完成准备交付后停止，等待审查，不进入P006b/c或Phase1。
 
 ## P0-03 本机编码 probe
 
@@ -93,7 +114,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Mode Captur
 - `apps/desktop`：Vue 3 / TypeScript / Tailwind / Tauri v2，受限本机 IPC。
 - `crates/hub-capture-win`：D3D11 / DXGI Desktop Duplication、限时实验、BGRA 读回及 BMP 导出。
 - `crates/hub-encode-win`：MF 编码、CLI 文件实验与无文件实时 AU 生产者。
-- `crates/hub-webrtc`：只绑定 loopback 的本机视频会话、SDP/RTP、3 AU 队列与清理。
+- `crates/hub-webrtc`：隔离的本机/指定LAN会话、SDP/RTP、3 AU队列、DataChannel及清理；P006a另有默认关闭的TURN准备模块。
+- `crates/hub-turn-credentials`：仅服务端使用的短期票据签发纯模块，无HTTP接口，桌面客户端不依赖。
+- `deploy/coturn`：不可直接运行的占位模板、离线校验/渲染及授权后手工操作说明。
 - `scripts`：环境检测、运行入口、可保存结果的验证脚本。
 - `artifacts`：非画面测试证据；`artifacts/private` 中的桌面样本不进 Git 或交付 ZIP。
 - `docs/ADR`：本机实验边界、未开放远控能力的原因及后续接入条件。

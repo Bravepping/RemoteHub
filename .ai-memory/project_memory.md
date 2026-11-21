@@ -20,6 +20,8 @@ Rust fmt、TS strict、Vue/TS Prettier。模块依赖 Tauri -> hub-capture-win -
 
 ## Known Issues
 
+P0-06a遵循ADR0006，状态implementation-ready，G6真实云Allocate/STUN未授权未执行；不能标infrastructure-verified/P006 done，父项仍4/7。新增server-only issuer不进desktop，p006-turn-probe默认关闭且无公网桌面IPC/页面；旧scope/PinnedRuntime/媒体/控制代码不变。17组检查预期通过：54 Rust/13前端/3Edge/3Python。0.21.1原生TURN gather仅UDP，拒绝TCP/turns/DNS；DirectPreferred未启用。REST票据bearer可复用、无单票即时撤销，realm不在HMAC输入中；WSS传输和长期身份尚未实现，必须分开记录算法/离线/真实云证据。
+
 DataChannel::poll还会产生buffered事件，测试必须等OnMessage，不能把任意poll返回当ACK。PC销毁时OnClose计数可能为0，close_requested和task_joined单独记录，不补造事件。B最后回传样本早于本地终态，不能按发送900减893宣称丢帧。PowerShell合并stderr会包装NativeCommandError，Node spawn捕获退出码/UTF8输出更适合保存检查证据。
 
 DXGI 目前 CPU staging、主屏、无光标合成、旋转拒绝、access lost 终止。Windows 10 本机通过，Windows 11 未测。PowerShell 5 脚本使用 ASCII，避免无 BOM UTF-8 中文解析问题。此机交互 PATH 引号异常，在本次构建进程内修复，不修改全局设置。

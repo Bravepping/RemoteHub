@@ -1,0 +1,121 @@
+[
+  {
+    "name": "baseline-verify",
+    "command": "pnpm verify",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "all-features-clippy",
+    "command": "cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "all-features-test",
+    "command": "cargo test --workspace --all-features --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "edge-test",
+    "command": "pnpm test:e2e",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "p004-probe-check",
+    "command": "cargo check -p remotehub-desktop --features p004-probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "p004-lan-check",
+    "command": "cargo check -p remotehub-desktop --features p004-lan --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "p005-control-check",
+    "command": "cargo check -p remotehub-desktop --features p005-control --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "p006-turn-probe-check",
+    "command": "cargo check -p remotehub-desktop --features p006-turn-probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "desktop-default-build",
+    "command": "cargo build -p remotehub-desktop --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "coturn-template",
+    "command": "E:\\ides\\Python\\python.exe deploy/coturn/verify_config.py --template",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "coturn-tests",
+    "command": "E:\\ides\\Python\\python.exe -m unittest discover -s deploy/coturn -p test_config.py -v",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "bash-syntax",
+    "command": "E:/tools/Git/bin/bash.exe -n deploy/coturn/verify.sh",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "bash-template",
+    "command": "E:/tools/Git/bin/bash.exe deploy/coturn/verify.sh --template",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "probe-build",
+    "command": "cargo build -p hub-webrtc --bin turn-allocate-probe --features p006-turn-probe --profile probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "probe-help",
+    "command": "target/probe/turn-allocate-probe.exe --help",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "probe-default-denied",
+    "command": "target/probe/turn-allocate-probe.exe ",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "probe-placeholder-denied",
+    "command": "target/probe/turn-allocate-probe.exe --approved-target deploy/coturn/probe-input.json.example",
+    "exitCode": 1,
+    "expectedExitCode": 1,
+    "passed": true
+  }
+]

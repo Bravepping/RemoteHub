@@ -1,0 +1,5 @@
+$ cargo build -p hub-webrtc --bin turn-allocate-probe --features p006-turn-probe --profile probe --locked --offline
+   Compiling hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
+    Finished `probe` profile [optimized] target(s) in 5.42s
+
+EXIT=0

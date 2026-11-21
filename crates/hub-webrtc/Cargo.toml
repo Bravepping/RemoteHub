@@ -5,6 +5,14 @@ edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[features]
+p006-turn-probe = ["dep:zeroize"]
+
+[[bin]]
+name = "turn-allocate-probe"
+path = "src/bin/turn-allocate-probe.rs"
+required-features = ["p006-turn-probe"]
+
 [dependencies]
 hub-encode-win = { path = "../hub-encode-win" }
 serde.workspace = true
@@ -17,3 +25,4 @@ bytes = "=1.12.2"
 hmac = "=0.12.1"
 sha2 = "=0.10.9"
 uuid = { version = "=1.29.3", features = ["v4"] }
+zeroize = { version = "=1.9.2", optional = true }

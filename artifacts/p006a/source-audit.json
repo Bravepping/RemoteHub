@@ -1,0 +1,36 @@
+{
+  "baseline": "079275d1875e78bfbc811a429a52e4dbb539cb5a",
+  "adrFirstCommit": "3a8f67f3b3099468f1924f49608c3bb8e6d4c834",
+  "originMainAtFinalReview": "079275d1875e78bfbc811a429a52e4dbb539cb5a",
+  "existingLockPackagesUnchanged": 533,
+  "addedPackages": [
+    {
+      "name": "hub-turn-credentials",
+      "version": "0.1.0",
+      "checksum": null
+    }
+  ],
+  "webRtcVersion": "0.21.1",
+  "rtcVersion": "0.21.1",
+  "issuerInDesktopAllFeaturesDependencyClosure": false,
+  "defaultP006FeatureEnabled": false,
+  "allocateCliRequiredFeature": [
+    "p006-turn-probe"
+  ],
+  "protectedPaths": [
+    "crates/hub-capture-win",
+    "crates/hub-encode-win",
+    "crates/hub-webrtc/src/scope.rs",
+    "crates/hub-webrtc/src/pinned_runtime.rs",
+    "crates/hub-webrtc/src/control.rs",
+    "crates/hub-webrtc/src/control_channel.rs",
+    "crates/hub-webrtc/src/session.rs",
+    "crates/hub-webrtc/src/lan.rs",
+    "apps/desktop/src-tauri/src",
+    "apps/desktop/src/features/p004"
+  ],
+  "protectedPathsDiffEmpty": true,
+  "actualInputApiCallCount": 0,
+  "physicalCloudTestPerformed": false,
+  "cloudGate": "G6 blocked"
+}

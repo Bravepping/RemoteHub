@@ -1,4 +1,11 @@
-# P0-05 开发检查点
+# P0-06a 准备检查点
+
+- 已完成带证据：开工main=079275d且干净；ADR0006/ICE与rendezvous契约先提交3a8f67f。P006a implementation-ready：server-only短票据签发、隔离RelayOnly策略/socket、受限SDP与离线信令MAC、真实API诊断框架/显式操作者CLI、TS relay工厂、coturn模板/校验/渲染及Linux人工部署回退。17组最终检查达到预期：54 Rust/13前端/3Edge/3Python，default原生build与四feature独立check通过；私有MF1项ignored。source-audit证明533个既有锁包不变、issuer不进desktop、旧采集/编码/控制/入口diff为空、无输入API。没有新云或双机实测。
+- 相关文件：docs/PHASE0_P006A_TEST_REPORT.md、ADR0006/P006_ICE_CONTRACT/PHASE0_P006A_PLAN；crates/hub-turn-credentials；hub-webrtc ice_policy/relay_runtime/turn_probe/rendezvous_probe/signaling/bin；TS features/p006；deploy/coturn；scripts/p006a-checks.mjs；artifacts/p006a。默认关闭feature，无新Tauri命令/公网页面；默认CLI拒绝、占位配置在建PC前拒绝。最终Git SHA/交付包以会话与包内BUILD_INFO为准。
+- 未完成：G6真实云端Allocate/STUN/错误或过期凭据拒绝blocked：没有核实主机/系统/权限，也没有云登录/部署/测试明确授权，不SSH不探测不部署。G1–5/G7/G8完成仅implementation-ready；P006父项blocked，Phase0仍4/7，P004录屏差异保留。本轮停止等待审查，不进P006b/c/P1。获得目标资料和独立授权后才安排G6。
+- 风险/发现：0.21.1原生TURN仅UDP；coturn Wiki自述过时，模板未由目标包实际加载。REST票据可复用/无单票即时撤销/realm不在HMAC中，issuer错realm拒绝不代替coturn负例；临时信令非长期身份，WSS传输未实现。SDK/JS秘密副本不保证清零；CLI私有JSON短期且应及时销毁。Windows bash指定实际Python，避免Store别名。新增负例的unwrap_err要求Debug已改直接匹配，完整重跑通过；Node固定pnpm shim提示如实保留。
+
+## P0-05 基线
 
 - 已完成带证据：fetch确认main=b914942且开工工作树干净；先提交ADR0005/CONTROL_V1（f68e42e），再实现。默认关闭p005-control，复用同一视频PC。两台物理Windows10有线电脑两轮30秒视频+100事件，A接收/ACK写入/B发送/确认均100，连续1..101序号、ping/pong1、异常0；源900帧，B最后回传视频893帧、720p、丢包0（不伪称最终900）。四种清理：B停止188帧/A停止207/B关窗210/B拔线279（LAN_LEASE_EXPIRED），全部控制join/源/PC回收。B停止/关窗/拔线有A真实OnClose1。43 Rust、11前端、2Edge和全部10最终命令exit0；本机真实SCTP负例与双机分开，私有MF1项ignored。
 - 相关文件：control.rs/control_channel.rs；signaling/session/lan；Tauri p004_lan/feature/main；Vue control.ts/lan.ts/LanVideoProbe；scripts/p005.ps1。旧P004a/04b构造器仍video-only，P005才接受一video一application的同BUNDLE SDP。TCP只运认证上下文、心跳和统计，无控制事件/ACK代理。源码不含SendInput调用。
