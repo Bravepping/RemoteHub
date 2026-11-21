@@ -1,0 +1,45 @@
+{
+  "case": "all-unavailable",
+  "started_at_ns": "1795303535785473300",
+  "finished_at_ns": "1795303550841455300",
+  "elapsed_ms": 15055,
+  "policy": "all",
+  "media_tracks": 0,
+  "physical_machines": 1,
+  "fault_drop_direct": true,
+  "fault_drop_turn": true,
+  "fault_dropped_packets": 16,
+  "gathered_a": {
+    "host": 1,
+    "srflx": 0,
+    "relay": 0
+  },
+  "gathered_b": {
+    "host": 1,
+    "srflx": 0,
+    "relay": 0
+  },
+  "gather_complete_a": true,
+  "gather_complete_b": true,
+  "selected_a": null,
+  "selected_b": null,
+  "sent": 0,
+  "received": 0,
+  "acknowledged": 0,
+  "resources_released": true,
+  "error": "DIRECT_CONNECT_TIMEOUT",
+  "closes": [
+    {
+      "endpoint": "a",
+      "call_ns": "1795303550839873300",
+      "returned_ns": "1795303550841266400",
+      "local_close_succeeded": true
+    },
+    {
+      "endpoint": "b",
+      "call_ns": "1795303550841268600",
+      "returned_ns": "1795303550841453900",
+      "local_close_succeeded": true
+    }
+  ]
+}

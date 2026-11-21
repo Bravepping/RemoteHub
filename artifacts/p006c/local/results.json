@@ -1,0 +1,14 @@
+[
+  {
+    "scenario": "direct",
+    "exitCode": 0,
+    "passed": true,
+    "scope": "two real native PeerConnections on one Windows PC; no cloud or video"
+  },
+  {
+    "scenario": "all-unavailable",
+    "exitCode": 1,
+    "passed": true,
+    "scope": "two real native PeerConnections on one Windows PC; no cloud or video"
+  }
+]

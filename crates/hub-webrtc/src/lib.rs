@@ -1,6 +1,12 @@
 pub mod control;
 #[cfg(windows)]
 pub mod control_channel;
+#[cfg(feature = "p006-direct-probe")]
+pub mod direct_policy;
+#[cfg(feature = "p006-direct-probe")]
+pub mod direct_probe;
+#[cfg(feature = "p006-direct-probe")]
+pub mod direct_runtime;
 #[cfg(feature = "p006-turn-probe")]
 pub mod ice_policy;
 #[cfg(windows)]

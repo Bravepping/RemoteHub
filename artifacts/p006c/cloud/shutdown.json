@@ -1,0 +1,20 @@
+{
+  "judgedBeforeServiceStop": true,
+  "judgedAtNs": 1795303051234547493,
+  "finishedAtNs": 1795303051271551866,
+  "sameTurnPidDuringAllCases": true,
+  "maxConcurrentAllocations": 2,
+  "finalRelaySocketsBeforeServiceStop": 0,
+  "socketsAfterServiceStop": 0,
+  "serviceInactiveDisabled": true,
+  "wssRemainedInactive": true,
+  "coturnConfigHashUnchanged": true,
+  "dedicatedUnitHashUnchanged": true,
+  "firewallPoliciesUnchanged": true,
+  "businessContainersStartTimesUnchanged": true,
+  "additionalRunningUnits": [],
+  "missingBaselineUnits": [],
+  "rawControlCaptureSha256": "cd0ca13fb925846ff35e6b4de1d04ca7e20665b3b03b7013cf291f0ea51125ac",
+  "rawCaptureAndShortTicketsDeleted": true,
+  "observerExitCode": 0
+}

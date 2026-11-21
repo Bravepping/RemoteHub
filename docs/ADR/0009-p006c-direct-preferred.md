@@ -14,10 +14,10 @@ DirectPreferred使用ICE All，同轮收集host/srflx/relay，不人为延迟TUR
 
 ## 自动验证
 
-无采集/无输入/无WSS的Windows原生两个真实PC，可靠有序DataChannel发送100条有序固定实验消息并逐条确认，保留双方真实selected pair及候选类别数量，不保存SDP/地址/票据/载荷。四种测试：正常direct；测试套接字丢弃全部对端直连数据但保留TURN；丢弃TURN但保留direct；两者全丢弃。测试故障开关仅探针进程可设置，不改系统配置、不改生产策略。fallback测试仍ICE All、仍交换直连候选，不能通过改成relay-only冒充自动回退。
+无采集/无输入/无WSS，同一物理Windows机器的两个真实原生PeerConnection实例，可靠有序DataChannel发送100条有序固定实验消息并逐条确认，保留双方真实selected pair及候选类别数量，不保存SDP/地址/票据/载荷。四种测试：正常direct；测试套接字丢弃非指定TURN端点的UDP（含直接向远端relay端口的混合路径）但保留经TURN服务器的通路；丢弃TURN但保留direct；两者全丢弃。测试故障开关仅探针进程可设置，不改系统配置、不改生产策略。fallback测试仍ICE All、仍交换直连候选，不能通过改成relay-only冒充自动回退。
 
 无云授权时只运行本地host/host与负面策略测试。真实云fallback及分配回收需新的具体启动授权；不能继承生命周期轮的已结束窗口。首步完成不将P006c或父项标done，也不标记物理双机视频/P2P实测通过。
 
 ## 风险
 
-本阶段不是切网后ICE restart/无缝重连；ICE All并不保证每种NAT直连成功。TURN不可达可能延长gather，探针整体有界60秒；每条路径若不成功必须显式失败并关闭PC。PC close与云分配释放仍分别记录；不能以停止服务掩盖残留。下步视频入口接入需要单独真实兼容验证，Phase1及输入注入不在范围内。
+本阶段不是切网后ICE restart/无缝重连；ICE All并不保证每种NAT直连成功。TURN不可达可能延长gather，探针主流程有界60秒，失败后另有每端最多3秒close；每条路径若不成功必须显式失败并关闭PC。PC close与云分配释放仍分别记录；不能以停止服务掩盖残留。下步视频入口接入需要单独真实兼容验证，Phase1及输入注入不在范围内。

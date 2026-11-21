@@ -1,6 +1,6 @@
 # RemoteHub · Phase 0 技术验证
 
-这是已生成并在本机编译测试的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。同机/双机视频及同一PC上的真实DataChannel模拟控制已实测。正式输入、持久设备身份/服务端与 TURN 尚未完成，整个 Phase 0 尚未通过。
+这是已生成并在本机编译测试的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。同机/双机视频及同一PC上的真实DataChannel模拟控制、跨网强制TURN已实测。正式输入、持久设备身份/服务端及视频路径自动选择仍未完成，整个 Phase 0 尚未通过。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 
@@ -74,6 +74,14 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 完整[独立报告](docs/TURN_ALLOCATION_LIFECYCLE_TEST_REPORT.md)、[复现说明](docs/TURN_LIFECYCLE_RUNBOOK.md)及artifacts/turn-lifecycle区分真实云/Windows与离线fixture。19项检查达到预期，61 Rust/16前端/3 Edge/11 Python；本轮服务已停止、不开机自启，配置/业务容器启动时间/防火墙策略未变。没有屏幕采集或重复双机串流；Edge不是嵌入WebView2，不能将本轮data-only扩大为所有媒体负载保证。
 
 接收端主动停止按用户现场确认跳过补测，原独立日志限制保留，不再阻塞推进。本轮生命周期报告与代码独立提交后才进入P006c；P2P优先与自动回退状态另列，不由这些测试推断。
+
+## P0-06c 直连优先与自动回退首步
+
+生命周期交付88f1edc之后，新增默认关闭的`p006-direct-probe`，通过独立DirectGrant/套接字边界使用ICE All；旧本机、LAN、强制relay入口不变。一个物理Windows机器上的两个真实原生PeerConnection已自动完成真实云端四例：TURN可用选host/host；进程内直连受阻自动选relay/relay；TURN受阻仍host/host；两路均断明确失败。前三例均100条发送/接收/ACK一致，第四例0消息、无pair，不能当成连接成功。
+
+云端4个实际Allocation均有Refresh0成功回应及约1.14–1.40秒首次观察socket消失，停止前已经0；服务现已停止、不自启，WSS始终关闭。24项自动检查通过，66 Rust/16前端/3 Edge/11 Python。回退轮耗时34.873秒，仍需优化；未接入视频Session/WebView2或做新的物理双机/P2P NAT验收，P006c仍doing。
+
+见[首步报告](docs/PHASE0_P006C_TEST_REPORT.md)、[契约](docs/P006C_CONTRACT.md)、[复现步骤](docs/P006C_RUNBOOK.md)。`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-checks.ps1`只做离线回归；`node scripts/p006c-local.mjs --local PRIVATE_INTERFACE_IPV4`显式运行无云/无采集的本机真实传输。真实云测试需新范围授权及短票，不能复用已清理配置。
 
 ## P0-03 本机编码 probe
 

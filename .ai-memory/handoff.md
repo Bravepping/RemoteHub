@@ -1,4 +1,13 @@
-# TURN生命周期 / P006c开工检查点
+# P006c 首步交付检查点
+
+- 生命周期独立代码/报告已推main 88f1edc，用户随后明确授权P006c自动云测试（最多40分钟/2分配/只既有coturn/WSS关闭/无配置FW SG业务改动）。ADR0009先提交b8b0214，新增默认关闭p006-direct-probe；尚未接现有视频Session/WebView2/业务信令，不标P006c或P006父项done。
+- 2026-11-22北京时间07:13:41至07:17:31实际启动专用coturn，单PID324151；同一物理Windows机两个真实原生PC、无媒体/输入，ICE All：正常host/host 100/100/100、直连进程内阻断自动relay/relay 100/100/100（34.873秒）、TURN进程内阻断仍host/host 100/100/100（22.051秒）、两路阻断35.014秒明确DIRECT_CONNECT_TIMEOUT、0消息/no pair。双方正常/回退均保留host/srflx/relay各1，不改relay-only。故障真实丢包仅进程内，不是物理NAT/防火墙试验。
+- 4实际云分配各授予600秒，Refresh0成功回应+1.140至1.394秒首次观察socket消失；同PID最多2，逐轮0再继续。后两轮4票无成功Allocate；本轮即时释放后提前停止，原租约deadline检查点null（上一轮6例完整期限证据独立保留）。最终shutdown证实停服务前socket0、coturn inactive/disabled、WSS始终停、timer取消、原配置/unit/FW策略/业务容器与服务集合不变，原始控制捕获/短票清理，SSH关闭。
+- 报告docs/PHASE0_P006C_TEST_REPORT.md，脱敏artifacts/p006c（真实云、local与offline/development分开）；24项最终检查/66 Rust、旧桌面3、16前端、3Edge、11Python；MF1ignored。最终审查后加EOF失败保护与真实闭PC回归，保留云前二进制/sourcehash及最终差异，未为此重启服务。首个component2拒绝及闭通道fixture类型/handler错误留development，修复后重跑。
+- 约束：用户明确跳过接收端主动停止补测，保留原独立日志限制。P006c完整视频/control.v1与WebView2接入、真实物理双机/NAT、trickle/restart/切网恢复未做，SDP外prflx仍拒绝。下一步复用旧视频链路接入，不进入输入或P1。新云启动仍需新范围授权。
+- 运维资料外部清单写入曾因自动审批工作区额度不足未执行，未绕过；仓库中的报告/交接证据完整保留。Git最终SHA以提交/对话为准，避免自引用。
+
+# TURN生命周期 / P006c开工检查点（历史）
 
 - 用户明确接受接收端主动停止现场确认并要求跳过补测，保留原900帧独立提前停止证据限制，不再要求重复双机操作。P006b据此收尾，P006父项仍doing，P006c需后续开发。
 - 开工main ed6ff20干净，先提交ADR0008 dde4649。用户单独批准既有coturn最长60分钟/最多2分配/WSS关闭/无配置防火墙安全组业务修改。2026-11-21北京时间22:39至23:06真实完成6例：协议主动释放、停止续租、Windows原生/Edge gather后close、已连接Rust/Edge data-only双方close。5例Refresh0请求/成功回应+1.110至1.464秒首次观察socket消失；实际租约均600秒，不续租到期后0.318秒消失。原始deadline+15秒均无残留，同PID286888、最多2分配；判定结束前socket已0，未用服务停止冒充单例释放。

@@ -75,6 +75,10 @@ impl RelayGrant {
     pub(crate) fn session(&self) -> &str {
         &self.session
     }
+    #[cfg(feature = "p006-direct-probe")]
+    pub(crate) fn expires_at(&self) -> u64 {
+        self.expires_at
+    }
     /// Called only after native experiment approval and authenticated session exchange.
     /// No Tauri command or remote service constructs grants in P006a.
     pub fn new(
@@ -122,7 +126,15 @@ impl IceConfig {
         serde_json::from_str(text).map_err(|_| "ICE_CONFIG_INVALID".into())
     }
     pub fn validate(&self, grant: &RelayGrant, now: u64) -> Result<(), String> {
-        if self.mode != IceMode::RelayOnly {
+        self.validate_mode(grant, now, IceMode::RelayOnly)
+    }
+    pub(crate) fn validate_mode(
+        &self,
+        grant: &RelayGrant,
+        now: u64,
+        expected: IceMode,
+    ) -> Result<(), String> {
+        if self.mode != expected {
             return Err("ICE_MODE_NOT_ENABLED_IN_P006A".into());
         }
         if !grant.is_current(now)

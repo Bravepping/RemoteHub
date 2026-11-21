@@ -176,11 +176,17 @@ mod tests {
             .send_to(b"bad-port", socket.local_addr().unwrap())
             .await
             .unwrap();
+        let mut buf = [0; 64];
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut buf))
+                .await
+                .is_err()
+        );
+        assert_eq!(counters.rejected_rx.load(Ordering::Relaxed), 1);
         server
             .send_to(b"approved", socket.local_addr().unwrap())
             .await
             .unwrap();
-        let mut buf = [0; 64];
         let (n, source) = tokio::time::timeout(Duration::from_secs(1), socket.recv_from(&mut buf))
             .await
             .unwrap()

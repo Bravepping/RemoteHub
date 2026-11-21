@@ -167,8 +167,16 @@ mod tests {
         let bad = tokio::net::UdpSocket::bind("127.0.0.2:0").await.unwrap();
         let good = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         bad.send_to(b"off-peer", address).await.unwrap();
-        good.send_to(b"approved", address).await.unwrap();
         let mut bytes = [0; 64];
+        // Different UDP senders have no cross-socket arrival ordering guarantee.
+        // Prove rejection before introducing the successful receive.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), socket.recv_from(&mut bytes))
+                .await
+                .is_err()
+        );
+        assert_eq!(counters.rejected_rx.load(Ordering::Relaxed), 1);
+        good.send_to(b"approved", address).await.unwrap();
         let (n, source) =
             tokio::time::timeout(Duration::from_secs(1), socket.recv_from(&mut bytes))
                 .await

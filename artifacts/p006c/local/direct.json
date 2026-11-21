@@ -1,0 +1,55 @@
+{
+  "case": "direct",
+  "started_at_ns": "1795303533809763700",
+  "finished_at_ns": "1795303535775146900",
+  "elapsed_ms": 1965,
+  "policy": "all",
+  "media_tracks": 0,
+  "physical_machines": 1,
+  "fault_drop_direct": false,
+  "fault_drop_turn": false,
+  "fault_dropped_packets": 0,
+  "gathered_a": {
+    "host": 1,
+    "srflx": 0,
+    "relay": 0
+  },
+  "gathered_b": {
+    "host": 1,
+    "srflx": 0,
+    "relay": 0
+  },
+  "gather_complete_a": true,
+  "gather_complete_b": true,
+  "selected_a": {
+    "local_type": "host",
+    "remote_type": "host",
+    "protocol": "udp",
+    "path": "direct"
+  },
+  "selected_b": {
+    "local_type": "host",
+    "remote_type": "host",
+    "protocol": "udp",
+    "path": "direct"
+  },
+  "sent": 100,
+  "received": 100,
+  "acknowledged": 100,
+  "resources_released": true,
+  "error": null,
+  "closes": [
+    {
+      "endpoint": "a",
+      "call_ns": "1795303535774661300",
+      "returned_ns": "1795303535775045600",
+      "local_close_succeeded": true
+    },
+    {
+      "endpoint": "b",
+      "call_ns": "1795303535775046600",
+      "returned_ns": "1795303535775146000",
+      "local_close_succeeded": true
+    }
+  ]
+}
