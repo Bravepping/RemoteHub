@@ -31,6 +31,7 @@ struct RuntimeInfo {
     remote_access_enabled: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
+    p005_enabled: bool,
 }
 
 #[tauri::command]
@@ -43,6 +44,7 @@ fn get_runtime_info() -> RuntimeInfo {
         remote_access_enabled: false,
         p004_enabled: cfg!(feature = "p004-probe"),
         p004_lan_enabled: cfg!(feature = "p004-lan"),
+        p005_enabled: cfg!(feature = "p005-control"),
     }
 }
 
@@ -122,7 +124,11 @@ fn main() {
         .setup(|app| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
-                window.set_title("RemoteHub · P0-04b 双机视频实验 v2")?;
+                window.set_title(if cfg!(feature = "p005-control") {
+                    "RemoteHub · P0-05 视频与模拟控制实验 v1"
+                } else {
+                    "RemoteHub · P0-04b 双机视频实验 v2"
+                })?;
             }
             Ok(())
         })

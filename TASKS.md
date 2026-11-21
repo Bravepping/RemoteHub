@@ -10,11 +10,11 @@
 - [ ] `P0-04` **doing（视频功能通过，基线证据有差异）** — 本机及两台真实PC局域网720p30视频已通过，启停/关窗/拔线回收已实测；原基线要求的录屏未留存，本次明确不保存画面，以真实stats和用户观看确认交付，父项暂不标done。
 - [x] `P0-04a` **done（同机视频实验）** — Windows 原生 Tauri/WebView2，实时 DXGI/MF → webrtc-rs 0.21.1 → H.264 SRTP/解码；五轮 15 秒各 450 帧及一轮 30 秒 900 帧，接收丢包 0；主动停止与播放中关窗清理通过。默认关闭实验 feature，详见 `docs/PHASE0_P004_TEST_REPORT.md`。
 - [x] `P0-04b` **done（有界局域网双机实验）** — 两台物理Windows10有线PC，v2的30秒900帧全部发送/接收/解码/呈现，1280×720、host/host指定对端UDP、接收丢包0；两端主动停止、接收端关窗与拔线提前回收通过。默认关闭LAN feature，详见 `docs/PHASE0_P004B_TEST_REPORT.md`。
-- [ ] `P0-05` **todo** — 尚未实现 DataChannel；不能用本机函数调用代替通道实测。
+- [x] `P0-05` **done（模拟控制，无实际输入）** — 复用P004b同一视频PC的真实可靠有序control.v1；两台Windows10电脑100条模拟事件发送/Rust接收/ACK写入/B确认全部100，ping/pong与序号连续、异常0，视频同时1280×720正常播放；两端停止、接收端关窗/拔线清理通过。43 Rust / 11前端 / 2Edge；协议与本机真实SCTP负例覆盖，详见 `docs/PHASE0_P005_TEST_REPORT.md`。
 - [ ] `P0-06` **blocked** — 第二台有线局域网PC已提供，尚无可用 coturn 测试节点，公网路由未验收；本机未安装 Docker。没有修改云资源。
 - [ ] `P0-07` **doing** — 已交首轮 Spike 报告、实测数据和 ADR 0001；整个媒体链路与备选方案结论需 P0-03..06 后补齐。
 
-当前交付：P0 父任务正式验收 3/7；P0-04a/04b子关卡功能通过，P004基线录屏未留存，不重复计入父任务完成数。Phase 0 尚未通过退出条件。首轮报告：`docs/PHASE0_TEST_REPORT.md`；编码报告：`docs/PHASE0_P003_TEST_REPORT.md`；同机：`docs/PHASE0_P004_TEST_REPORT.md`；双机：`docs/PHASE0_P004B_TEST_REPORT.md`。没有进入 Phase 1。
+当前交付：P0 父任务正式验收 4/7（P001/02/03/05）；P0-04a/04b子关卡功能通过，P004基线录屏未留存，不重复计入父任务完成数。Phase 0 尚未通过退出条件。首轮报告：`docs/PHASE0_TEST_REPORT.md`；编码报告：`docs/PHASE0_P003_TEST_REPORT.md`；同机：`docs/PHASE0_P004_TEST_REPORT.md`；双机：`docs/PHASE0_P004B_TEST_REPORT.md`；控制：`docs/PHASE0_P005_TEST_REPORT.md`。P005完成后停止扩展，等待审查，没有进入P006或Phase1。
 
 ## Phase 1 · 工程与 UI
 

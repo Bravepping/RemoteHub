@@ -72,7 +72,10 @@ onMounted(refresh);
             : '当前验证本机窗口与主屏采集，尚未开放设备连接。'
         }}
       </p>
-      <LanVideoProbe v-if="runtime?.p004_lan_enabled" />
+      <LanVideoProbe
+        v-if="runtime?.p004_lan_enabled"
+        :control-enabled="runtime?.p005_enabled ?? false"
+      />
       <LoopbackVideoProbe v-else-if="runtime?.p004_enabled" />
       <template v-if="!runtime?.p004_enabled">
         <section class="runtime-card">

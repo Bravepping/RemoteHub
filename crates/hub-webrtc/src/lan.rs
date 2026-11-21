@@ -4,7 +4,7 @@ use crate::{
     session::{Session, Stats},
     signaling::validate_description,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     sync::{
@@ -22,6 +22,7 @@ use tokio::{
 
 #[derive(Clone, Serialize)]
 pub struct LanStatus {
+    pub browser_control: Option<crate::control::BrowserStats>,
     pub role: String,
     pub state: String,
     pub elapsed_ms: u64,
@@ -33,6 +34,8 @@ pub struct LanStatus {
     pub error: Option<String>,
 }
 pub struct LanSession {
+    control_enabled: bool,
+    control_session: Mutex<Option<String>>,
     scope: LanScope,
     seconds: u32,
     port: u16,
@@ -55,10 +58,26 @@ impl LanSession {
         role: &'static str,
         key: Key,
     ) -> Result<Arc<Self>, String> {
+        Self::new_mode(scope, seconds, port, role, key, false)
+    }
+    fn new_mode(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        role: &'static str,
+        key: Key,
+        control_enabled: bool,
+    ) -> Result<Arc<Self>, String> {
         if !(5..=30).contains(&seconds) || port < 1024 {
             return Err("INVALID_LAN_CONFIG".into());
         }
         Ok(Arc::new(Self {
+            control_enabled,
+            control_session: Mutex::new(if control_enabled && role == "receiver" {
+                Some(uuid::Uuid::new_v4().to_string())
+            } else {
+                None
+            }),
             scope,
             seconds,
             port,
@@ -69,6 +88,7 @@ impl LanSession {
             key: Mutex::new(Some(Arc::new(key))),
             source: Mutex::new(None),
             status: Mutex::new(LanStatus {
+                browser_control: None,
                 role: role.into(),
                 state: "waiting".into(),
                 elapsed_ms: 0,
@@ -89,9 +109,24 @@ impl LanSession {
         seconds: u32,
         port: u16,
     ) -> Result<(Arc<Self>, String), String> {
+        Self::host_mode(scope, seconds, port, false).await
+    }
+    pub async fn host_control(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+    ) -> Result<(Arc<Self>, String), String> {
+        Self::host_mode(scope, seconds, port, true).await
+    }
+    async fn host_mode(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        enabled: bool,
+    ) -> Result<(Arc<Self>, String), String> {
         let key = Key::generate();
         let display = key.display();
-        let this = Self::new(scope, seconds, port, "sender", key)?;
+        let this = Self::new_mode(scope, seconds, port, "sender", key, enabled)?;
         let listener = TcpListener::bind((scope.local, port))
             .await
             .map_err(|_| "LAN_LISTEN_FAILED")?;
@@ -111,6 +146,36 @@ impl LanSession {
         code: &str,
     ) -> Result<Arc<Self>, String> {
         Self::new(scope, seconds, port, "receiver", Key::parse(code)?)
+    }
+    pub fn receiver_control(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        code: &str,
+    ) -> Result<Arc<Self>, String> {
+        Self::new_mode(scope, seconds, port, "receiver", Key::parse(code)?, true)
+    }
+    pub fn control_session(&self) -> Option<String> {
+        self.control_session
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
+    pub fn record_browser_control(&self, data: crate::control::BrowserStats) -> Result<(), String> {
+        if !self.control_enabled || self.role != "receiver" {
+            return Err("CONTROL_STATS_NOT_ALLOWED".into());
+        }
+        data.validate()?;
+        self.update(|s| s.browser_control = Some(data));
+        Ok(())
+    }
+    fn validate_sdp(&self, sdp: &str, scope: NetworkScope, answer: bool) -> Result<(), String> {
+        if self.control_enabled {
+            crate::signaling::validate_control_description(sdp, scope, answer)?;
+        } else {
+            validate_description(sdp, scope, answer)?;
+        }
+        Ok(())
     }
     fn update(&self, f: impl FnOnce(&mut LanStatus)) {
         let mut s = self.status.lock().unwrap_or_else(|p| p.into_inner());
@@ -235,10 +300,29 @@ impl LanSession {
                 Ok(value) => value,
                 Err(_) => continue,
             };
-            if kind != "offer" {
+            if kind
+                != if self.control_enabled {
+                    "offer.control.v1"
+                } else {
+                    "offer"
+                }
+            {
                 continue;
             }
-            validate_description(&offer, NetworkScope::Lan(self.scope), false)?;
+            let offer = if self.control_enabled {
+                let envelope: ControlSignal =
+                    serde_json::from_str(&offer).map_err(|_| "CONTROL_SIGNAL_SCHEMA")?;
+                uuid::Uuid::parse_str(&envelope.control_session)
+                    .map_err(|_| "CONTROL_SESSION_INVALID")?;
+                *self
+                    .control_session
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner()) = Some(envelope.control_session);
+                envelope.sdp
+            } else {
+                offer
+            };
+            self.validate_sdp(&offer, NetworkScope::Lan(self.scope), false)?;
             accepted = Some((socket, codec, offer));
             break;
         }
@@ -251,10 +335,30 @@ impl LanSession {
             s.state = "negotiating".into();
             s.authenticated = true;
         });
-        let source = Session::new_lan(self.seconds, self.scope)?;
+        let source = if self.control_enabled {
+            Session::new_lan_control(
+                self.seconds,
+                self.scope,
+                self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?,
+            )?
+        } else {
+            Session::new_lan(self.seconds, self.scope)?
+        };
         *self.source.lock().unwrap_or_else(|p| p.into_inner()) = Some(source.clone());
         let answer = source.signal(offer).await?;
-        lan_wire::write(&mut socket, codec.encode("answer", answer)?).await?;
+        let (kind, payload) = if self.control_enabled {
+            (
+                "answer.control.v1",
+                serde_json::to_string(&ControlSignal {
+                    sdp: answer,
+                    control_session: self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?,
+                })
+                .map_err(|_| "CONTROL_SIGNAL_SCHEMA")?,
+            )
+        } else {
+            ("answer", answer)
+        };
+        lan_wire::write(&mut socket, codec.encode(kind, payload)?).await?;
         self.control(socket, codec).await
     }
     pub async fn signal_receiver(self: &Arc<Self>, offer: String) -> Result<String, String> {
@@ -262,7 +366,7 @@ impl LanSession {
             return Err("INVALID_RECEIVER_SESSION".into());
         }
         // The receiver's own offer must only advertise its explicitly selected interface.
-        validate_description(
+        self.validate_sdp(
             &offer,
             NetworkScope::Lan(LanScope {
                 local: self.scope.peer,
@@ -305,13 +409,41 @@ impl LanSession {
             .map_err(|_| "LAN_LOCAL_BIND_FAILED")?;
         let mut socket = tokio::select! {r=timeout(Duration::from_secs(5),socket.connect((self.scope.peer,self.port).into()))=>r.map_err(|_|"LAN_CONNECT_TIMEOUT")?.map_err(|_|"LAN_CONNECT_FAILED")?,_=self.cancelled()=>return Err("CANCELLED".into())};
         let mut codec = Codec::new(self.secret()?, uuid::Uuid::new_v4().to_string(), false)?;
-        lan_wire::write(&mut socket, codec.encode("offer", offer)?).await?;
+        let (kind, payload) = if self.control_enabled {
+            (
+                "offer.control.v1",
+                serde_json::to_string(&ControlSignal {
+                    sdp: offer,
+                    control_session: self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?,
+                })
+                .map_err(|_| "CONTROL_SIGNAL_SCHEMA")?,
+            )
+        } else {
+            ("offer", offer)
+        };
+        lan_wire::write(&mut socket, codec.encode(kind, payload)?).await?;
         let frame = tokio::select! {result=timeout(Duration::from_secs(10),lan_wire::read(&mut socket))=>result.map_err(|_|"LAN_ANSWER_TIMEOUT")??,_=self.cancelled()=>return Err("CANCELLED".into())};
         let (kind, answer) = codec.accept(frame)?;
-        if kind != "answer" {
+        if kind
+            != if self.control_enabled {
+                "answer.control.v1"
+            } else {
+                "answer"
+            }
+        {
             return Err("EXPECTED_AUTHENTICATED_ANSWER".into());
         }
-        validate_description(&answer, NetworkScope::Lan(self.scope), true)?;
+        let answer = if self.control_enabled {
+            let envelope: ControlSignal =
+                serde_json::from_str(&answer).map_err(|_| "CONTROL_SIGNAL_SCHEMA")?;
+            if Some(envelope.control_session) != self.control_session() {
+                return Err("CONTROL_SESSION_MISMATCH".into());
+            }
+            envelope.sdp
+        } else {
+            answer
+        };
+        self.validate_sdp(&answer, NetworkScope::Lan(self.scope), true)?;
         self.update(|s| {
             s.state = "connected".into();
             s.authenticated = true;
@@ -328,6 +460,11 @@ impl LanSession {
             return Err("RECEIVER_STOPPED".into());
         }
         validate_metrics(&data)?;
+        if let Some(control) = data.get("control") {
+            self.record_browser_control(
+                serde_json::from_value(control.clone()).map_err(|_| "CONTROL_METRICS_INVALID")?,
+            )?;
+        }
         self.update(|s| {
             s.receiver_samples.push(data.clone());
             if s.receiver_samples.len() > 60 {
@@ -394,6 +531,13 @@ impl LanSession {
     }
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ControlSignal {
+    sdp: String,
+    control_session: String,
+}
+
 pub fn validate_metrics(data: &Value) -> Result<(), String> {
     let object = data.as_object().ok_or("METRICS_INVALID")?;
     let allowed = [
@@ -419,6 +563,7 @@ pub fn validate_metrics(data: &Value) -> Result<(), String> {
         "totalFreezesDuration",
         "peerMatches",
         "decoderImplementation",
+        "control",
     ];
     if object.keys().any(|k| !allowed.contains(&k.as_str()))
         || serde_json::to_vec(data)
@@ -430,6 +575,11 @@ pub fn validate_metrics(data: &Value) -> Result<(), String> {
     }
     if data["peerMatches"].as_bool() == Some(false) {
         return Err("BROWSER_SELECTED_OFF_PEER".into());
+    }
+    if let Some(control) = data.get("control") {
+        let stats: crate::control::BrowserStats =
+            serde_json::from_value(control.clone()).map_err(|_| "CONTROL_METRICS_INVALID")?;
+        stats.validate()?;
     }
     if data["framesDecoded"].as_u64().unwrap_or(0) > 0
         && data["peerMatches"].as_bool() != Some(true)

@@ -38,6 +38,7 @@ use webrtc::{
 
 #[derive(Clone, Default, Serialize)]
 pub struct Stats {
+    pub control: Option<crate::control::ControlStats>,
     pub state: String,
     pub elapsed_ms: u64,
     pub stream: StreamReport,
@@ -82,9 +83,16 @@ impl Shared {
         f(&mut stats);
     }
 }
-struct Handler(Arc<Shared>);
+struct Handler(Arc<Shared>, Option<Arc<crate::control_channel::Endpoint>>);
 #[async_trait::async_trait]
 impl PeerConnectionEventHandler for Handler {
+    async fn on_data_channel(&self, channel: Arc<dyn webrtc::data_channel::DataChannel>) {
+        if let Some(control) = &self.1 {
+            control.accept(channel);
+        } else {
+            self.0.stop.stop();
+        }
+    }
     async fn on_connection_state_change(&self, state: RTCPeerConnectionState) {
         let value = state.to_string();
         self.0.update(|s| {
@@ -114,6 +122,7 @@ impl PeerConnectionEventHandler for Handler {
 }
 
 pub struct Session {
+    control: Option<Arc<crate::control_channel::Endpoint>>,
     network: crate::scope::NetworkScope,
     socket_counters: Arc<crate::pinned_runtime::SocketCounters>,
     seconds: u32,
@@ -129,14 +138,37 @@ impl Session {
     pub fn new_lan(seconds: u32, scope: crate::scope::LanScope) -> Result<Arc<Self>, String> {
         Self::with_network(seconds, crate::scope::NetworkScope::Lan(scope))
     }
+    pub fn new_lan_control(
+        seconds: u32,
+        scope: crate::scope::LanScope,
+        session: String,
+    ) -> Result<Arc<Self>, String> {
+        Self::configured(
+            seconds,
+            crate::scope::NetworkScope::Lan(scope),
+            Some(session),
+        )
+    }
     fn with_network(
         seconds: u32,
         network: crate::scope::NetworkScope,
     ) -> Result<Arc<Self>, String> {
+        Self::configured(seconds, network, None)
+    }
+    fn configured(
+        seconds: u32,
+        network: crate::scope::NetworkScope,
+        control_session: Option<String>,
+    ) -> Result<Arc<Self>, String> {
         if !(5..=30).contains(&seconds) {
             return Err("INVALID_DURATION_5_TO_30".into());
         }
+        let stop = StopToken::default();
+        let control = control_session
+            .map(|id| crate::control_channel::Endpoint::new(id, stop.clone(), seconds))
+            .transpose()?;
         Ok(Arc::new(Self {
+            control,
             network,
             socket_counters: Arc::new(Default::default()),
             seconds,
@@ -145,7 +177,7 @@ impl Session {
                     state: "starting".into(),
                     ..Default::default()
                 }),
-                stop: StopToken::default(),
+                stop,
                 keyframe: AtomicBool::new(false),
                 connected: AtomicBool::new(false),
                 gathering_done: AtomicBool::new(false),
@@ -168,6 +200,7 @@ impl Session {
         }
         stats.rejected_udp_rx = self.socket_counters.rejected_rx.load(Ordering::Relaxed);
         stats.rejected_udp_tx = self.socket_counters.rejected_tx.load(Ordering::Relaxed);
+        stats.control = self.control.as_ref().map(|c| c.stats());
         stats
     }
     pub fn cancel(&self) {
@@ -176,7 +209,9 @@ impl Session {
 
     pub async fn signal(self: &Arc<Self>, offer: String) -> Result<String, String> {
         // Validate before starting any sockets or media. Only the native window owner calls this.
-        let negotiation = if self.network.is_lan() {
+        let negotiation = if self.control.is_some() {
+            crate::signaling::validate_control_description(&offer, self.network, false)?
+        } else if self.network.is_lan() {
             crate::signaling::validate_description(&offer, self.network, false)?
         } else {
             validate_offer(&offer)?
@@ -240,6 +275,12 @@ impl Session {
         });
         let result = self.build_pc(negotiation.payload_type).await;
         if let Ok(pc) = result {
+            let control_task = self.control.as_ref().map(|control| {
+                let control = control.clone();
+                tokio::spawn(async move {
+                    control.run().await;
+                })
+            });
             let outcome = timeout(
                 Duration::from_secs(self.seconds as u64 + 15),
                 self.media(&pc, offer, &negotiation, &mut answer_tx, &mut producer),
@@ -249,6 +290,23 @@ impl Session {
             self.shared.stop.stop();
             let close = timeout(Duration::from_secs(2), pc.close()).await;
             let close_ok = matches!(close, Ok(Ok(())));
+            let control_ok = if let Some(mut task) = control_task {
+                match timeout(Duration::from_secs(3), &mut task).await {
+                    Ok(Ok(())) => {
+                        if let Some(c) = &self.control {
+                            c.joined();
+                        }
+                        true
+                    }
+                    _ => {
+                        task.abort();
+                        let _ = task.await;
+                        false
+                    }
+                }
+            } else {
+                true
+            };
             let mut join_ok = true;
             if let Some(thread) = producer {
                 let joined = tokio::task::spawn_blocking(move || thread.join());
@@ -263,10 +321,13 @@ impl Session {
                         s.error = Some(error);
                     }
                 }
-                if !close_ok || !join_ok {
+                if !close_ok || !join_ok || !control_ok {
                     s.error = Some("RESOURCE_CLEANUP_INCOMPLETE".into());
                 }
-                s.resources_released = close_ok && join_ok;
+                if s.error.is_none() {
+                    s.error = self.control.as_ref().and_then(|c| c.stats().last_error);
+                }
+                s.resources_released = close_ok && join_ok && control_ok;
                 s.state = if s.error.is_some() {
                     "failed"
                 } else {
@@ -311,8 +372,8 @@ impl Session {
                 Some(Duration::from_secs(3)),
                 Some(Duration::from_secs(6)),
                 Some(Duration::from_secs(1)),
-            )
-            .build();
+            );
+        let settings=if self.control.is_some(){settings.with_sctp_max_message_size(rtc::peer_connection::configuration::setting_engine::SctpMaxMessageSize::Bounded(16*1024)).with_sctp_max_receive_buffer_size(64*1024)}else{settings}.build();
         let mut builder = PeerConnectionBuilder::new()
             .with_media_engine(engine)
             .with_interceptor_registry(registry)
@@ -322,7 +383,7 @@ impl Session {
                     .with_ice_servers(vec![])
                     .build(),
             )
-            .with_handler(Arc::new(Handler(self.shared.clone())))
+            .with_handler(Arc::new(Handler(self.shared.clone(), self.control.clone())))
             .with_udp_addrs(vec![format!("{}:0", self.network.local())]);
         if let crate::scope::NetworkScope::Lan(scope) = self.network {
             builder = builder.with_runtime(Arc::new(crate::pinned_runtime::PinnedRuntime {
@@ -331,6 +392,9 @@ impl Session {
                 peer: scope.peer.into(),
                 counters: self.socket_counters.clone(),
             }));
+        }
+        if self.control.is_some() {
+            builder = builder.with_data_channel_send_buffer_limit(16 * 1024);
         }
         let pc = builder.build().await.map_err(|e| e.to_string())?;
         Ok(Arc::new(pc))
@@ -615,6 +679,296 @@ impl rtc::interceptor::Interceptor for Feedback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    async fn data_pair() -> (
+        Arc<Session>,
+        Arc<dyn PeerConnection>,
+        Arc<dyn PeerConnection>,
+        Arc<dyn webrtc::data_channel::DataChannel>,
+        JoinHandle<()>,
+        String,
+    ) {
+        use webrtc::data_channel::RTCDataChannelInit;
+        use webrtc::rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit};
+        let id = uuid::Uuid::new_v4().to_string();
+        let scope = crate::scope::LanScope {
+            local: "127.0.0.1".parse().unwrap(),
+            peer: "127.0.0.1".parse().unwrap(),
+        };
+        let host = Session::new_lan_control(30, scope, id.clone()).unwrap();
+        let a = host.build_pc(102).await.unwrap();
+        let browser_fixture = Session::new(30).unwrap();
+        let b = browser_fixture.build_pc(102).await.unwrap();
+        b.add_transceiver_from_kind(
+            RtpCodecKind::Video,
+            Some(RTCRtpTransceiverInit {
+                direction: RTCRtpTransceiverDirection::Recvonly,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+        a.add_track(Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
+            "control-test".into(),
+            "fixture".into(),
+            "no capture".into(),
+            RtpCodecKind::Video,
+            vec![RTCRtpEncodingParameters {
+                rtp_coding_parameters: RTCRtpCodingParameters {
+                    ssrc: Some(SSRC),
+                    ..Default::default()
+                },
+                codec: codec(),
+                active: true,
+                max_bitrate: 4_000_000,
+                max_framerate: Some(30.0),
+                scale_resolution_down_by: None,
+            }],
+        ))))
+        .await
+        .unwrap();
+        let dc = b
+            .create_data_channel(
+                crate::control::LABEL,
+                Some(RTCDataChannelInit {
+                    protocol: crate::control::LABEL.into(),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+        let endpoint = host.control.as_ref().unwrap().clone();
+        let task = tokio::spawn(async move {
+            endpoint.run().await;
+        });
+        b.set_local_description(b.create_offer(None).await.unwrap())
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(4), async {
+            while !browser_fixture
+                .shared
+                .gathering_done
+                .load(Ordering::Acquire)
+            {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        // Match the browser's existing candidate filter; the Rust fixture also emits RTCP.
+        let offer = b
+            .local_description()
+            .await
+            .unwrap()
+            .sdp
+            .lines()
+            .filter(|line| {
+                !line.starts_with("a=candidate:") || line.split_whitespace().nth(1) == Some("1")
+            })
+            .collect::<Vec<_>>()
+            .join("\r\n")
+            + "\r\n";
+        crate::signaling::validate_control_description(&offer, host.network, false).unwrap();
+        assert!(validate_offer(&offer).is_err());
+        a.set_remote_description(RTCSessionDescription::offer(offer).unwrap())
+            .await
+            .unwrap();
+        a.set_local_description(a.create_answer(None).await.unwrap())
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(4), async {
+            while !host.shared.gathering_done.load(Ordering::Acquire) {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let answer = a.local_description().await.unwrap().sdp;
+        crate::signaling::validate_control_description(&answer, host.network, true).unwrap();
+        b.set_remote_description(RTCSessionDescription::answer(answer).unwrap())
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), async {
+            loop {
+                if matches!(
+                    dc.poll().await,
+                    Some(webrtc::data_channel::DataChannelEvent::OnOpen)
+                ) {
+                    break;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        (host, a, b, dc, task, id)
+    }
+    #[tokio::test]
+    async fn actual_sctp_hundred_events_ping_and_protocol_rejections_without_screen_capture() {
+        use crate::control::Message;
+        use webrtc::data_channel::DataChannelEvent;
+        let (host, a, b, dc, task, id) = data_pair().await;
+        for seq in 1..=100 {
+            let text = serde_json::to_string(&Message::Move {
+                v: 1,
+                seq,
+                session_id: id.clone(),
+                x_norm: (seq % 100) as f64 / 100.0,
+                y_norm: 0.5,
+            })
+            .unwrap();
+            dc.send_text(&text).await.unwrap();
+            let message = timeout(Duration::from_secs(2), async {
+                loop {
+                    match dc.poll().await {
+                        Some(DataChannelEvent::OnMessage(m)) => break m,
+                        Some(
+                            DataChannelEvent::OnBufferedAmountLow
+                            | DataChannelEvent::OnBufferedAmountHigh,
+                        ) => (),
+                        event => panic!("unexpected SCTP event {event:?}"),
+                    }
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                matches!(serde_json::from_slice::<Message>(&message.data).unwrap(),Message::Ack{seq:reply,ack_seq,..}if reply==seq&&ack_seq==seq)
+            );
+            sleep(Duration::from_millis(20)).await;
+        }
+        dc.send_text(
+            &serde_json::to_string(&Message::Ping {
+                v: 1,
+                seq: 101,
+                session_id: id.clone(),
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        let pong = timeout(Duration::from_secs(2), async {
+            loop {
+                match dc.poll().await {
+                    Some(DataChannelEvent::OnMessage(m)) => break m,
+                    Some(
+                        DataChannelEvent::OnBufferedAmountLow
+                        | DataChannelEvent::OnBufferedAmountHigh,
+                    ) => (),
+                    event => panic!("unexpected SCTP event {event:?}"),
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<Message>(&pong.data).unwrap(),
+            Message::Pong { reply_to: 101, .. }
+        ));
+        // Replay a previously accepted sequence through real SCTP, never through IPC/TCP.
+        dc.send_text(
+            &serde_json::to_string(&Message::Ping {
+                v: 1,
+                seq: 101,
+                session_id: id,
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        timeout(Duration::from_secs(2), async {
+            while !host.shared.stop.is_stopped() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        a.close().await.unwrap();
+        b.close().await.unwrap();
+        timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        let stats = host.control.as_ref().unwrap().stats();
+        assert_eq!(stats.accepted_moves, 100);
+        assert_eq!(stats.open_events, 1);
+        assert_eq!(stats.acks_sent, 100);
+        assert_eq!(stats.pongs_sent, 1);
+        assert_eq!(stats.rejected, 1);
+        assert_eq!(stats.last_error.as_deref(), Some("CONTROL_SEQUENCE"));
+        assert_eq!(host.stats().stream.frames_input, 0);
+    }
+    #[tokio::test]
+    async fn actual_sctp_rejects_wrong_session_oversized_and_malformed_messages() {
+        for case in 0..3 {
+            let (host, a, b, dc, task, id) = data_pair().await;
+            let (text, error) = match case {
+                0 => (
+                    serde_json::to_string(&crate::control::Message::Ping {
+                        v: 1,
+                        seq: 1,
+                        session_id: uuid::Uuid::new_v4().to_string(),
+                    })
+                    .unwrap(),
+                    "CONTROL_SESSION_MISMATCH",
+                ),
+                1 => ("x".repeat(1025), "CONTROL_MESSAGE_SIZE"),
+                _ => (
+                    format!("{{\"kind\":\"arbitrary_input\",\"session_id\":\"{id}\"}}"),
+                    "CONTROL_SCHEMA",
+                ),
+            };
+            dc.send_text(&text).await.unwrap();
+            timeout(Duration::from_secs(2), async {
+                while !host.shared.stop.is_stopped() {
+                    sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .unwrap();
+            a.close().await.unwrap();
+            b.close().await.unwrap();
+            timeout(Duration::from_secs(3), task)
+                .await
+                .unwrap()
+                .unwrap();
+            let stats = host.control.as_ref().unwrap().stats();
+            assert_eq!(stats.accepted_moves, 0);
+            assert_eq!(stats.acks_sent, 0);
+            assert_eq!(stats.last_error.as_deref(), Some(error));
+            assert_eq!(host.stats().stream.frames_input, 0);
+        }
+    }
+    #[tokio::test]
+    async fn actual_sctp_rate_limit_and_closed_session_cannot_continue() {
+        let (host, a, b, dc, task, id) = data_pair().await;
+        for seq in 1..=61 {
+            let data = serde_json::to_string(&crate::control::Message::Ping {
+                v: 1,
+                seq,
+                session_id: id.clone(),
+            })
+            .unwrap();
+            let _ = dc.send_text(&data).await;
+        }
+        timeout(Duration::from_secs(2), async {
+            while !host.shared.stop.is_stopped() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        let stats = host.control.as_ref().unwrap().stats();
+        assert_eq!(stats.last_error.as_deref(), Some("CONTROL_RATE_LIMIT"));
+        assert_eq!(stats.pings_received, 60);
+        assert_eq!(stats.rejected, 1);
+        a.close().await.unwrap();
+        b.close().await.unwrap();
+        timeout(Duration::from_secs(3), task)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(dc.send_text("no authorization after close").await.is_err());
+        assert_eq!(host.stats().stream.frames_input, 0);
+    }
     #[tokio::test]
     async fn stop_without_signal_is_idempotent_and_invalid_offer_creates_no_media() {
         let s = Session::new(10).unwrap();

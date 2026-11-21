@@ -1,0 +1,6 @@
+$ pnpm lint
+Checking formatting...
+All matched files use Prettier code style!
+$ prettier --check apps/desktop/src apps/desktop/*.ts scripts/*.mjs
+
+EXIT=0

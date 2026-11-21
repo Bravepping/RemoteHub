@@ -1,4 +1,11 @@
-# P0-04b 交付检查点
+# P0-05 开发检查点
+
+- 已完成带证据：fetch确认main=b914942且开工工作树干净；先提交ADR0005/CONTROL_V1（f68e42e），再实现。默认关闭p005-control，复用同一视频PC。两台物理Windows10有线电脑两轮30秒视频+100事件，A接收/ACK写入/B发送/确认均100，连续1..101序号、ping/pong1、异常0；源900帧，B最后回传视频893帧、720p、丢包0（不伪称最终900）。四种清理：B停止188帧/A停止207/B关窗210/B拔线279（LAN_LEASE_EXPIRED），全部控制join/源/PC回收。B停止/关窗/拔线有A真实OnClose1。43 Rust、11前端、2Edge和全部10最终命令exit0；本机真实SCTP负例与双机分开，私有MF1项ignored。
+- 相关文件：control.rs/control_channel.rs；signaling/session/lan；Tauri p004_lan/feature/main；Vue control.ts/lan.ts/LanVideoProbe；scripts/p005.ps1。旧P004a/04b构造器仍video-only，P005才接受一video一application的同BUNDLE SDP。TCP只运认证上下文、心跳和统计，无控制事件/ACK代理。源码不含SendInput调用。
+- 未完成/限制：P005范围已验收，收尾Git与归档标识见交付BUILD_INFO/会话结果，完成后停止等待审查，不进P006/P1。B终态本地final未收取，其界面/回收由用户确认；B运行中真实ACK统计由A认证连接保存。没有物理DataChannel OnError，error回调覆盖是自动fixture，不伪造。P004基线录屏差异继续保留；无实际输入、长稳、Win11或独立安全审计。
+- 发现/修正：webrtc fixture需add_track（不采集）才能sendonly；fixture候选先模拟前端component1过滤；真实DataChannel poll还产生buffered事件，集成测试需等待OnMessage而非把任意事件当ACK。H264匹配限video节、每节独立mid。前端测试RTCErrorEvent类型已修。PowerShell把stderr包装NativeCommandError，最终用Node捕获UTF8原始stdout/stderr和退出码避免误判；实际最终10命令全0。真实P004b基线保留，不把旧记录当P005新实测。
+
+## P0-04b 基线
 
 - 已完成带证据：基线5fb0867，ADR先提交dabb5fa。两台真实Windows10有线PC，v2完整30秒900帧输入/编码/发送/接收/解码/呈现全部一致，1280×720，8365包、接收丢包0，实际selected host/host UDP指定对端匹配。两端停止114/144帧、接收端关窗125帧、拔线187帧（LAN_LEASE_EXPIRED）提前停止，发送端源/会话释放。用户亲自确认并操作，回报四项均回收。36 Rust(all features)、8前端、1Edge、verify/clippy通过，1私有MF测试保持ignored。
 - 相关文件：ADR0004、hub-webrtc scope/pinned_runtime/lan_wire/lan、Tauri p004_lan/feature/命令ACL、Vue LanVideoProbe/lan.ts、p004b脚本/限定规则脚本、P004B_RUNBOOK和PHASE0_P004B_TEST_REPORT。脱敏实际统计artifacts/p004b。私有目录不得打包；具体IP/配对码/原SDP不进Git。

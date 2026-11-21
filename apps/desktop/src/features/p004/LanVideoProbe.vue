@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onBeforeUnmount, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+const props = defineProps<{ controlEnabled?: boolean }>();
 import {
   LanProbe,
   type LanStatus,
@@ -54,6 +55,7 @@ async function start() {
   receiver.value = undefined;
   hostCode.value = '';
   const config: LanConfig = {
+    controlSim: props.controlEnabled ?? false,
     role: role.value,
     consent: consent.value,
     localIp: localIp.value.trim(),
@@ -96,8 +98,16 @@ onBeforeUnmount(() => {
   <section class="lan">
     <div class="heading">
       <div>
-        <span class="step">P0-04b / 双机视频实验 · v2</span>
-        <h2>局域网实时桌面视频</h2>
+        <span class="step">{{
+          controlEnabled
+            ? 'P0-05 / 视频与模拟控制实验 · v1'
+            : 'P0-04b / 双机视频实验 · v2'
+        }}</span>
+        <h2>
+          {{
+            controlEnabled ? '实时视频 + 100 条模拟事件' : '局域网实时桌面视频'
+          }}
+        </h2>
       </div>
       <span class="badge" role="status">{{ labels[state] ?? state }}</span>
     </div>
@@ -158,11 +168,11 @@ onBeforeUnmount(() => {
     ></video>
     <div class="controls">
       <label class="consent"
-        ><input
-          v-model="consent"
-          type="checkbox"
-          :disabled="busy"
-        />我同意本次与指定电脑的视频实验</label
+        ><input v-model="consent" type="checkbox" :disabled="busy" />{{
+          controlEnabled
+            ? '我同意本次视频及模拟坐标实验（不执行输入）'
+            : '我同意本次与指定电脑的视频实验'
+        }}</label
       ><button
         :disabled="
           busy ||
@@ -183,6 +193,60 @@ onBeforeUnmount(() => {
       </button>
     </div>
     <div v-if="error" class="error" role="alert">{{ error }}</div>
+    <div v-if="controlEnabled" class="control-panel">
+      <h3>control.v1 / 可靠有序 DataChannel</h3>
+      <p>接收端开始播放后自动发送 100 条模拟坐标；系统鼠标不会移动。</p>
+      <dl>
+        <dt>通道状态</dt>
+        <dd>
+          {{
+            role === 'sender'
+              ? (native?.source?.control?.state ?? '未建立')
+              : (receiver?.control?.state ?? '未建立')
+          }}
+        </dd>
+        <dt>发送事件 / 收到 ACK</dt>
+        <dd>
+          {{
+            receiver?.control
+              ? `${receiver.control.sentMoves} / ${receiver.control.ackReceived}`
+              : '未测'
+          }}
+        </dd>
+        <dt>Rust 接收 / 写入 ACK</dt>
+        <dd>
+          {{
+            native?.source?.control
+              ? `${native.source.control.accepted_moves} / ${native.source.control.acks_sent}`
+              : '发送端窗口查看'
+          }}
+        </dd>
+        <dt>未确认 / 异常</dt>
+        <dd>
+          {{
+            receiver?.control
+              ? `${receiver.control.pending} / ${receiver.control.anomalies}`
+              : '未测'
+          }}
+        </dd>
+        <dt>ping / pong</dt>
+        <dd>
+          {{
+            receiver?.control
+              ? `${receiver.control.pingsSent} / ${receiver.control.pongsReceived}`
+              : '未测'
+          }}
+        </dd>
+        <dt>最后控制错误</dt>
+        <dd>
+          {{
+            native?.source?.control?.last_error ??
+            receiver?.control?.lastError ??
+            '无'
+          }}
+        </dd>
+      </dl>
+    </div>
     <dl>
       <dt>本轮配对</dt>
       <dd>{{ native?.authenticated ? '已认证指定对端' : '尚未认证' }}</dd>

@@ -14,9 +14,13 @@ P0-04b新增默认关闭p004-lan、短时指定RFC1918两端scope和原生双向
 
 ## Convention Capture
 
+P0-05在同一视频PC上新增默认关闭control.v1可靠有序模拟事件，ADR0005/CONTROL_V1。P005原生双端确认和HMAC信令绑定本轮controlSession，严格一video一application同BUNDLE，原P004a/04b仍video-only。DataChannel poll任务独立有界且源worker负责close/join；模拟坐标不调用输入API。两轮双机100/100 ACK与四项清理通过；43 Rust/11前端/2Edge。只完成P005，停止等审查，不进P006/P1。
+
 Rust fmt、TS strict、Vue/TS Prettier。模块依赖 Tauri -> hub-capture-win -> windows。输出样本放 artifacts/private 并排除 Git/打包。正确：测试返回值可来自 fixture；错误：产品显示固定假测量。每次以 artifacts 和当前实测结果更新 TASKS，不继承未实测的成功。
 
 ## Known Issues
+
+DataChannel::poll还会产生buffered事件，测试必须等OnMessage，不能把任意poll返回当ACK。PC销毁时OnClose计数可能为0，close_requested和task_joined单独记录，不补造事件。B最后回传样本早于本地终态，不能按发送900减893宣称丢帧。PowerShell合并stderr会包装NativeCommandError，Node spawn捕获退出码/UTF8输出更适合保存检查证据。
 
 DXGI 目前 CPU staging、主屏、无光标合成、旋转拒绝、access lost 终止。Windows 10 本机通过，Windows 11 未测。PowerShell 5 脚本使用 ASCII，避免无 BOM UTF-8 中文解析问题。此机交互 PATH 引号异常，在本次构建进程内修复，不修改全局设置。
 

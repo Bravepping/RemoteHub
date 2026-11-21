@@ -18,25 +18,117 @@ pub fn validate_description(
     scope: crate::scope::NetworkScope,
     answer: bool,
 ) -> Result<Negotiation, String> {
+    validate_policy(sdp, scope, answer, false)
+}
+pub fn validate_control_description(
+    sdp: &str,
+    scope: crate::scope::NetworkScope,
+    answer: bool,
+) -> Result<Negotiation, String> {
+    validate_policy(sdp, scope, answer, true)
+}
+fn validate_policy(
+    sdp: &str,
+    scope: crate::scope::NetworkScope,
+    answer: bool,
+    control: bool,
+) -> Result<Negotiation, String> {
     if sdp.len() > 64 * 1024 || sdp.contains('\0') {
         return Err("SDP_SIZE_OR_ENCODING".into());
     }
     let lines: Vec<_> = sdp.lines().map(str::trim).collect();
     let media: Vec<_> = lines.iter().filter(|line| line.starts_with("m=")).collect();
-    if media.len() != 1
+    if media.len() != if control { 2 } else { 1 }
         || !media[0].starts_with("m=video ")
         || !media[0].contains(" UDP/TLS/RTP/SAVPF ")
         || !lines.contains(&if answer { "a=sendonly" } else { "a=recvonly" })
     {
         return Err("SINGLE_RECVONLY_VIDEO_REQUIRED".into());
     }
+    if control {
+        if !scope.is_lan() {
+            return Err("CONTROL_LAN_SCOPE_REQUIRED".into());
+        }
+        let app = sdp
+            .split("m=application ")
+            .nth(1)
+            .ok_or("CONTROL_APPLICATION_REQUIRED")?;
+        let app_lines: Vec<_> = app.lines().map(str::trim).collect();
+        let m: Vec<_> = media[1].split_whitespace().collect();
+        if m.len() != 4
+            || m[0] != "m=application"
+            || m[1] == "0"
+            || !m[1].parse::<u16>().is_ok_and(|p| p > 0)
+            || m[2] != "UDP/DTLS/SCTP"
+            || m[3] != "webrtc-datachannel"
+            || !lines.contains(&"a=rtcp-mux")
+        {
+            return Err("CONTROL_SCTP_MEDIA".into());
+        }
+        let mids: Vec<_> = lines
+            .iter()
+            .filter_map(|s| s.strip_prefix("a=mid:"))
+            .collect();
+        let bundle: Vec<_> = lines
+            .iter()
+            .filter_map(|s| s.strip_prefix("a=group:BUNDLE "))
+            .collect();
+        if mids.len() != 2
+            || mids[0] == mids[1]
+            || mids.iter().any(|m| m.is_empty() || m.len() > 32)
+            || bundle.len() != 1
+            || bundle[0].split_whitespace().collect::<Vec<_>>() != mids
+        {
+            return Err("CONTROL_SINGLE_BUNDLE_REQUIRED".into());
+        }
+        let ports: Vec<_> = app_lines
+            .iter()
+            .filter_map(|s| s.strip_prefix("a=sctp-port:"))
+            .collect();
+        let sizes: Vec<_> = app_lines
+            .iter()
+            .filter_map(|s| s.strip_prefix("a=max-message-size:"))
+            .collect();
+        if ports.len() != 1
+            || !ports[0].parse::<u16>().is_ok_and(|p| p > 0)
+            || sizes.len() != 1
+            || !sizes[0]
+                .parse::<u32>()
+                .is_ok_and(|s| (1..=16 * 1024 * 1024).contains(&s))
+            || lines.iter().any(|s| s.starts_with("a=sctpmap:"))
+        {
+            return Err("CONTROL_SCTP_PARAMETERS".into());
+        }
+        let session = sdp.split("m=").next().unwrap_or_default();
+        for section in sdp.split("m=").skip(1) {
+            if section
+                .lines()
+                .filter(|s| s.trim().starts_with("a=mid:"))
+                .count()
+                != 1
+            {
+                return Err("CONTROL_SINGLE_BUNDLE_REQUIRED".into());
+            }
+            if !session
+                .lines()
+                .chain(section.lines())
+                .any(|s| s.trim().starts_with("a=fingerprint:sha-256 "))
+            {
+                return Err("SHA256_DTLS_FINGERPRINT_REQUIRED".into());
+            }
+        }
+    }
     let mut candidates = Vec::new();
+    let mut application = false;
     for line in &lines {
+        if line.starts_with("m=") {
+            application = line.starts_with("m=application ");
+        }
         if line.starts_with("a=remote-candidates:")
             || (!answer && line.starts_with("a=ssrc:"))
-            || line.starts_with("a=sendrecv")
-            || (!answer && line.starts_with("a=sendonly"))
-            || (answer && line.starts_with("a=recvonly"))
+            || (!application && line.starts_with("a=sendrecv"))
+            || (!application && !answer && line.starts_with("a=sendonly"))
+            || (!application && answer && line.starts_with("a=recvonly"))
         {
             return Err("UNEXPECTED_REMOTE_MEDIA_OR_CANDIDATE".into());
         }
@@ -94,11 +186,17 @@ pub fn validate_description(
             return Err("SHA256_DTLS_FINGERPRINT_REQUIRED".into());
         }
     }
-    for line in &lines {
+    let video_lines: Vec<_> = lines
+        .iter()
+        .skip_while(|line| !line.starts_with("m=video "))
+        .take_while(|line| !line.starts_with("m=application "))
+        .copied()
+        .collect();
+    for line in &video_lines {
         if let Some(value) = line.strip_prefix("a=rtpmap:") {
             if let Some((pt, codec)) = value.split_once(' ') {
                 if codec.eq_ignore_ascii_case("H264/90000") {
-                    let fmtp = lines
+                    let fmtp = video_lines
                         .iter()
                         .find_map(|l| l.strip_prefix(&format!("a=fmtp:{pt} ")))
                         .unwrap_or_default();
@@ -125,6 +223,34 @@ pub fn validate_description(
 mod tests {
     use super::*;
     const OFFER: &str = "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=recvonly\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\n";
+    #[test]
+    fn control_policy_is_explicit_and_rejects_extra_media_missing_bundle_and_bad_sctp() {
+        use crate::scope::{LanScope, NetworkScope};
+        let scope = NetworkScope::Lan(
+            LanScope::new("10.0.0.2".parse().unwrap(), "10.0.0.3".parse().unwrap()).unwrap(),
+        );
+        let session = format!(
+            "v=0\r\na=group:BUNDLE 0 1\r\na=fingerprint:sha-256 {}\r\n",
+            ["AB"; 32].join(":")
+        );
+        let video = OFFER.strip_prefix("v=0\r\n").unwrap();
+        let good=format!("{session}{video}a=mid:0\r\na=rtcp-mux\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:1\r\na=sctp-port:5000\r\na=max-message-size:262144\r\n");
+        assert!(validate_control_description(&good, scope, false).is_ok());
+        assert!(validate_offer(&good).is_err());
+        assert!(validate_description(&good, scope, false).is_err());
+        assert!(validate_control_description(&good, NetworkScope::Loopback, false).is_err());
+        for bad in [
+            good.replace("BUNDLE 0 1", "BUNDLE 0"),
+            good.replace("a=mid:1", "a=mid:0"),
+            good.replace("a=sctp-port:5000", "a=sctp-port:0"),
+            good.replace("a=max-message-size:262144", "a=max-message-size:0"),
+            good.replace("UDP/DTLS/SCTP", "TCP/DTLS/SCTP"),
+            good.clone() + "m=audio 9 UDP/TLS/RTP/SAVPF 111\r\n",
+            good.clone() + "a=candidate:1 1 UDP 1 10.0.0.4 5000 typ host\r\n",
+        ] {
+            assert!(validate_control_description(&bad, scope, false).is_err());
+        }
+    }
     #[test]
     fn lan_sdp_requires_authenticated_dtls_identity_and_exact_peer() {
         use crate::scope::{LanScope, NetworkScope};

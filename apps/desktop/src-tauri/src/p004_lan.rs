@@ -47,6 +47,8 @@ impl LanState {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
+    control_sim: bool,
     role: String,
     consent: bool,
     local_ip: String,
@@ -57,6 +59,9 @@ pub struct Config {
 }
 impl Config {
     fn validate(&self) -> Result<LanScope, String> {
+        if self.control_sim && !cfg!(feature = "p005-control") {
+            return Err("CONTROL_FEATURE_DISABLED".into());
+        }
         if !self.consent {
             return Err("CONSENT_REQUIRED".into());
         }
@@ -75,6 +80,7 @@ impl Config {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Started {
+    control_session: Option<String>,
     session_id: String,
     pairing_code: Option<String>,
 }
@@ -145,7 +151,12 @@ pub async fn p004_lan_start(
     } else {
         "接收并播放来自"
     };
-    let message=format!("本次将{action} {}，视频最长 {} 秒。仅连接这一台指定电脑。\n\n发送端最多等待配对 120 秒；连接中断会停止采集。不会保存画面。\n\n是否同意本次双机视频实验？",scope.peer,config.seconds);
+    let control_text = if config.control_sim {
+        "\n同时允许 control.v1 通道传输模拟鼠标坐标与确认，仅记录统计，不执行实际键盘鼠标输入。"
+    } else {
+        ""
+    };
+    let message=format!("本次将{action} {}，视频最长 {} 秒。仅连接这一台指定电脑。{control_text}\n\n发送端最多等待配对 120 秒；连接中断会停止采集。不会保存画面。\n\n是否同意本次实验？",scope.peer,config.seconds);
     let allowed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
@@ -163,16 +174,29 @@ pub async fn p004_lan_start(
         return Err("WINDOW_CLOSING".into());
     }
     let (session, code) = if config.role == "sender" {
-        let (s, c) = LanSession::host(scope, config.seconds, config.port).await?;
+        let (s, c) = if config.control_sim {
+            LanSession::host_control(scope, config.seconds, config.port).await?
+        } else {
+            LanSession::host(scope, config.seconds, config.port).await?
+        };
         (s, Some(c))
     } else {
         (
-            LanSession::receiver(
-                scope,
-                config.seconds,
-                config.port,
-                config.pairing_code.as_deref().unwrap_or_default(),
-            )?,
+            if config.control_sim {
+                LanSession::receiver_control(
+                    scope,
+                    config.seconds,
+                    config.port,
+                    config.pairing_code.as_deref().unwrap_or_default(),
+                )?
+            } else {
+                LanSession::receiver(
+                    scope,
+                    config.seconds,
+                    config.port,
+                    config.pairing_code.as_deref().unwrap_or_default(),
+                )?
+            },
             None,
         )
     };
@@ -181,6 +205,7 @@ pub async fn p004_lan_start(
         id: id.clone(),
         session: session.clone(),
     });
+    let control_session = session.control_session();
     let report_id = id.clone();
     let receiver = config.role == "receiver";
     tauri::async_runtime::spawn(async move {
@@ -198,6 +223,7 @@ pub async fn p004_lan_start(
         }
     });
     Ok(Started {
+        control_session,
         session_id: id,
         pairing_code: code,
     })
@@ -253,9 +279,14 @@ pub fn p004_lan_save(
     state: tauri::State<'_, Arc<LanState>>,
     session_id: String,
     browser_closed: bool,
+    control: Option<hub_webrtc::control::BrowserStats>,
 ) -> Result<String, String> {
     crate::p004::origin(&window)?;
-    let status = find(&state, &session_id)?.stats();
+    let session = find(&state, &session_id)?;
+    if let Some(control) = control {
+        session.record_browser_control(control)?;
+    }
+    let status = session.stats();
     if !status.resources_released {
         return Err("LAN_CLEANUP_PENDING".into());
     }
@@ -271,10 +302,19 @@ fn write_report(
         .map_err(|_| "REPORT_DIRECTORY_UNAVAILABLE")?
         .parent()
         .ok_or("REPORT_DIRECTORY_UNAVAILABLE")?
-        .join("artifacts/private/p004b");
+        .join(if cfg!(feature = "p005-control") {
+            "artifacts/private/p005"
+        } else {
+            "artifacts/private/p004b"
+        });
     std::fs::create_dir_all(&dir).map_err(|_| "REPORT_DIRECTORY_FAILED")?;
     let name = format!("{id}-{event}.json");
-    let data=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":"p004b-v2","appVersion":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_SERIALIZATION_FAILED")?;
+    let tag = if cfg!(feature = "p005-control") {
+        "p005-v1"
+    } else {
+        "p004b-v2"
+    };
+    let data=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":tag,"appVersion":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_SERIALIZATION_FAILED")?;
     if data.len() > 128 * 1024 {
         return Err("REPORT_TOO_LARGE".into());
     }
@@ -287,7 +327,14 @@ fn write_report(
     }
     .map_err(|_| "REPORT_EXISTS_OR_WRITE_FAILED")?;
     file.write_all(&data).map_err(|_| "REPORT_WRITE_FAILED")?;
-    Ok(format!("artifacts/private/p004b/{name}"))
+    Ok(format!(
+        "artifacts/private/{}/{name}",
+        if cfg!(feature = "p005-control") {
+            "p005"
+        } else {
+            "p004b"
+        }
+    ))
 }
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
@@ -334,6 +381,7 @@ mod tests {
     #[test]
     fn native_lan_config_rejects_absent_consent_public_peer_and_unbounded_duration() {
         let mut config = Config {
+            control_sim: false,
             role: "sender".into(),
             consent: false,
             local_ip: "192.168.10.2".into(),

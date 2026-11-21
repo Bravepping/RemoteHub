@@ -1,26 +1,34 @@
 import { invoke } from '@tauri-apps/api/core';
 import {
+  ControlClient,
+  type BrowserControlStats,
+  type HostControlStats,
+} from './control';
+import {
   receiveStats,
   type NativeStats,
   type ReceiverSnapshot,
 } from './webrtc';
 
 export interface LanReceiver extends ReceiverSnapshot {
+  control?: BrowserControlStats;
   peerMatches: boolean | null;
   decoderImplementation: string | null;
 }
 export interface LanStatus {
+  browser_control?: BrowserControlStats | null;
   role: string;
   state: string;
   elapsed_ms: number;
   authenticated: boolean;
   messages_received: number;
-  source: NativeStats | null;
+  source: (NativeStats & { control?: HostControlStats | null }) | null;
   receiver_samples: LanReceiver[];
   resources_released: boolean;
   error: string | null;
 }
 export interface LanConfig {
+  controlSim?: boolean;
   role: 'sender' | 'receiver';
   consent: boolean;
   localIp: string;
@@ -63,6 +71,8 @@ export function selectedPeer(
 }
 
 export class LanProbe {
+  private control?: ControlClient;
+  private controlSession?: string;
   private id?: string;
   private pc?: RTCPeerConnection;
   private timer?: ReturnType<typeof setTimeout>;
@@ -91,9 +101,11 @@ export class LanProbe {
       const result = await invoke<{
         sessionId: string;
         pairingCode: string | null;
+        controlSession?: string | null;
       }>('p004_lan_start', { config });
       config.pairingCode = undefined;
       this.id = result.sessionId;
+      this.controlSession = result.controlSession ?? undefined;
       if (this.stopped) {
         await invoke('p004_lan_stop', { sessionId: this.id });
         return;
@@ -114,6 +126,13 @@ export class LanProbe {
       bundlePolicy: 'max-bundle',
     });
     this.pc = pc;
+    if (config.controlSim) {
+      if (!this.controlSession) throw new Error('CONTROL_CONTEXT_MISSING');
+      this.control = new ControlClient(pc, this.controlSession, (code) => {
+        this.failed(code);
+        void this.stop();
+      });
+    }
     pc.ontrack = (event) => {
       if (this.stopped) return;
       this.video.srcObject = event.streams[0] ?? new MediaStream([event.track]);
@@ -188,7 +207,12 @@ export class LanProbe {
     )
       this.firstFrame = data.elapsedMs;
     data.firstFrameMs = this.firstFrame;
-    return { ...data, peerMatches, decoderImplementation };
+    return {
+      ...data,
+      peerMatches,
+      decoderImplementation,
+      ...(this.control ? { control: this.control.snapshot() } : {}),
+    };
   }
   private async poll() {
     if (this.stopped || !this.id) return;
@@ -214,6 +238,10 @@ export class LanProbe {
       } else receiver = status.receiver_samples.at(-1);
       const playing =
         (receiver?.framesDecoded ?? 0) > 0 && (receiver?.videoWidth ?? 0) > 0;
+      if (!status.resources_released)
+        this.control?.beginBatch(
+          playing && receiver?.peerMatches === true && !this.video.paused,
+        );
       this.update(
         playing && !status.resources_released ? 'playing' : status.state,
         status,
@@ -242,6 +270,7 @@ export class LanProbe {
   private async finish() {
     this.update('stopping');
     try {
+      await this.control?.close();
       if (this.id) await invoke('p004_lan_stop', { sessionId: this.id });
       const tracks = this.pc?.getReceivers().map((r) => r.track) ?? [];
       tracks.forEach((t) => t.stop());
@@ -258,6 +287,7 @@ export class LanProbe {
         const path = await invoke<string>('p004_lan_save', {
           sessionId: this.id,
           browserClosed: closed,
+          ...(this.control ? { control: this.control.snapshot() } : {}),
         });
         this.saved(path);
         this.update(
@@ -270,6 +300,7 @@ export class LanProbe {
       this.failed(String(error));
       this.update('failed');
     } finally {
+      await this.control?.close();
       this.pc?.getReceivers().forEach((r) => r.track.stop());
       this.pc?.close();
       this.pc = undefined;

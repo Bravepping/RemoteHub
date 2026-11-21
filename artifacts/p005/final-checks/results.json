@@ -1,0 +1,42 @@
+[
+  {
+    "command": "pnpm lint",
+    "exitCode": 0
+  },
+  {
+    "command": "pnpm typecheck",
+    "exitCode": 0
+  },
+  {
+    "command": "pnpm test",
+    "exitCode": 0
+  },
+  {
+    "command": "pnpm build",
+    "exitCode": 0
+  },
+  {
+    "command": "cargo fmt --all -- --check",
+    "exitCode": 0
+  },
+  {
+    "command": "cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings",
+    "exitCode": 0
+  },
+  {
+    "command": "cargo test --workspace --all-features --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "command": "pnpm test:e2e",
+    "exitCode": 0
+  },
+  {
+    "command": "cargo check -p remotehub-desktop --features p004-probe --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "command": "cargo check -p remotehub-desktop --features p004-lan --locked --offline",
+    "exitCode": 0
+  }
+]

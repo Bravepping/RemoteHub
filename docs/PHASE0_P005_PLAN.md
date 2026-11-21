@@ -1,5 +1,7 @@
 # P0-05 执行计划
 
+执行结果：步骤1–6的代码与真实证据已完成，双机两轮视频+100事件和四种清理通过；最终Git/归档标识见交付BUILD_INFO。P005完成后停止，不进入P006/P1。
+
 1. 已fetch核对origin/main=b914942，工作树干净；读取AGENTS/TASKS/设计及P004b报告。先写ADR0005/CONTROL_V1契约并提交，不改变现有成果。
 2. 纯协议与权限/seq/rate/size测试，SDP新增显式video+application策略。出口：旧video-only/P004a继续拒绝DataChannel，P005负例全拒绝。
 3. Session复用同一PC增加受控DataChannel事件任务；LanSession显式P005认证信封/权限上下文，Tauri原生确认+feature及统计。出口：真实本机SCTP集成正常100条及非法/重放/越权/超限/停止验证，不采集桌面。

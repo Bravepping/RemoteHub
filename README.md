@@ -1,6 +1,6 @@
 # RemoteHub · Phase 0 技术验证
 
-这是已生成并在本机编译测试的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。同机视频与默认关闭的指定局域网双机实验均已实测。DataChannel、正式配对/服务端与 TURN 尚未完成，整个 Phase 0 尚未通过。
+这是已生成并在本机编译测试的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。同机/双机视频及同一PC上的真实DataChannel模拟控制已实测。正式输入、持久设备身份/服务端与 TURN 尚未完成，整个 Phase 0 尚未通过。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 
@@ -27,6 +27,14 @@ AMD 驱动实际 SPS 标识为 `42041f`，其中不适用约束位按 H.264 解�
 显式构建 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p004b.ps1 -BuildOnly`，生成的优化程序支持发送/接收两个角色。每轮两端原生确认、一次性码认证，原生TCP/UDP仅允许指定对端，连接中断或最长30秒后停止；统计保存到程序目录 `artifacts/private/p004b`。普通构建和 P004a 的网络范围不变。
 
 操作与限定防火墙设置见 [双机操作说明](docs/P004B_RUNBOOK.md)，范围/兼容性见 ADR0004。首轮RTCP候选校验错误已修复；v2真实双机30秒900帧全部接收/解码/呈现，1280×720、丢包0，主动停止/关窗/拔线回收通过。详见 [双机测试报告](docs/PHASE0_P004B_TEST_REPORT.md)。本轮不保存画面，基线要求的录屏未留存，P004父项仍保留证据差异。
+
+## P0-05 模拟控制 DataChannel
+
+显式构建 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p005.ps1 -BuildOnly`，生成P005实验版。WebView2控制端在现有视频PeerConnection创建可靠有序control.v1，Rust被控端真实接收归一化模拟坐标并经通道返回ACK；不调用Windows输入API。
+
+两台真实Windows10有线PC，两轮30秒视频+100模拟事件，发送/Rust接收/ACK写入/B确认全为100、序号连续、异常0，720p视频同时正常播放。两端主动停止、接收端关窗/拔线清理通过。43 Rust/11前端/2Edge及受限SDP/权限/大小/限流/重放负例通过；本机SCTP自动测试与双机实测分别记录。
+
+操作见 [P005双机步骤](docs/P005_RUNBOOK.md)，协议见 [control.v1](docs/CONTROL_V1.md)，实测与限制见 [P005测试报告](docs/PHASE0_P005_TEST_REPORT.md)。新feature默认关闭，旧P004a/04b保持视频-only范围。统计位于程序目录artifacts/private/p005；不记录坐标、完整SDP、配对码或画面。P005完成后停止扩展，等待审查，不进入P006或Phase1。
 
 ## P0-03 本机编码 probe
 
