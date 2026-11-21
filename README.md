@@ -59,11 +59,13 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 ## P0-06b 跨网络强制 TURN 实验
 
-已实现并通过60项Rust、16项前端、3项Edge及完整构建/lint/clippy，当前等待两台真实Windows电脑验收。沿用同一视频PC与control.v1；Rust和WebView2都核实实际relay/relay UDP路径，实际播放后才发送100条模拟事件，不执行键鼠输入。受认证WSS、应用专用CA、临时角色邀请、短票与配对HMAC都与旧本机/LAN范围隔离。
+宽带发送端与手机蜂窝热点接收端已真实验证：两轮30秒720p30视频各900帧全发送/接收/解码/呈现，丢包和冻结均0；5轮都为双方真实selected relay/relay UDP，同一视频PC上的100条control.v1发送/Rust接收/ACK/确认均100，序号连续、异常0，不执行实际输入。
 
-获授权的云端WSS和原G6 TURN已临时启动且不自启，用户放行TCP8443后公网TLS/邀请拒绝/双角色配对通过；本机两个独立TURN分配的双向载荷与释放也通过。这些不是双机视频结果。操作见 [P006b双机步骤](docs/P006B_RUNBOOK.md)，范围见 [ADR0007](docs/ADR/0007-p006b-cross-network-relay.md) 和 [协议](docs/P006B_CONTRACT.md)，已测与未测项见 [P006b报告](docs/PHASE0_P006B_TEST_REPORT.md)。
+发送端停止、接收端关窗及热点断网分别在194/196/244帧提前回收。接收端单独主动停止有现场确认，但对应900帧记录不能独立证明提前停止，因此该专项不标PASS；也未证明每个PC关闭都会立即完成TURN Refresh(0)。这些限制在[完整报告](docs/PHASE0_P006B_TEST_REPORT.md)公开，P006b/P006完整验收仍保留doing，不推进P006c或Phase1。
 
-显式构建：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b.ps1 -BuildOnly`。新版双机私有实验包必须完整复制，exe旁的p006b-private.json只包含CA公证书及限时邀请，不包含TURN共享secret或TLS私钥；该文件不入Git。每轮双方亲自确认；P006b及P006父项未标done，不进入P006c或Phase1。
+60项Rust、16项前端、3项Edge及13组完整检查通过；Ubuntu隔离信令服务4测试和构建通过。结束后WSS/TURN已停止、保持disabled、实验socket清零。原基线26项服务仍运行，两个业务容器保持；新增观察到fwupd运行，未操作。源码不含实际节点地址、角色邀请、TURN共享secret或TLS私钥。
+
+操作见 [双机步骤](docs/P006B_RUNBOOK.md)，范围见 [ADR0007](docs/ADR/0007-p006b-cross-network-relay.md) 和 [协议](docs/P006B_CONTRACT.md)，真实统计位于artifacts/p006b/two-pc。复现自动检查：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b-checks.ps1`；显式构建：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b.ps1 -BuildOnly`。实验重新使用需要新的明确授权和私有限时配置，每轮双方亲自确认；验收归档不附带有效邀请。
 
 ## P0-03 本机编码 probe
 

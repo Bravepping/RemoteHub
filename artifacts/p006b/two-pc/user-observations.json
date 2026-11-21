@@ -1,0 +1,22 @@
+{
+  "source": "User statements in this chat, separate from program statistics",
+  "normalRound": {
+    "durationSeconds": 30,
+    "changingVideoObserved": true,
+    "relayPairCheckReported": true,
+    "sentAndAcknowledgedReported": [100, 100],
+    "pendingAndAnomaliesReported": [0, 0],
+    "errorOnEitherComputerReported": false
+  },
+  "cleanupStatement": {
+    "receiverStop": "user reported completed and later confirmed testing normal after targeted repeat request; no additional sender report found, corresponding initial 900-frame record does not independently prove early stop",
+    "senderStop": "user reported completed and resources released; chronological sender evidence round-03",
+    "receiverWindowClose": "user reported completed and resources released; chronological sender evidence round-04",
+    "receiverHotspotDisconnect": "user reported completed and resources released; chronological sender evidence round-05"
+  },
+  "limits": [
+    "Receiver local final/window-close files have not been collected",
+    "Sender-side browserClosed is not evidence of receiver WebView2 cleanup",
+    "No screen recording or actual input injection was performed"
+  ]
+}

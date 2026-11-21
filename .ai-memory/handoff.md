@@ -1,9 +1,10 @@
-# P0-06b 实现检查点（等待真实双机）
+# P0-06b 双机收尾检查点
 
-- 用户新授权P006b，已准备宽带发送端与手机蜂窝热点接收端，并明确允许启动同ECS服务。ADR/协议先提交6f694de；续接保留未提交实现，fetch远端main仍4507fa9。沿用既有视频/control同一PC，默认关闭p006-relay，未做P006c/输入/P1。
-- 已实现：hub-probe-wire、隔离Axum WSS服务、relay_client、Session显式relay runtime与实际selected pair守卫、Rust控制路径授权、Tauri本轮原生同意/清理/私有统计、Vue双端实验。邀请码/HMAC/大小/速率/序号/时限/房间/连接上限，旧scope和4秒gather保留。epoch跨秒签票已固定同一issued_at。
-- 已验证：13组公开脚本scripts/p006b-checks.ps1全PASS；60 Rust + 旧桌面3、16前端、3Edge；私有MF1仍ignored。Ubuntu专用隔离vendor构建和4测试通过。首次Linux fixture未等sender Waiting触发race，已修正并保留失败摘要；首次公网8443入站无包，用户自行放行后实际TLS/错误CA/邀请拒绝/双角色短票通过。本机两个真实TURN分配/双向载荷/释放通过，明确不是双机视频。实际云端证据artifacts/p006b/cloud，自动artifacts/p006b/automatic。
-- 服务器：remotehub-p006b与remotehub-turn-g6非root临时运行且disabled；本轮邀请到期后3秒临时timer自动停两服务，结束测试还需主动核查。私有客户端配置.tools/p006b/p006b-private.json，TURN共享secret/TLS私钥留云端；密码仅SSH内存，不能归档.tools/g6/private日志。后续真实双机需每轮由用户亲自确认，先30秒720p30+100事件，再两端停止/接收端关窗/热点断网，仍未执行，不填PASS。Git最终SHA/包待本轮提交。
+- 实现提交977f97fe3aac287283fa73da93cf60b9261e965b已推GitHub；源码/二进制本轮收尾不再修改。ADR先6f694de，基线4507fa9，沿用同一视频PC与control.v1，未做P006c/输入/P1。
+- 真实宽带+蜂窝热点双机5轮：两轮30秒各900帧完整发送/接收/解码/呈现，720p、lost0/freeze0；每轮真实双方relay/relay UDP、100条发送/接收/ACK/确认、1..101连续序号、异常0。三轮提前194/196/244帧，按用户给定顺序对应发送端停止/接收端关窗/热点断网，源/控制join回收。首个接收端停止尝试仍900帧；补测请求后用户称正常，无新增记录，只记现场确认，不标独立PASS。B本地final/window-close未收取，A browserClosed不冒充B证明。
+- 自动13组PASS：60 Rust+旧桌面3、16前端、3Edge；私有MF1 ignored。Ubuntu WSS4测试/build、公网TLS/错误CA/邀请拒绝与本机两分配双向TURN通过，和双机结果分开。artifacts/p006b/two-pc为脱敏实测/原报告SHA/用户观察；cloud/shutdown为收尾。
+- 北京时间2026-11-21 22:17:25已停remotehub-p006b与remotehub-turn-g6、均inactive/disabled/MainPID0；8443/3478/relay范围/实验进程socket均0，TURN运行目录回收，取消临时timer，SSH关闭。基线26服务仍运行，两个容器保持；另fwupd运行（未操作/原因未查），不称集合完全相同。停服务前尚1个relay范围socket，未归属每会话，逐PC即时Refresh(0)未证实。秘密仅云端受限/本机忽略目录；临时TURN票已从本机删除。
+- 状态：双机主链路及主要清理通过，P006b/P006完整验收doing（上述独立证据限制）；P004录屏差异保留，Phase0正式仍4/7。交付报告/脱敏证据，停止扩展等待审查。原私有实验包限时邀请不再用于在线实验；最终Git/归档SHA见BUILD_INFO。
 
 # P0-06a / G6 交付检查点
 
