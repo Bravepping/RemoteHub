@@ -1,0 +1,14 @@
+Native UI verification, 2026-11-21, Windows 10 x64.
+Binary: target/debug/remotehub-desktop.exe with custom-protocol feature.
+Entry: launched the compiled executable, no Vite server required.
+Observed title: RemoteHub · Phase 0
+Observed WebView2 document URL: http://tauri.localhost/
+Observed native IPC result: 桌面核心已就绪 · 远程访问关闭
+Observed runtime: windows / x86_64 · v0.1.0 · DXGI Desktop Duplication (probe on demand)
+Observed default capture checkbox: unchecked.
+Observed default capture button: disabled.
+Action: clicked 重新检测; real core returned the same runtime and ready state.
+Action: closed the main window; it disappeared from the returned window inventory.
+The local consent checkbox and capture button were not clicked in this native UI test.
+DXGI was tested independently through the real compiled capture-probe CLI; see capture-cli.txt.
+The native screenshot was visually inspected through the computer-use tool; it is present in the chat tool evidence, not included as a separate screenshot file.

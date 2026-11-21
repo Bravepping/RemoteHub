@@ -1,0 +1,16 @@
+/target/
+/node_modules/
+**/node_modules/
+**/dist/
+/.tools/
+/.pnpm-store/
+/artifacts/private/
+/artifacts/*.bgra
+/artifacts/*.bmp
+/artifacts/*.h264
+.env
+*.log
+**/test-results/
+**/playwright-report/
+**/src-tauri/gen/
+.ai-memory/*/

@@ -1,0 +1,4 @@
+RELEASE_STARTUP_SMOKE=PASS (process remained alive for 3 seconds)
+RELEASE_TEST_PROCESS_CLEANED=True
+Executable: target/release/remotehub-desktop.exe
+WindowStyle: Hidden, test-only process startup check; not a second UI test.

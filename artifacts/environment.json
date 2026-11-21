@@ -1,0 +1,52 @@
+{
+    "checked_at":  "2026-11-21T10:15:58.9257940+08:00",
+    "os":  {
+               "name":  "Windows 10 Pro",
+               "version":  "22H2",
+               "build":  "19045.6466"
+           },
+    "tools":  {
+                  "git":  "E:\\tools\\Git\\cmd\\git.exe",
+                  "rustc":  "C:\\Users\\Administrator\\Documents\\ChatGPT\\远程项目\\RemoteHub\\.tools\\cargo\\bin\\rustc.exe",
+                  "cargo":  "C:\\Users\\Administrator\\Documents\\ChatGPT\\远程项目\\RemoteHub\\.tools\\cargo\\bin\\cargo.exe",
+                  "node":  "C:\\Users\\Administrator\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\bin\\node.exe",
+                  "pnpm":  "C:\\Users\\Administrator\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\bin\\fallback\\pnpm.cmd",
+                  "cl":  "C:\\Users\\Administrator\\Documents\\ChatGPT\\远程项目\\RemoteHub\\.tools\\msvc\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe",
+                  "link":  "C:\\Users\\Administrator\\Documents\\ChatGPT\\远程项目\\RemoteHub\\.tools\\msvc\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe",
+                  "rc":  "C:\\Users\\Administrator\\Documents\\ChatGPT\\远程项目\\RemoteHub\\.tools\\msvc\\Windows Kits\\10\\bin\\10.0.26100.0\\x64\\rc.exe",
+                  "docker":  null
+              },
+    "versions":  {
+                     "git":  "git version 2.52.0.windows.1",
+                     "rustc":  "rustc 1.100.0 (0ef1bc386 2026-11-09)",
+                     "cargo":  "cargo 1.100.0 (3acc79c0c 2026-11-05)",
+                     "node":  "v24.22.3",
+                     "pnpm":  "11.25.0"
+                 },
+    "webview2":  [
+                     {
+                         "name":  "Microsoft Edge WebView2 Runtime",
+                         "pv":  "157.0.4341.60"
+                     }
+                 ],
+    "gpu_registry":  [
+                         {
+                             "DriverDesc":  "Zako Display Adapter",
+                             "DriverVersion":  "15.0.15.10"
+                         },
+                         {
+                             "DriverDesc":  "GameViewer Virtual Display Adapter",
+                             "DriverVersion":  "15.6.5.199"
+                         },
+                         {
+                             "DriverDesc":  "USB Mobile Monitor Virtual Display",
+                             "DriverVersion":  "2.0.0.1"
+                         },
+                         {
+                             "DriverDesc":  "AMD Radeon RX 6750 GRE 10GB",
+                             "DriverVersion":  "32.0.21045.16010"
+                         }
+                     ],
+    "native_build_prerequisites_detected":  true,
+    "note":  "Tool presence does not prove build or hardware success. GPU registry may include inactive adapters."
+}

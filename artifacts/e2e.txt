@@ -1,0 +1,10 @@
+$ pnpm test:e2e
+$ pnpm --filter @remotehub/desktop test:e2e
+$ node scripts/e2e.mjs
+
+Running 1 test using 1 worker
+ok 1 tests/preview.spec.ts:3:1 > browser preview does not impersonate a working desktop core (503ms)
+1 passed (1.4s)
+
+The page was opened in real Microsoft Edge. Desktop capture was disabled, the browser-preview error was visible, and refresh retained the disconnected state.
+Screenshot: artifacts/browser-preview.png

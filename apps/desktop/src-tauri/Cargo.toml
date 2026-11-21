@@ -1,0 +1,17 @@
+[package]
+name = "remotehub-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]
+
+[build-dependencies]
+tauri-build = { version = "=2.7.6", features = [] }
+
+[dependencies]
+tauri = { version = "=2.12.7", features = [] }
+serde.workspace = true
+hub-capture-win = { path = "../../../crates/hub-capture-win" }

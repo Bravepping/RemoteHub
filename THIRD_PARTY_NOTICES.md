@@ -1,0 +1,20 @@
+# 第三方依赖与来源
+
+本项目首轮使用官方包，无 Sunshine / Moonlight / EasyTier 源码或二进制。
+
+| 直接依赖 | 来源 | 声明许可 |
+|---|---|---|
+| Tauri / Tauri Build / API / CLI | https://github.com/tauri-apps/tauri | MIT OR Apache-2.0 |
+| windows-rs | https://github.com/microsoft/windows-rs | MIT OR Apache-2.0 |
+| serde / serde_json | https://github.com/serde-rs | MIT OR Apache-2.0 |
+| thiserror | https://github.com/dtolnay/thiserror | MIT OR Apache-2.0 |
+| Vue / Vue Test Utils / vue-tsc | https://github.com/vuejs | MIT |
+| Vite / Vitest | https://github.com/vitejs / https://github.com/vitest-dev | MIT |
+| Tailwind CSS | https://github.com/tailwindlabs/tailwindcss | MIT |
+| TypeScript | https://github.com/microsoft/TypeScript | Apache-2.0 |
+| Playwright | https://github.com/microsoft/playwright | Apache-2.0 |
+| jsdom / Prettier | https://github.com/jsdom/jsdom / https://github.com/prettier/prettier | MIT |
+
+精确版本由 Cargo.lock 和 pnpm-lock.yaml 固定。锁文件含全部传递依赖，分发前仍需按最终二进制和全部传递依赖生成完整 SBOM/许可附件；本文不是完整分发法律审查。H.264 使用尚未在本轮实现。
+
+开发工具不打包分发：Rust 官方工具链，Microsoft MSVC / Windows SDK；其自身适用对应许可。项目内临时准备工具脚本参考 https://gist.github.com/mmozeiko/7f3162ec2988e81e56d5c4e22cde9977 ，从 Microsoft 清单下载并逐文件 SHA-256 校验，仅用于本机 `.tools` 目录，排除于交付。此脚本不是产品运行依赖。
