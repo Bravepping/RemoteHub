@@ -1,9 +1,9 @@
-# P0-06a 准备检查点
+# P0-06a / G6 交付检查点
 
-- 已完成带证据：开工main=079275d且干净；ADR0006/ICE与rendezvous契约先提交3a8f67f。P006a implementation-ready：server-only短票据签发、隔离RelayOnly策略/socket、受限SDP与离线信令MAC、真实API诊断框架/显式操作者CLI、TS relay工厂、coturn模板/校验/渲染及Linux人工部署回退。17组最终检查达到预期：54 Rust/13前端/3Edge/3Python，default原生build与四feature独立check通过；私有MF1项ignored。source-audit证明533个既有锁包不变、issuer不进desktop、旧采集/编码/控制/入口diff为空、无输入API。没有新云或双机实测。
-- 相关文件：docs/PHASE0_P006A_TEST_REPORT.md、ADR0006/P006_ICE_CONTRACT/PHASE0_P006A_PLAN；crates/hub-turn-credentials；hub-webrtc ice_policy/relay_runtime/turn_probe/rendezvous_probe/signaling/bin；TS features/p006；deploy/coturn；scripts/p006a-checks.mjs；artifacts/p006a。默认关闭feature，无新Tauri命令/公网页面；默认CLI拒绝、占位配置在建PC前拒绝。最终Git SHA/交付包以会话与包内BUILD_INFO为准。
-- 未完成：G6真实云端Allocate/STUN/错误或过期凭据拒绝blocked：没有核实主机/系统/权限，也没有云登录/部署/测试明确授权，不SSH不探测不部署。G1–5/G7/G8完成仅implementation-ready；P006父项blocked，Phase0仍4/7，P004录屏差异保留。本轮停止等待审查，不进P006b/c/P1。获得目标资料和独立授权后才安排G6。
-- 风险/发现：0.21.1原生TURN仅UDP；coturn Wiki自述过时，模板未由目标包实际加载。REST票据可复用/无单票即时撤销/realm不在HMAC中，issuer错realm拒绝不代替coturn负例；临时信令非长期身份，WSS传输未实现。SDK/JS秘密副本不保证清零；CLI私有JSON短期且应及时销毁。Windows bash指定实际Python，避免Store别名。新增负例的unwrap_err要求Debug已改直接匹配，完整重跑通过；Node固定pnpm shim提示如实保留。
+- 已完成带证据：准备基线079275d、ADR先行3a8f67f、实现5e05c09。用户后续单独授权指定ECS的G6，开工fetch仍5e05c09干净；实际Ubuntu24.04/coturn4.6.1、非root专用unit与EIP映射，Windows原生两轮各1 relay候选/gather81和92ms/close成功，真实UDP11项全部通过（无/错/过期401、错realm437专用原因、五危险peer403），Refresh释放。P006a现infrastructure-verified。完整17组回归达预期，54 Rust/13前端/3Edge/3配置Python+4协议Python，私有MF1ignored。apps/crates/锁和实测CLI二进制与5e05c09不变。
+- 相关文件：docs/PHASE0_G6_TEST_REPORT/PLAN、历史P006a报告/ADR0006；scripts/g6_turn_wire.py及4项离线测试/RFC许可；deploy/coturn单元pidfile/userdb专用/run路径；artifacts/p006a/g6保留真实结果/首轮断言差异/本轮全回归/收尾摘要。服务器本次新增remotehub-turn-g6.service、/etc/remotehub-turn-g6和/opt/remotehub-turn-g6-tools，实际地址/秘密仅服务端私有或本地忽略目录，登录密码未保存。最终SHA/包以BUILD_INFO为准。
+- 未完成：P006父项仍待不同网络双机视频/control真实relay与pair证据，不能以Allocate代替；Phase0仍4/7、P004录屏差异不改。测试专用及默认coturn均inactive/disabled，短票本机文件已移除，运行时socket与/run目录回收；保留已安装包/受限配置，后续需另轮授权启动。既有26服务/2容器仍运行，INPUT/OUTPUT和归一化nft策略不变，没有改安全组/防火墙。完成交付后停等审查，不进P006b/c/P1。
+- 风险/发现：0.21.1原生TURN仅UDP；P006b/WSS/长期身份未实现，REST票据可复用且无单票即时撤销。G6第一次错realm返回437而断言期望401/441，保留首轮；核对coturn4.6.1源码Allocate分支确为437+专用原因，新增严格回归后真实重测11/11。nft原始hash因40处计数变化，去counter数值后结构完全相同。STUN/Allocate事务耗时不是ICE RTT；未建PC对端故pair/RTT/loss仍null。目标4.6.1 help已验证pidfile/userdb，单元不写受保护默认目录；其它目标仍须独立核对。
 
 ## P0-05 基线
 

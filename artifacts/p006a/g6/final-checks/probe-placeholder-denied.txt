@@ -1,0 +1,4 @@
+$ target/probe/turn-allocate-probe.exe --approved-target deploy/coturn/probe-input.json.example
+{"error":"PROBE_CONFIG_SCHEMA","probe_elapsed_ms":0,"round_trip_time":null,"selected_pair":null,"status":"failed"}
+
+EXIT=1

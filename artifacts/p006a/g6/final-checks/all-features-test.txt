@@ -1,0 +1,138 @@
+$ cargo test --workspace --all-features --locked --offline
+
+running 6 tests
+test tests::refuses_capture_before_native_api_without_consent ... ok
+test tests::bmp_rejects_oversized_and_incomplete_frames ... ok
+test tests::rejects_short_buffers_bad_stride_and_dimensions ... ok
+test tests::rejects_unbounded_capture ... ok
+test tests::removes_gpu_row_padding_without_mixing_rows ... ok
+test tests::bmp_is_top_down_bgra_and_never_overwrites ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 12 tests
+test color::tests::reference_black_white_and_red_vectors ... ok
+test lifecycle::tests::bounded_pacer_reuses_a_real_frame_for_short_stalls_and_reports_long_stalls ... ok
+test color::tests::resize_respects_stride_and_uv_order ... ok
+test h264::tests::avcc_configuration_retains_parameter_sets_and_rejects_truncation ... ok
+test h264::tests::rejects_empty_corrupt_and_truncated_nals ... ok
+test color::tests::rejects_truncation_odd_output_and_overflow ... ok
+test lifecycle::tests::consent_limits_repeated_start_stop_and_cleanup ... ok
+test lifecycle::tests::fractional_frame_clock_never_drifts_or_reorders ... ok
+test probe::tests::capture_access_lost_and_resize_failures_propagate_and_release_probe_lease ... ok
+test stream::tests::live_sink_failure_aborts_and_time_cannot_reorder ... ok
+test h264::tests::annex_b_and_avcc_have_identical_nals ... ok
+test mf::tests::no_mft_failure_releases_thread_com_runtime ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 4 tests
+test tests::rfc2202_known_hmac_vector_and_coturn_timestamp_username ... ok
+test tests::secret_validation_and_debug_are_redacted ... ok
+test tests::unauthenticated_unapproved_expired_revoked_and_cross_session_rejected ... ok
+test tests::ttl_clock_realm_replay_and_quota_bounds ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 30 tests
+test lan::tests::metrics_never_accept_an_unverified_playing_peer_or_extra_payload ... ok
+test ice_policy::tests::rejects_expiry_modes_unapproved_endpoint_tcp_tls_dns_and_private_relays ... ok
+test ice_policy::tests::real_native_config_uses_relay_policy_and_redacts_credentials ... ok
+test lan_wire::tests::mac_rejects_tamper_replay_reflection_and_wrong_code ... ok
+test lan_wire::tests::oversized_prefix_fails_before_allocation ... ok
+test lan::tests::stopped_receiver_cannot_be_signaled_or_keep_its_secret ... ok
+test control::tests::rejects_permissions_expiry_replay_coordinates_schema_size_and_direction ... ok
+test control::tests::hundred_simulated_events_have_contiguous_acks ... ok
+test rendezvous_probe::tests::authenticated_relay_sdp_and_replay_reflection_expiry_are_fail_closed ... ok
+test scope::tests::lan_never_defaults_to_a_public_wildcard_or_same_machine_address ... ok
+test session::tests::fourth_au_backpressure_is_an_explicit_failure ... ok
+test session::tests::stop_without_signal_is_idempotent_and_invalid_offer_creates_no_media ... ok
+test signaling::tests::control_policy_is_explicit_and_rejects_extra_media_missing_bundle_and_bad_sctp ... ok
+test signaling::tests::lan_sdp_requires_authenticated_dtls_identity_and_exact_peer ... ok
+test pinned_runtime::tests::socket_boundary_drops_off_peer_datagrams_and_denies_other_destinations ... ok
+test relay_runtime::tests::real_local_udp_enforces_server_port_and_revocation ... ok
+test signaling::tests::relay_sdp_is_separate_from_lan_and_rejects_scope_expiry_and_tamper ... ok
+test lan::tests::receiver_returns_the_actual_authenticated_answer_validation_error ... ok
+test video::tests::amd_reserved_constraint5_is_disclosed_and_never_rewrites_the_sps ... ok
+test video::tests::exact_clock_and_fua_payloads_preserve_access_unit ... ok
+test turn_probe::tests::real_library_build_close_without_gather_reports_no_fabricated_pair_or_rtt ... ok
+test signaling::tests::signaling_rejects_external_candidates_data_and_wrong_codec ... ok
+test rendezvous_probe::tests::authenticated_limits_and_context_are_enforced ... ok
+test control::tests::fixed_window_and_total_limits_are_enforced ... ok
+test lan::tests::off_peer_tcp_creates_no_source_and_cancel_releases_the_listener ... ok
+test session::tests::actual_sctp_rate_limit_and_closed_session_cannot_continue ... ok
+test session::tests::actual_sctp_rejects_wrong_session_oversized_and_malformed_messages ... ok
+test lan::tests::silent_control_peer_expires_lease_and_releases_without_capture ... ok
+test session::tests::actual_sctp_hundred_events_ping_and_protocol_rejections_without_screen_capture ... ok
+test session::tests::real_loopback_negotiation_timeout_closes_driver_without_starting_capture ... ok
+
+test result: ok. 30 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 8.06s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+test actual_mf_access_units_packetize_without_changing_sps ... ignored, requires explicit REMOTEHUB_MF_SAMPLE_DIR pointing to a private local MF sample
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 2 tests
+test p004_lan::tests::native_lan_config_rejects_absent_consent_public_peer_and_unbounded_duration ... ok
+test p004::tests::native_gate_rejects_missing_consent_concurrent_start_and_foreign_session ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.03s
+     Running unittests src\lib.rs (target\debug\build\hub-capture-win/34f6e724baf34430\out\hub_capture_win-34f6e724baf34430.exe)
+     Running unittests src\bin\capture-probe.rs (target\debug\build\hub-capture-win/5c1f88b2df3f51e9\out\capture_probe-5c1f88b2df3f51e9.exe)
+     Running unittests src\lib.rs (target\debug\build\hub-encode-win/00533ee770fd900f\out\hub_encode_win-00533ee770fd900f.exe)
+     Running unittests src\bin\encode-probe.rs (target\debug\build\hub-encode-win/8a0d8a207c0c5432\out\encode_probe-8a0d8a207c0c5432.exe)
+     Running unittests src\lib.rs (target\debug\build\hub-turn-credentials/2d883042bbb717a8\out\hub_turn_credentials-2d883042bbb717a8.exe)
+     Running unittests src\lib.rs (target\debug\build\hub-webrtc/c768f834601612d0\out\hub_webrtc-c768f834601612d0.exe)
+     Running unittests src\bin\turn-allocate-probe.rs (target\debug\build\hub-webrtc/151dfe064ffc7d0e\out\turn_allocate_probe-151dfe064ffc7d0e.exe)
+     Running tests\real_mf_packetization.rs (target\debug\build\hub-webrtc/928b8240a16c4e59\out\real_mf_packetization-928b8240a16c4e59.exe)
+     Running unittests src\main.rs (target\debug\build\remotehub-desktop/1f706ea0f6bab7f1\out\remotehub_desktop-1f706ea0f6bab7f1.exe)
+   Doc-tests hub_capture_win
+   Doc-tests hub_encode_win
+   Doc-tests hub_turn_credentials
+   Doc-tests hub_webrtc
+
+EXIT=0

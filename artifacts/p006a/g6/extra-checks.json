@@ -1,0 +1,14 @@
+[
+  {
+    "name": "wire-offline-tests",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "wire-default-denied",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  }
+]

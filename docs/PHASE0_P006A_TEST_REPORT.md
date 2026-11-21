@@ -1,5 +1,7 @@
 # P0-06a TURN/ICE 准备测试报告
 
+后续记录：以下为5e05c09准备交付时的历史结果；用户之后提供目标并另行授权，G6已真实通过，当前状态升为infrastructure-verified，见[独立G6实测报告](PHASE0_G6_TEST_REPORT.md)。不将后续实测倒填到历史离线结果。
+
 2026-11-21，状态：**implementation-ready**。G1–G5/G7/G8完成，G6 **blocked / 未执行**。不是infrastructure-verified，不是P006父任务完成。没有访问阿里云主机、安装coturn、修改安全组/防火墙或进行公网端口探测，没有进入P006b/c、Phase1或实际输入开发。
 
 ## 基线与交付范围

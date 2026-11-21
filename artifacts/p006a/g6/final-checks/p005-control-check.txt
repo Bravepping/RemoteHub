@@ -1,0 +1,4 @@
+$ cargo check -p remotehub-desktop --features p005-control --locked --offline
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.33s
+
+EXIT=0

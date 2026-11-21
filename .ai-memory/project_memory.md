@@ -20,7 +20,7 @@ Rust fmt、TS strict、Vue/TS Prettier。模块依赖 Tauri -> hub-capture-win -
 
 ## Known Issues
 
-P0-06a遵循ADR0006，状态implementation-ready，G6真实云Allocate/STUN未授权未执行；不能标infrastructure-verified/P006 done，父项仍4/7。新增server-only issuer不进desktop，p006-turn-probe默认关闭且无公网桌面IPC/页面；旧scope/PinnedRuntime/媒体/控制代码不变。17组检查预期通过：54 Rust/13前端/3Edge/3Python。0.21.1原生TURN gather仅UDP，拒绝TCP/turns/DNS；DirectPreferred未启用。REST票据bearer可复用、无单票即时撤销，realm不在HMAC输入中；WSS传输和长期身份尚未实现，必须分开记录算法/离线/真实云证据。
+P0-06a遵循ADR0006，5e05c09先交implementation-ready；后用户单独授权G6真实云STUN/Allocate/凭据及peer拒绝通过，升infrastructure-verified，P006父项仍待独立双机relay验收/Phase0仍4/7。新server-only issuer不进desktop，feature默认关闭且无公网桌面入口；原媒体/控制/锁不变，17组回归+54 Rust/13前端/3Edge/7Python通过。0.21.1原生TURN仅UDP；WSS、长期身份/ACL、DirectPreferred未实施。coturn4.6.1错realm Allocate实际为437且原因明确，不能泛化437为通过；REST票仍可复用/无即时单票撤销。G6测试unit已停、不自启，26旧服务/2容器保持，nft去计数后策略相同。实际地址/秘密/原日志不进Git；区分事务耗时和未测ICE RTT。
 
 DataChannel::poll还会产生buffered事件，测试必须等OnMessage，不能把任意poll返回当ACK。PC销毁时OnClose计数可能为0，close_requested和task_joined单独记录，不补造事件。B最后回传样本早于本地终态，不能按发送900减893宣称丢帧。PowerShell合并stderr会包装NativeCommandError，Node spawn捕获退出码/UTF8输出更适合保存检查证据。
 

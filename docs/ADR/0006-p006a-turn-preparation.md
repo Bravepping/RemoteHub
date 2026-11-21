@@ -27,3 +27,5 @@ RelayOnly区别物理TURN服务器端点与逻辑对端relay候选：物理UDP�
 先离线测试向量、TTL/授权/重放/配置/SDP/秘密Debug负例；真实库配置与未连接diagnostic；旧P004a/P004b/P005回归、全构建/lint/clippy/test和配置验证。真实Allocate/STUN需要明确目标及授权，未测记blocked，不用模拟成功填G6。交付源码/文档/脱敏自动证据、Git SHA与校验包；完成后停止等待审查。
 
 来源：[coturn当前配置说明](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf)、[TURN REST草案及撤销限制](https://datatracker.ietf.org/doc/html/draft-uberti-behave-turn-rest-00)。coturn wiki自身声明过时，以目标安装包help/man和当前源核对；服务端版本尚未知。
+
+后续G6（同日、独立授权）：目标Ubuntu24.04/coturn4.6.1-1build4，真实Windows UDP STUN/Allocate与非法票据/危险peer拒绝通过，详见PHASE0_G6_TEST_REPORT。测试专用服务非root、不开机自启，收尾已停止；旧隔离策略和未实现WSS/长期身份的边界不变。P006a升级infrastructure-verified，P006父项仍待独立双机relay视频验收。

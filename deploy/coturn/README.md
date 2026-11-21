@@ -1,6 +1,6 @@
 # RemoteHub P0-06a coturn准备包
 
-状态：离线可审查准备，不是已部署服务。当前没有核实阿里云ECS地址、发行版、EIP映射、域名/证书、已有服务或SSH/安全组权限；没有执行任何云命令。只有明确确认目标和授权后，才允许按此runbook操作。初始版本支持TURN UDP；原生webrtc0.21.1源码跳过TURN TCP/TLS，即便服务器开端口也不能声称客户端支持。P006父项、双机relay与自动回退均未完成。
+状态更新（2026-11-21）：用户另轮明确指定ECS并授权G6，已完成Ubuntu24.04/coturn4.6.1-1build4真实STUN/Allocate及凭据/危险peer拒绝验证，P006a达到infrastructure-verified；详见[云端报告](../../docs/PHASE0_G6_TEST_REPORT.md)。本次独立服务已停止且不开机自启，保留受限服务端配置；默认包服务同样inactive/disabled。实际地址、登录凭据和临时票据不在本包。以下通用runbook用于后续独立授权的部署，不因历史G6而授权其他目标或改动。原生webrtc0.21.1仅TURN UDP，P006父项、双机relay与自动回退仍未完成。
 
 ## 文件与离线检查
 
@@ -27,7 +27,7 @@
 
 1. 通过官方仓库安装coturn（如`apt-get install coturn`），记录安装版本与系统默认自动启动行为；若默认服务可能自启并占3478，先规划批准后的受控停用，避免在受限模板安装前短暂暴露默认服务。不盲目开启发行版默认unit。
 2. 为本次实验产生新的独立realm，生成至少32字节强随机共享密钥（例如服务端`openssl rand -hex 32`），只写本机0600私有env/密钥存储。不要将输出留在终端录屏、shell历史、仓库、客户端或消息中。issuer的REMOTEHUB_TURN_SHARED_SECRET与coturn配置使用同一秘密；本模块不带HTTP接口。
-3. 用render.py创建新的私有配置并离线校验。核实实际服务账户（示例turnserver）与/usr/bin/turnserver路径。专用目录可采用root:服务组 0750，配置root:服务组 0640供非root服务读取，env保持root 0600；不能world-readable。模板默认丢弃流量日志，禁止verbose/CLI/username标签。
+3. 用render.py创建新的私有配置并离线校验。核实实际服务账户（示例turnserver）与/usr/bin/turnserver路径。专用目录可采用root:服务组 0750，配置root:服务组 0640供非root服务读取，env保持root 0600；不能world-readable。模板默认丢弃流量日志，禁止verbose/CLI/username标签。单元示例将pidfile和临时SQLite放入其专用/run目录，避免非root/ProtectSystem=strict下写入系统默认路径；已在目标4.6.1核对help并运行，其他版本仍需核对。
 4. 审查systemd单元后安装为新remotehub-coturn.service，并`systemd-analyze verify`。3478为非特权端口，不需root常驻或额外capability；若目标包需写数据库/运行目录，只允许核实的专用路径，不放宽ProtectSystem到全局可写。
 5. 经批准协调阿里云安全组与Linux防火墙：初测仅3478/udp，以及49160–49259/udp中继，限定已知测试来源如环境允许。回程UDP/conntrack策略也需核对。不要关防火墙、不要放开全部端口；5349/tcp和3478/tcp当前无需开放。TURN TLS以后必须实际证书/主机名验证与支持该传输的客户端，单开端口无效。
 6. 仅批准的实例上启动新unit并核实实际监听/非root UID/资源限制。不要启用开机自启或无人值守作为本轮默认行为。模板是草案，只有目标coturn实际启动和功能负例通过才算运行配置验证。
@@ -38,7 +38,7 @@
 
 默认日志/dev/null且no-stdout-log，避免IP/用户名流量记录无界增长。若排障确需日志，另经批准启用仅本次的私有文件、0600/0640与≤1MiB轮转/短保留，不打开verbose/原始凭据；分享前脱敏。保留服务active/版本/非敏感错误计数摘要，不将原IP日志上传Git。
 
-## 授权后的最小网络验证（G6，当前blocked）
+## 授权后的最小网络验证（G6已有实测，其他目标仍需授权）
 
 构建：`cargo build -p hub-webrtc --bin turn-allocate-probe --features p006-turn-probe --profile probe --locked`。默认或`--help`不访问网络。此工具无屏幕采集、无远端SDP、无视频轨或模拟控制事件，只触发真实库TURN gather/Allocate并关闭；最长gather10秒+cleanup3秒。不是P006b视频验收。
 
@@ -52,4 +52,6 @@ realm限制：REST密码HMAC本身不含realm，原生库按服务器challenge�
 
 停止并禁用本次专用unit（仅限本次实际创建的单元），撤销本次新建的安全组/防火墙精确规则ID，恢复本次明确变更过的备份，不清空全机规则或其他服务。撤销issuer会话批准、销毁短期私有JSON与env的访问权限并轮换本次secret；已签发REST票据不能瞬间单票吊销，观察短期TTL/allocations退出。移除专用服务文件前核对路径及所属，保留脱敏审计摘要。默认构建关闭p006-turn-probe即可回到原客户端；没有修改原LAN地址策略。
 
-官方依据：[当前coturn配置](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf)、[TURN REST草案](https://datatracker.ietf.org/doc/html/draft-uberti-behave-turn-rest-00)。目标包版本与配置实际加载、ECS映射、安全组及G6输出尚未取得，本轮不能标infrastructure-verified，更不能P006 done。
+补充G6协议工具：`python scripts/g6_turn_wire.py --approved-target PRIVATE_JSON`，仅用于明确批准的端点。JSON为{target:数字公网IPv4,local:本机物理RFC1918接口,valid:{username,credential},expired:{username,credential}}，目标端口固定3478；过期票只用于真实负例，必须由服务端签发，文件不含共享secret。工具会实际发送STUN/Allocate/CreatePermission/Refresh，校验正例响应完整性、拒绝危险peer并释放分配；不会向危险peer地址实际发包。RFC5769离线向量与解析/篡改/特定realm错误负例在`python -m unittest discover -s scripts -p test_g6_turn_wire.py -v`。不要把短期JSON或原数据包上传Git。
+
+官方依据：[当前coturn配置](https://github.com/coturn/coturn/blob/master/examples/etc/turnserver.conf)、[TURN REST草案](https://datatracker.ietf.org/doc/html/draft-uberti-behave-turn-rest-00)。G6实际只验证当前获授权实例的配置/UDP3478/Allocate及拒绝行为，没有安全组控制台权限/变更，也没测试relay端口的双机视频路径；P006父项不能done。

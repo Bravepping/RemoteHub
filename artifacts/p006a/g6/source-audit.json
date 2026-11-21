@@ -1,0 +1,10 @@
+{
+  "baseline": "5e05c090993b209a63836ee8bad2247df8eb69c9",
+  "appsCratesAndLocksDiffEmpty": true,
+  "originalSdkAndNetworkGuardsUnchanged": true,
+  "testedAllocateBinarySha256": "059beaa6516bb5d0e02cce4369331edbac4a1bb2dd03212b48acb9f16f1d4b14",
+  "noNewPrivateTargetInEvidence": true,
+  "actualInputInjectionAdded": false,
+  "cloudVideoTestPerformed": false,
+  "remoteDesktopEntryAdded": false
+}

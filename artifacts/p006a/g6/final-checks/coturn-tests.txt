@@ -1,0 +1,11 @@
+$ E:\ides\Python\python.exe -m unittest discover -s deploy/coturn -p test_config.py -v
+test_blank_env_template_cannot_be_deployed (test_config.ConfigTests.test_blank_env_template_cannot_be_deployed) ... ok
+test_error_cli_never_echoes_secret_payload (test_config.ConfigTests.test_error_cli_never_echoes_secret_payload) ... ok
+test_render_no_overwrite_secret_safe_errors_and_policy_mutations (test_config.ConfigTests.test_render_no_overwrite_secret_safe_errors_and_policy_mutations) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.060s
+
+OK
+
+EXIT=0

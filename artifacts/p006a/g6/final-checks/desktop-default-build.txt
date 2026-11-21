@@ -1,0 +1,4 @@
+$ cargo build -p remotehub-desktop --locked --offline
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+
+EXIT=0

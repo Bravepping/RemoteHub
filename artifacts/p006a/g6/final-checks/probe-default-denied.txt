@@ -1,0 +1,4 @@
+$ target/probe/turn-allocate-probe.exe
+PROBE_EXPLICIT_TARGET_APPROVAL_REQUIRED; use --help
+
+EXIT=2

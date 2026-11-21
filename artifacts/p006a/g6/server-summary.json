@@ -1,0 +1,41 @@
+{
+  "time": 1795258004,
+  "packageVersion": "4.6.1-1build4",
+  "beforeStop": {
+    "turnListenerSockets": 2,
+    "relaySockets": 0,
+    "turnProcessUdpSocketCount": 2,
+    "all3478Sockets": 2,
+    "allRelayRangeSockets": 0
+  },
+  "runtimeState": "MemoryCurrent=5459968\nTasksCurrent=7\nCapabilityBoundingSet=\nUser=turnserver\nGroup=turnserver\nProtectSystem=strict\nNoNewPrivileges=yes\nActiveState=active\nSubState=running\nUnitFileState=disabled\n",
+  "journalLineCount": 2,
+  "journalUnknownOptionOrConfigError": false,
+  "afterStop": {
+    "turnListenerSockets": 0,
+    "relaySockets": 0,
+    "turnProcessUdpSocketCount": 0,
+    "all3478Sockets": 0,
+    "allRelayRangeSockets": 0
+  },
+  "finalDedicatedState": "ActiveState=inactive\nSubState=dead\nUnitFileState=disabled\n",
+  "finalDefaultState": "ActiveState=inactive\nUnitFileState=disabled\n",
+  "inputRulesSha256": "7dfdd29b767706ff292a91100f86dfadf457f7caaae61ba2502790994c7c334d",
+  "outputRulesSha256": "b2001b2845045ae6e0abd69645998d16e95d02da8126e31363c702f03fe34b24",
+  "nftRulesSha256": "415137afaa2a1f05c3072387a908034deb3d4cdd887769d254211e88940b7f8f",
+  "configMode": "0o640",
+  "secretEnvMode": "0o600",
+  "runtimeDirectoryRemoved": true,
+  "cloudFirewallOrSecurityGroupMutatedByThisTask": false,
+  "inputRulesUnchanged": true,
+  "outputRulesUnchanged": true,
+  "nftRulesUnchanged": false,
+  "businessContainerListingUnchanged": true,
+  "originalRunningServicesStillRunning": true,
+  "newRunningServices": [],
+  "nftPolicyWithoutCountersSha256": "10de25448417cc3f03ddb39f4b323f4e53eab77fd3001e2527f3f11aaf549f34",
+  "counterFieldsIgnored": 40,
+  "dedicatedServiceActive": false,
+  "dedicatedServiceEnabled": false,
+  "nftPolicyUnchangedIgnoringTrafficCounters": true
+}

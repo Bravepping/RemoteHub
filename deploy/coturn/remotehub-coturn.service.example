@@ -9,7 +9,7 @@ Wants=network-online.target
 Type=simple
 User=turnserver
 Group=turnserver
-ExecStart=/usr/bin/turnserver -c /etc/remotehub-turn/turnserver.conf
+ExecStart=/usr/bin/turnserver -c /etc/remotehub-turn/turnserver.conf --pidfile=/run/remotehub-turn/turnserver.pid --userdb=/run/remotehub-turn/turndb
 NoNewPrivileges=true
 CapabilityBoundingSet=
 PrivateTmp=true

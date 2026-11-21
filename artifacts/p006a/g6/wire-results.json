@@ -1,0 +1,84 @@
+{
+  "transport": "actual UDP STUN/TURN",
+  "cases": [
+    {
+      "case": "stun_binding",
+      "passed": true,
+      "responseType": "0x101",
+      "requestElapsedMs": 45.255
+    },
+    {
+      "case": "anonymous_allocate",
+      "passed": true,
+      "serverErrorCode": 401,
+      "requestElapsedMs": 42.245
+    },
+    {
+      "case": "deny_peer_loopback",
+      "passed": true,
+      "serverErrorCode": 403,
+      "requestElapsedMs": 35.693
+    },
+    {
+      "case": "deny_peer_private",
+      "passed": true,
+      "serverErrorCode": 403,
+      "requestElapsedMs": 36.196
+    },
+    {
+      "case": "deny_peer_metadata_link_local",
+      "passed": true,
+      "serverErrorCode": 403,
+      "requestElapsedMs": 35.747
+    },
+    {
+      "case": "deny_peer_cgnat",
+      "passed": true,
+      "serverErrorCode": 403,
+      "requestElapsedMs": 35.67
+    },
+    {
+      "case": "deny_peer_multicast",
+      "passed": true,
+      "serverErrorCode": 403,
+      "requestElapsedMs": 35.489
+    },
+    {
+      "case": "correct",
+      "responseType": "0x103",
+      "serverErrorCode": null,
+      "requestElapsedMs": 36.418,
+      "responseIntegrityVerified": true,
+      "relayMatchesApprovedRange": true,
+      "passed": true
+    },
+    {
+      "case": "wrong_password",
+      "responseType": "0x113",
+      "serverErrorCode": 401,
+      "requestElapsedMs": 33.764,
+      "passed": true
+    },
+    {
+      "case": "expired",
+      "responseType": "0x113",
+      "serverErrorCode": 401,
+      "requestElapsedMs": 30.723,
+      "passed": true
+    },
+    {
+      "case": "wrong_realm",
+      "responseType": "0x113",
+      "serverErrorCode": 437,
+      "requestElapsedMs": 44.136,
+      "passed": true,
+      "realmMismatchReasonVerified": true
+    }
+  ],
+  "allocationsReleased": true,
+  "selectedPair": null,
+  "iceRtt": null,
+  "packetsLost": null,
+  "sharedSecretPresent": false,
+  "passed": true
+}

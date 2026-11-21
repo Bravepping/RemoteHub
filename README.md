@@ -38,7 +38,7 @@ AMD 驱动实际 SPS 标识为 `42041f`，其中不适用约束位按 H.264 解�
 
 ## P0-06a TURN/ICE 准备
 
-状态为 **implementation-ready**：新增隔离的RelayOnly策略、server-only短期TURN票据模块、离线认证信令验证器、安全coturn模板与手工部署/回滚说明，以及默认关闭的Allocate检查CLI。没有部署阿里云、没有开放公网桌面会话，也没有进行真实云Allocate/STUN或双机relay验收；G6仍blocked，P006父项未完成。
+状态为 **infrastructure-verified**：准备实现之后，用户单独授权的G6真实云STUN/Allocate、缺失/错误/过期票据、错误realm及危险peer拒绝已通过；[云端报告](docs/PHASE0_G6_TEST_REPORT.md)记录两次真实原生gather与11项协议检查。目标独立TURN测试服务已停止且不开机自启，保留受限配置，原业务服务及防火墙策略保持。公网桌面会话/WSS传输和双机relay视频未实现或未验收，P006父项仍未完成。
 
 原生webrtc/rtc仍锁定0.21.1，其当前TURN实现只支持UDP。本轮严格拒绝TCP/turns/DNS和DirectPreferred执行，不以配置字符串冒充实际relay。旧Loopback/LAN PinnedRuntime、视频、control.v1及原生授权入口不变。TURN共享密钥只属于独立服务端模块，不链接进桌面应用；REST票据在有效期内可复用且不能单票即时撤销，完整身份/ACL/WSS服务尚未实现。
 
@@ -55,7 +55,7 @@ $env:REMOTEHUB_BASH=(Get-Command bash).Source
 node scripts/p006a-checks.mjs
 ```
 
-CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、默认拒绝和无法解析的占位模板，不连接公网。普通启动无采集或网络探测；真实目标的`--approved-target PRIVATE_JSON`只能在另获端点测试授权后使用。没有给默认客户端增加新公网页面或IPC。本轮完成准备交付后停止，等待审查，不进入P006b/c或Phase1。
+CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、默认拒绝和无法解析的占位模板，不连接公网。普通启动无采集或网络探测；真实目标的`--approved-target PRIVATE_JSON`只能在获该端点测试授权后使用。没有给默认客户端增加新公网页面或IPC。本轮只追加已授权G6实测与辅助脚本，完成后停止，等待审查，不进入P006b/c或Phase1。
 
 ## P0-03 本机编码 probe
 

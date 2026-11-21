@@ -20,6 +20,7 @@
 | TypeScript | https://github.com/microsoft/TypeScript | Apache-2.0 |
 | Playwright | https://github.com/microsoft/playwright | Apache-2.0 |
 | jsdom / Prettier | https://github.com/jsdom/jsdom / https://github.com/prettier/prettier | MIT |
+| RFC5769 STUN测试向量（仅开发测试） | https://www.rfc-editor.org/rfc/rfc5769.html | IETF Trust Simplified BSD，附scripts/RFC5769_TEST_VECTOR_LICENSE.txt |
 
 精确版本由 Cargo.lock 和 pnpm-lock.yaml 固定。锁文件含全部传递依赖，分发前仍需按最终二进制和全部传递依赖生成完整 SBOM/许可附件；本文不是完整分发法律审查。P0-03 已通过系统 Media Foundation 编码 H.264，不随产品附带外部编码器；FFmpeg 只作为本机开发解码/封装验证工具，不作为客户端运行依赖打包。
 
