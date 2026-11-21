@@ -1,0 +1,8 @@
+0
+test integration_tests::real_wss_validates_tls_invitation_origin_roles_and_authenticated_frames ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+
+warning: workspace (manifest) generated 1 warning
+   Compiling hub-rendezvous-probe v0.1.0 (/opt/remotehub-p006b-build/vendored-source-v2/crates/hub-rendezvous-probe)
+    Finished `release` profile [optimized] target(s) in 11.80s

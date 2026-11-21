@@ -34,13 +34,13 @@ AMD 驱动实际 SPS 标识为 `42041f`，其中不适用约束位按 H.264 解�
 
 两台真实Windows10有线PC，两轮30秒视频+100模拟事件，发送/Rust接收/ACK写入/B确认全为100、序号连续、异常0，720p视频同时正常播放。两端主动停止、接收端关窗/拔线清理通过。43 Rust/11前端/2Edge及受限SDP/权限/大小/限流/重放负例通过；本机SCTP自动测试与双机实测分别记录。
 
-操作见 [P005双机步骤](docs/P005_RUNBOOK.md)，协议见 [control.v1](docs/CONTROL_V1.md)，实测与限制见 [P005测试报告](docs/PHASE0_P005_TEST_REPORT.md)。新feature默认关闭，旧P004a/04b保持视频-only范围。统计位于程序目录artifacts/private/p005；不记录坐标、完整SDP、配对码或画面。P005已获阶段性审查通过，本轮按新任务仅推进P006a。
+操作见 [P005双机步骤](docs/P005_RUNBOOK.md)，协议见 [control.v1](docs/CONTROL_V1.md)，实测与限制见 [P005测试报告](docs/PHASE0_P005_TEST_REPORT.md)。新feature默认关闭，旧P004a/04b保持视频-only范围。统计位于程序目录artifacts/private/p005；不记录坐标、完整SDP、配对码或画面。P005已获阶段性审查通过，后续TURN与跨网进展见下文。
 
 ## P0-06a TURN/ICE 准备
 
-状态为 **infrastructure-verified**：准备实现之后，用户单独授权的G6真实云STUN/Allocate、缺失/错误/过期票据、错误realm及危险peer拒绝已通过；[云端报告](docs/PHASE0_G6_TEST_REPORT.md)记录两次真实原生gather与11项协议检查。目标独立TURN测试服务已停止且不开机自启，保留受限配置，原业务服务及防火墙策略保持。公网桌面会话/WSS传输和双机relay视频未实现或未验收，P006父项仍未完成。
+状态为 **infrastructure-verified**：准备实现之后，用户单独授权的G6真实云STUN/Allocate、缺失/错误/过期票据、错误realm及危险peer拒绝已通过；[云端报告](docs/PHASE0_G6_TEST_REPORT.md)记录两次真实原生gather与11项协议检查。G6收尾时独立TURN测试服务已停止且不开机自启；后续P006b按新授权临时启动，保留受限配置，原业务服务及防火墙策略保持。双机relay视频仍待独立验收，P006父项未完成。
 
-原生webrtc/rtc仍锁定0.21.1，其当前TURN实现只支持UDP。本轮严格拒绝TCP/turns/DNS和DirectPreferred执行，不以配置字符串冒充实际relay。旧Loopback/LAN PinnedRuntime、视频、control.v1及原生授权入口不变。TURN共享密钥只属于独立服务端模块，不链接进桌面应用；REST票据在有效期内可复用且不能单票即时撤销，完整身份/ACL/WSS服务尚未实现。
+原生webrtc/rtc仍锁定0.21.1，其当前TURN实现只支持UDP。本轮严格拒绝TCP/turns/DNS和DirectPreferred执行，不以配置字符串冒充实际relay。旧Loopback/LAN PinnedRuntime、视频、control.v1及原生授权入口不变。TURN共享密钥只属于独立服务端模块，不链接进桌面应用；REST票据在有效期内可复用且不能单票即时撤销，正式持久身份/ACL尚未实现；P006b新增的临时WSS不等同正式身份服务。
 
 完整说明见 [ADR0006](docs/ADR/0006-p006a-turn-preparation.md)、[ICE与信令契约](docs/P006_ICE_CONTRACT.md)、[coturn操作说明](deploy/coturn/README.md)、[测试与验收矩阵](docs/PHASE0_P006A_TEST_REPORT.md)。54 Rust/13前端/3Edge/3Python通过；Edge仅检查真实relay属性，没有连接云端。
 
@@ -55,7 +55,15 @@ $env:REMOTEHUB_BASH=(Get-Command bash).Source
 node scripts/p006a-checks.mjs
 ```
 
-CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、默认拒绝和无法解析的占位模板，不连接公网。普通启动无采集或网络探测；真实目标的`--approved-target PRIVATE_JSON`只能在获该端点测试授权后使用。没有给默认客户端增加新公网页面或IPC。本轮只追加已授权G6实测与辅助脚本，完成后停止，等待审查，不进入P006b/c或Phase1。
+CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、默认拒绝和无法解析的占位模板，不连接公网。普通启动无采集或网络探测；真实目标的`--approved-target PRIVATE_JSON`只能在获该端点测试授权后使用。没有给默认客户端增加新公网页面或IPC。以上为G6历史交付范围，当前P006b进展单列下文。
+
+## P0-06b 跨网络强制 TURN 实验
+
+已实现并通过60项Rust、16项前端、3项Edge及完整构建/lint/clippy，当前等待两台真实Windows电脑验收。沿用同一视频PC与control.v1；Rust和WebView2都核实实际relay/relay UDP路径，实际播放后才发送100条模拟事件，不执行键鼠输入。受认证WSS、应用专用CA、临时角色邀请、短票与配对HMAC都与旧本机/LAN范围隔离。
+
+获授权的云端WSS和原G6 TURN已临时启动且不自启，用户放行TCP8443后公网TLS/邀请拒绝/双角色配对通过；本机两个独立TURN分配的双向载荷与释放也通过。这些不是双机视频结果。操作见 [P006b双机步骤](docs/P006B_RUNBOOK.md)，范围见 [ADR0007](docs/ADR/0007-p006b-cross-network-relay.md) 和 [协议](docs/P006B_CONTRACT.md)，已测与未测项见 [P006b报告](docs/PHASE0_P006B_TEST_REPORT.md)。
+
+显式构建：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b.ps1 -BuildOnly`。新版双机私有实验包必须完整复制，exe旁的p006b-private.json只包含CA公证书及限时邀请，不包含TURN共享secret或TLS私钥；该文件不入Git。每轮双方亲自确认；P006b及P006父项未标done，不进入P006c或Phase1。
 
 ## P0-03 本机编码 probe
 

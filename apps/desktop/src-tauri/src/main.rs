@@ -1,21 +1,30 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(feature = "p004-probe")]
+#[cfg(any(feature = "p004-probe", feature = "p006-relay"))]
+mod experiment_origin;
+#[cfg(all(feature = "p004-probe", not(feature = "p006-relay")))]
 mod p004;
-#[cfg(feature = "p004-lan")]
+#[cfg(all(feature = "p004-lan", not(feature = "p006-relay")))]
 mod p004_lan;
+#[cfg(feature = "p006-relay")]
+mod p006;
 
+#[cfg(not(feature = "p006-relay"))]
 use hub_capture_win::ProbeReport;
 use serde::Serialize;
+#[cfg(not(feature = "p006-relay"))]
 use std::{
     sync::atomic::{AtomicBool, Ordering},
     time::Duration,
 };
 
+#[cfg(not(feature = "p006-relay"))]
 #[derive(Default)]
 struct ProbeState(AtomicBool);
 
+#[cfg(not(feature = "p006-relay"))]
 struct ProbeLease<'a>(&'a AtomicBool);
+#[cfg(not(feature = "p006-relay"))]
 impl Drop for ProbeLease<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
@@ -32,6 +41,7 @@ struct RuntimeInfo {
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
+    p006_enabled: bool,
 }
 
 #[tauri::command]
@@ -45,9 +55,11 @@ fn get_runtime_info() -> RuntimeInfo {
         p004_enabled: cfg!(feature = "p004-probe"),
         p004_lan_enabled: cfg!(feature = "p004-lan"),
         p005_enabled: cfg!(feature = "p005-control"),
+        p006_enabled: cfg!(feature = "p006-relay"),
     }
 }
 
+#[cfg(not(feature = "p006-relay"))]
 #[tauri::command]
 async fn run_capture_probe(
     window: tauri::WebviewWindow,
@@ -91,7 +103,9 @@ async fn run_capture_probe(
 }
 
 fn main() {
-    let builder = tauri::Builder::default().manage(std::sync::Arc::new(ProbeState::default()));
+    let builder = tauri::Builder::default();
+    #[cfg(not(feature = "p006-relay"))]
+    let builder = builder.manage(std::sync::Arc::new(ProbeState::default()));
     #[cfg(not(feature = "p004-probe"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         get_runtime_info,
@@ -117,7 +131,7 @@ fn main() {
             p004::p004_save_report
         ])
         .on_window_event(p004::on_window_event);
-    #[cfg(feature = "p004-lan")]
+    #[cfg(all(feature = "p004-lan", not(feature = "p006-relay")))]
     let builder = builder
         .manage(std::sync::Arc::new(p004::P004State::default()))
         .manage(std::sync::Arc::new(p004_lan::LanState::default()))
@@ -149,6 +163,28 @@ fn main() {
             p004_lan::p004_lan_save
         ])
         .on_window_event(p004_lan::on_window_event);
+    #[cfg(feature = "p006-relay")]
+    let builder = builder
+        .manage(std::sync::Arc::new(p006::State::default()))
+        .setup(|app| {
+            use tauri::Manager;
+            if let Some(window) = app.get_webview_window("main") {
+                window.set_title("RemoteHub · P0-06b 跨网络 TURN 实验 v1")?;
+            }
+            Ok(())
+        })
+        .invoke_handler(tauri::generate_handler![
+            get_runtime_info,
+            p006::p006_interfaces,
+            p006::p006_start,
+            p006::p006_ready,
+            p006::p006_signal,
+            p006::p006_stats,
+            p006::p006_metrics,
+            p006::p006_stop,
+            p006::p006_save
+        ])
+        .on_window_event(p006::on_window_event);
     builder
         .run(tauri::generate_context!())
         .expect("RemoteHub desktop startup failed");

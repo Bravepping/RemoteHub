@@ -15,6 +15,14 @@ fn main() {
             "p004_lan_metrics",
             "p004_lan_stop",
             "p004_lan_save",
+            "p006_interfaces",
+            "p006_start",
+            "p006_ready",
+            "p006_signal",
+            "p006_stats",
+            "p006_metrics",
+            "p006_stop",
+            "p006_save",
         ]),
     ))
     .expect("RemoteHub build configuration failed");

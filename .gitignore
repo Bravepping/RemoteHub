@@ -15,4 +15,6 @@
 **/src-tauri/gen/
 .ai-memory/*/
 /deploy/coturn/private/
+/deploy/rendezvous-probe/private/
+**/p006b-private.json
 __pycache__/

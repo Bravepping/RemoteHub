@@ -9,6 +9,7 @@ export interface RuntimeInfo {
   p004_enabled?: boolean;
   p004_lan_enabled?: boolean;
   p005_enabled?: boolean;
+  p006_enabled?: boolean;
 }
 
 export interface ProbeReport {

@@ -16,16 +16,40 @@ use webrtc::data_channel::{DataChannel, DataChannelEvent};
 pub struct Endpoint {
     stop: StopToken,
     claimed: AtomicBool,
+    permitted: AtomicBool,
     protocol: Mutex<Protocol>,
     incoming: mpsc::Sender<Arc<dyn DataChannel>>,
     receiver: Mutex<Option<mpsc::Receiver<Arc<dyn DataChannel>>>>,
 }
 impl Endpoint {
     pub fn new(session: String, stop: StopToken, seconds: u32) -> Result<Arc<Self>, String> {
+        Self::with_permission(session, stop, seconds, true)
+    }
+    #[cfg(feature = "p006-relay")]
+    pub(crate) fn new_guarded(
+        session: String,
+        stop: StopToken,
+        seconds: u32,
+    ) -> Result<Arc<Self>, String> {
+        Self::with_permission(session, stop, seconds, false)
+    }
+    #[cfg(feature = "p006-relay")]
+    pub(crate) fn approve_relay_path(&self) {
+        if !self.stop.is_stopped() {
+            self.permitted.store(true, Ordering::Release);
+        }
+    }
+    fn with_permission(
+        session: String,
+        stop: StopToken,
+        seconds: u32,
+        permitted: bool,
+    ) -> Result<Arc<Self>, String> {
         let (tx, rx) = mpsc::channel(1);
         Ok(Arc::new(Self {
             stop,
             claimed: AtomicBool::new(false),
+            permitted: AtomicBool::new(permitted),
             protocol: Mutex::new(Protocol::new(
                 session,
                 Duration::from_secs(seconds as u64 + 15),
@@ -124,9 +148,9 @@ impl Endpoint {
               Some(DataChannelEvent::OnOpen)=>self.update(|s|{s.open_events+=1;s.state="open".into();}),
               Some(DataChannelEvent::OnMessage(message))=>{
                self.update(|s|s.message_events+=1);
-               let response=self.protocol.lock().unwrap_or_else(|p|p.into_inner()).process(&message.data,message.is_string,!self.stop.is_stopped(),Instant::now())?;
+               let response=self.protocol.lock().unwrap_or_else(|p|p.into_inner()).process(&message.data,message.is_string,!self.stop.is_stopped() && self.permitted.load(Ordering::Acquire),Instant::now())?;
                let text=serde_json::to_string(&response).map_err(|_|"CONTROL_SERIALIZE")?;
-               if self.stop.is_stopped(){return Err("CONTROL_NOT_AUTHORIZED".into());}
+               if self.stop.is_stopped() || !self.permitted.load(Ordering::Acquire){return Err("CONTROL_NOT_AUTHORIZED".into());}
                timeout(Duration::from_millis(500),channel.try_send_text(&text)).await.map_err(|_|"CONTROL_SEND_TIMEOUT")?.map_err(|_|"CONTROL_SEND_FAILED")?;
                self.protocol.lock().unwrap_or_else(|p|p.into_inner()).sent(&response);
               },

@@ -1,0 +1,10 @@
+{
+  "listen": "0.0.0.0:8443",
+  "public_ipv4": "APPROVED_PUBLIC_IPV4",
+  "sender_invitation": "GENERATE_32_RANDOM_BYTES_HEX",
+  "receiver_invitation": "GENERATE_DIFFERENT_32_RANDOM_BYTES_HEX",
+  "invitation_expires_at": 0,
+  "realm": "MATCH_EXISTING_PRIVATE_TURN_REALM",
+  "certificate": "/etc/remotehub-p006b/server.pem",
+  "private_key": "/etc/remotehub-p006b/server-key.pem"
+}

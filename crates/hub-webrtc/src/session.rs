@@ -38,6 +38,9 @@ use webrtc::{
 
 #[derive(Clone, Default, Serialize)]
 pub struct Stats {
+    #[cfg(feature = "p006-relay")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_selected_pair: Option<crate::turn_probe::PairSummary>,
     pub control: Option<crate::control::ControlStats>,
     pub state: String,
     pub elapsed_ms: u64,
@@ -122,6 +125,10 @@ impl PeerConnectionEventHandler for Handler {
 }
 
 pub struct Session {
+    #[cfg(feature = "p006-relay")]
+    relay: Option<RelaySettings>,
+    #[cfg(feature = "p006-relay")]
+    relay_stopped: Arc<AtomicBool>,
     control: Option<Arc<crate::control_channel::Endpoint>>,
     network: crate::scope::NetworkScope,
     socket_counters: Arc<crate::pinned_runtime::SocketCounters>,
@@ -131,7 +138,34 @@ pub struct Session {
     task: Mutex<Option<JoinHandle<()>>>,
     stop_lock: tokio::sync::Mutex<()>,
 }
+#[cfg(feature = "p006-relay")]
+pub struct RelaySettings {
+    pub grant: Arc<crate::ice_policy::RelayGrant>,
+    pub config: crate::ice_policy::IceConfig,
+}
 impl Session {
+    #[cfg(feature = "p006-relay")]
+    pub fn new_relay(
+        seconds: u32,
+        relay: RelaySettings,
+        control_session: String,
+    ) -> Result<Arc<Self>, String> {
+        relay.config.validate(&relay.grant, hub_probe_wire::now())?;
+        let mut session = Self::configured(
+            seconds,
+            crate::scope::NetworkScope::Loopback,
+            Some(control_session.clone()),
+        )?;
+        let inner = Arc::get_mut(&mut session).ok_or("SESSION_ALREADY_SHARED")?;
+        // Legacy network is never consulted when this explicit isolated policy is present.
+        inner.control = Some(crate::control_channel::Endpoint::new_guarded(
+            control_session,
+            inner.shared.stop.clone(),
+            seconds + 30,
+        )?);
+        inner.relay = Some(relay);
+        Ok(session)
+    }
     pub fn new(seconds: u32) -> Result<Arc<Self>, String> {
         Self::with_network(seconds, crate::scope::NetworkScope::Loopback)
     }
@@ -168,6 +202,10 @@ impl Session {
             .map(|id| crate::control_channel::Endpoint::new(id, stop.clone(), seconds))
             .transpose()?;
         Ok(Arc::new(Self {
+            #[cfg(feature = "p006-relay")]
+            relay: None,
+            #[cfg(feature = "p006-relay")]
+            relay_stopped: Arc::new(AtomicBool::new(false)),
             control,
             network,
             socket_counters: Arc::new(Default::default()),
@@ -209,7 +247,24 @@ impl Session {
 
     pub async fn signal(self: &Arc<Self>, offer: String) -> Result<String, String> {
         // Validate before starting any sockets or media. Only the native window owner calls this.
-        let negotiation = if self.control.is_some() {
+        #[cfg(feature = "p006-relay")]
+        let relay_negotiation = self
+            .relay
+            .as_ref()
+            .map(|r| {
+                crate::signaling::validate_relay_description(
+                    &offer,
+                    &r.grant,
+                    hub_probe_wire::now(),
+                    false,
+                )
+            })
+            .transpose()?;
+        #[cfg(not(feature = "p006-relay"))]
+        let relay_negotiation: Option<Negotiation> = None;
+        let negotiation = if let Some(value) = relay_negotiation {
+            value
+        } else if self.control.is_some() {
             crate::signaling::validate_control_description(&offer, self.network, false)?
         } else if self.network.is_lan() {
             crate::signaling::validate_description(&offer, self.network, false)?
@@ -290,6 +345,8 @@ impl Session {
             self.shared.stop.stop();
             let close = timeout(Duration::from_secs(2), pc.close()).await;
             let close_ok = matches!(close, Ok(Ok(())));
+            #[cfg(feature = "p006-relay")]
+            self.relay_stopped.store(true, Ordering::Release);
             let control_ok = if let Some(mut task) = control_task {
                 match timeout(Duration::from_secs(3), &mut task).await {
                     Ok(Ok(())) => {
@@ -364,8 +421,12 @@ impl Session {
                 rtc::interceptor::Slot::Custom(9500),
                 Feedback::new(self.shared.clone()),
             );
+        #[cfg(feature = "p006-relay")]
+        let is_relay = self.relay.is_some();
+        #[cfg(not(feature = "p006-relay"))]
+        let is_relay = false;
         let settings = SettingEngineBuilder::new()
-            .with_include_loopback_candidate(!self.network.is_lan())
+            .with_include_loopback_candidate(!is_relay && !self.network.is_lan())
             .with_network_types(vec![NetworkType::Udp4])
             .with_multicast_dns_mode(MulticastDnsMode::Disabled)
             .with_ice_timeouts(
@@ -374,17 +435,27 @@ impl Session {
                 Some(Duration::from_secs(1)),
             );
         let settings=if self.control.is_some(){settings.with_sctp_max_message_size(rtc::peer_connection::configuration::setting_engine::SctpMaxMessageSize::Bounded(16*1024)).with_sctp_max_receive_buffer_size(64*1024)}else{settings}.build();
+        let configuration = RTCConfigurationBuilder::default()
+            .with_ice_servers(vec![])
+            .build();
+        let local = self.network.local();
+        #[cfg(feature = "p006-relay")]
+        let (configuration, local) = if let Some(r) = &self.relay {
+            (
+                r.config
+                    .native_configuration(&r.grant, hub_probe_wire::now())?,
+                r.grant.target().local,
+            )
+        } else {
+            (configuration, local)
+        };
         let mut builder = PeerConnectionBuilder::new()
             .with_media_engine(engine)
             .with_interceptor_registry(registry)
             .with_setting_engine(settings)
-            .with_configuration(
-                RTCConfigurationBuilder::default()
-                    .with_ice_servers(vec![])
-                    .build(),
-            )
+            .with_configuration(configuration)
             .with_handler(Arc::new(Handler(self.shared.clone(), self.control.clone())))
-            .with_udp_addrs(vec![format!("{}:0", self.network.local())]);
+            .with_udp_addrs(vec![format!("{local}:0")]);
         if let crate::scope::NetworkScope::Lan(scope) = self.network {
             builder = builder.with_runtime(Arc::new(crate::pinned_runtime::PinnedRuntime {
                 inner: webrtc::runtime::default_runtime().ok_or("NO_ASYNC_RUNTIME")?,
@@ -395,6 +466,24 @@ impl Session {
         }
         if self.control.is_some() {
             builder = builder.with_data_channel_send_buffer_limit(16 * 1024);
+        }
+        #[cfg(feature = "p006-relay")]
+        if let Some(r) = &self.relay {
+            let t = r.grant.target();
+            builder = builder.with_runtime(Arc::new(crate::relay_runtime::RelayRuntime {
+                base: crate::pinned_runtime::PinnedRuntime {
+                    inner: webrtc::runtime::default_runtime().ok_or("NO_ASYNC_RUNTIME")?,
+                    local: t.local.into(),
+                    peer: (*t.turn.ip()).into(),
+                    counters: self.socket_counters.clone(),
+                },
+                endpoint: t.turn.into(),
+                deadline: Instant::now()
+                    + Duration::from_secs(
+                        r.config.expires_at.saturating_sub(hub_probe_wire::now()),
+                    ),
+                stopped: self.relay_stopped.clone(),
+            }));
         }
         let pc = builder.build().await.map_err(|e| e.to_string())?;
         Ok(Arc::new(pc))
@@ -435,7 +524,12 @@ impl Session {
         pc.set_local_description(answer)
             .await
             .map_err(|e| e.to_string())?;
-        timeout(Duration::from_secs(4), async {
+        #[cfg(feature = "p006-relay")]
+        let is_relay = self.relay.is_some();
+        #[cfg(not(feature = "p006-relay"))]
+        let is_relay = false;
+        let gather_seconds = if is_relay { 10 } else { 4 };
+        timeout(Duration::from_secs(gather_seconds), async {
             while !self.shared.gathering_done.load(Ordering::Acquire)
                 && !self.shared.stop.is_stopped()
             {
@@ -456,10 +550,25 @@ impl Session {
             .lines()
             .filter(|l| l.starts_with("a=candidate:"))
             .collect();
-        if candidates.is_empty()
-            || candidates.iter().any(|c| {
-                !c.contains(&format!(" {} ", self.network.local())) || !c.contains(" typ host")
-            })
+        #[cfg(feature = "p006-relay")]
+        let relay_answer = if let Some(r) = &self.relay {
+            crate::signaling::validate_relay_description(
+                &answer,
+                &r.grant,
+                hub_probe_wire::now(),
+                true,
+            )?;
+            true
+        } else {
+            false
+        };
+        #[cfg(not(feature = "p006-relay"))]
+        let relay_answer = false;
+        if !relay_answer
+            && (candidates.is_empty()
+                || candidates.iter().any(|c| {
+                    !c.contains(&format!(" {} ", self.network.local())) || !c.contains(" typ host")
+                }))
         {
             return Err("NATIVE_ICE_NOT_LOOPBACK".into());
         }
@@ -467,7 +576,9 @@ impl Session {
             s.native_candidates = candidates
                 .iter()
                 .map(|_| {
-                    if self.network.is_lan() {
+                    if relay_answer {
+                        "relay/approved-range/udp"
+                    } else if self.network.is_lan() {
                         "host/pinned-lan/udp"
                     } else {
                         "host/127.0.0.1/udp"
@@ -488,6 +599,10 @@ impl Session {
         .map_err(|_| "ICE_CONNECT_TIMEOUT")?;
         if self.shared.stop.is_stopped() {
             return Ok(());
+        }
+        #[cfg(feature = "p006-relay")]
+        if self.relay.is_some() {
+            self.verify_relay_pair(pc).await?;
         }
         let (tx, mut rx) = mpsc::channel(3);
         let shared = self.shared.clone();
@@ -566,6 +681,13 @@ impl Session {
     }
 
     async fn update_stats(&self, pc: &Arc<dyn PeerConnection>) {
+        #[cfg(feature = "p006-relay")]
+        if self.relay.is_some() {
+            if let Err(error) = self.verify_relay_pair(pc).await {
+                self.shared.update(|s| s.error = Some(error));
+                self.shared.stop.stop();
+            }
+        }
         let report = pc.get_stats(Instant::now(), StatsSelector::None).await;
         for entry in report.iter() {
             match entry {
@@ -587,6 +709,41 @@ impl Session {
                 _ => (),
             }
         }
+    }
+    #[cfg(feature = "p006-relay")]
+    async fn verify_relay_pair(&self, pc: &Arc<dyn PeerConnection>) -> Result<(), String> {
+        let r = self.relay.as_ref().ok_or("RELAY_POLICY_MISSING")?;
+        let sctp = pc.sctp().await.ok_or("RELAY_SCTP_MISSING")?;
+        let pair = sctp
+            .transport()
+            .ice_transport()
+            .get_selected_candidate_pair()
+            .await
+            .map_err(|_| "RELAY_PAIR_READ_FAILED")?
+            .ok_or("RELAY_PAIR_NOT_SELECTED")?;
+        let permitted = |c: &webrtc::peer_connection::RTCIceCandidate| {
+            c.typ.to_string() == "relay"
+                && c.protocol.to_string() == "udp"
+                && c.address
+                    .parse()
+                    .is_ok_and(|ip| r.grant.permits_candidate(ip, c.port))
+        };
+        let valid = permitted(pair.local()) && permitted(pair.remote());
+        self.shared.update(|s| {
+            s.native_selected_pair = Some(crate::turn_probe::PairSummary {
+                local_type: pair.local().typ.to_string(),
+                remote_type: pair.remote().typ.to_string(),
+                protocol: pair.local().protocol.to_string(),
+                matches_relay_policy: valid,
+            })
+        });
+        if !valid {
+            return Err("NATIVE_SELECTED_NON_RELAY".into());
+        }
+        if let Some(control) = &self.control {
+            control.approve_relay_path();
+        }
+        Ok(())
     }
 }
 

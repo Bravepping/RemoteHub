@@ -14,6 +14,10 @@
 | hmac / sha2 / sha1（sha1仅server-only TURN REST兼容） | https://github.com/RustCrypto/MACs / https://github.com/RustCrypto/hashes | MIT OR Apache-2.0 |
 | base64 / zeroize（服务端票据与秘密内存清理） | https://github.com/marshallpierce/rust-base64 / https://github.com/RustCrypto/utils | MIT OR Apache-2.0 |
 | ring 0.17.14（传递密码依赖） | https://github.com/briansmith/ring | Apache-2.0 AND ISC |
+| Axum 0.8.8 / axum-server 0.8.0（隔离实验信令） | https://github.com/tokio-rs/axum / https://github.com/programatik29/axum-server | MIT |
+| tokio-tungstenite / tungstenite 0.28.0 | https://github.com/snapview/tokio-tungstenite / https://github.com/snapview/tungstenite-rs | MIT OR Apache-2.0 |
+| rustls 0.23.46 / rustls-pemfile 2.2.0 | https://github.com/rustls/rustls / https://github.com/rustls/pemfile | Apache-2.0 OR ISC OR MIT / Apache-2.0 OR ISC OR MIT |
+| rcgen 0.14.10（本机TLS开发测试） | https://github.com/rustls/rcgen | MIT OR Apache-2.0 |
 | Vue / Vue Test Utils / vue-tsc | https://github.com/vuejs | MIT |
 | Vite / Vitest | https://github.com/vitejs / https://github.com/vitest-dev | MIT |
 | Tailwind CSS | https://github.com/tailwindlabs/tailwindcss | MIT |

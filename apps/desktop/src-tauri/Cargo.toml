@@ -11,6 +11,7 @@ p004-probe = ["dep:hub-webrtc", "dep:tokio", "dep:uuid", "dep:windows", "dep:ser
 p004-lan = ["p004-probe"]
 p005-control = ["p004-lan"]
 p006-turn-probe = ["dep:hub-webrtc", "hub-webrtc/p006-turn-probe"]
+p006-relay = ["p005-control", "hub-webrtc/p006-relay", "dep:hub-probe-wire", "windows/Win32_NetworkManagement_IpHelper"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.6", features = [] }
@@ -20,6 +21,7 @@ tauri = { version = "=2.12.7", features = [] }
 serde.workspace = true
 hub-capture-win = { path = "../../../crates/hub-capture-win" }
 hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
+hub-probe-wire = { path = "../../../crates/hub-probe-wire", optional = true }
 tokio = { version = "=1.54.1", features = ["sync", "time"], optional = true }
 uuid = { version = "=1.29.3", features = ["v4"], optional = true }
 serde_json = { workspace = true, optional = true }

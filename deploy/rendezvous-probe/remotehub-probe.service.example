@@ -1,0 +1,33 @@
+[Unit]
+Description=RemoteHub explicitly approved short-lived P006b WSS experiment
+After=network-online.target
+
+[Service]
+Type=simple
+User=remotehub-p006b
+Group=remotehub-p006b
+EnvironmentFile=/etc/remotehub-p006b/issuer.env
+ExecStart=/opt/remotehub-p006b/hub-rendezvous-probe --private-config /etc/remotehub-p006b/server.json
+Restart=no
+RuntimeMaxSec=7200
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+MemoryMax=192M
+TasksMax=64
+CPUQuota=100%
+UMask=0077
+StandardOutput=null
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

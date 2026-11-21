@@ -61,22 +61,9 @@ impl Drop for StartingLease<'_> {
     }
 }
 
-pub(crate) fn origin(window: &WebviewWindow) -> Result<(), String> {
-    let url = window.url().map_err(|_| "WINDOW_URL_UNAVAILABLE")?;
-    origin_url(window.label(), &url)
-}
-fn origin_url(label: &str, url: &tauri::Url) -> Result<(), String> {
-    let app = (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
-        || (url.scheme() == "http" && url.host_str() == Some("tauri.localhost"))
-        || (cfg!(debug_assertions)
-            && url.scheme() == "http"
-            && url.host_str() == Some("127.0.0.1")
-            && url.port() == Some(1420));
-    if label != "main" || !app {
-        return Err("LOCAL_MAIN_WINDOW_REQUIRED".into());
-    }
-    Ok(())
-}
+pub(crate) use crate::experiment_origin::origin;
+#[cfg(test)]
+use crate::experiment_origin::origin_url;
 impl P004State {
     pub(crate) fn busy(&self) -> bool {
         self.starting.load(Ordering::Acquire)

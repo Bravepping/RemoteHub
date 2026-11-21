@@ -1,11 +1,11 @@
 //! Explicit TURN preparation policy; does not change NetworkScope or LAN constructors.
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use webrtc::peer_connection::{
     RTCConfiguration, RTCConfigurationBuilder, RTCIceServer, RTCIceTransportPolicy,
 };
 use zeroize::Zeroize;
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum IceMode {
     Loopback,
@@ -13,7 +13,7 @@ pub enum IceMode {
     RelayOnly,
     DirectPreferred,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IceServer {
     pub urls: Vec<String>,
@@ -26,7 +26,7 @@ impl Drop for IceServer {
         self.username.zeroize();
     }
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct IceConfig {
     pub mode: IceMode,

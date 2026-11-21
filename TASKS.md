@@ -11,11 +11,12 @@
 - [x] `P0-04a` **done（同机视频实验）** — Windows 原生 Tauri/WebView2，实时 DXGI/MF → webrtc-rs 0.21.1 → H.264 SRTP/解码；五轮 15 秒各 450 帧及一轮 30 秒 900 帧，接收丢包 0；主动停止与播放中关窗清理通过。默认关闭实验 feature，详见 `docs/PHASE0_P004_TEST_REPORT.md`。
 - [x] `P0-04b` **done（有界局域网双机实验）** — 两台物理Windows10有线PC，v2的30秒900帧全部发送/接收/解码/呈现，1280×720、host/host指定对端UDP、接收丢包0；两端主动停止、接收端关窗与拔线提前回收通过。默认关闭LAN feature，详见 `docs/PHASE0_P004B_TEST_REPORT.md`。
 - [x] `P0-05` **done（模拟控制，无实际输入）** — 复用P004b同一视频PC的真实可靠有序control.v1；两台Windows10电脑100条模拟事件发送/Rust接收/ACK写入/B确认全部100，ping/pong与序号连续、异常0，视频同时1280×720正常播放；两端停止、接收端关窗/拔线清理通过。43 Rust / 11前端 / 2Edge；协议与本机真实SCTP负例覆盖，详见 `docs/PHASE0_P005_TEST_REPORT.md`。
-- [ ] `P0-06` **blocked（待独立双机relay媒体验收）** — 获授权的ECS/coturn节点G6真实STUN/Allocate已通过；测试服务已停止且不自启。跨网络双机视频+control/真实selected pair尚未验证，不能以Allocate替代完整公网路由验收。
+- [ ] `P0-06` **doing（待独立双机relay媒体验收）** — G6真实STUN/Allocate已通过；用户授权P006b并临时开启WSS/TURN，均不自启。跨网络双机视频+control/真实selected pair尚未验证，不能以WSS配对或Allocate替代完整验收。
 - [x] `P0-06a` **infrastructure-verified** — 原implementation-ready的G1–5/G7/G8基础上，用户另行授权G6：Ubuntu24.04/coturn4.6.1，两次Windows原生真实relay候选（81/92ms gather），11项实际UDP协议检查通过，缺/错/过期票401、错realm437专用原因、五类危险peer403、释放与非root服务收尾通过。详见`docs/PHASE0_G6_TEST_REPORT.md`和`artifacts/p006a/g6`。原准备完整回归54 Rust/13前端/3Edge/3Python，新增4协议工具离线测试；未进入P006b/c、实际输入或Phase1。
+- [ ] `P0-06b` **doing（代码和自动测试通过，双机待验）** — 强制双端TURN、同视频PC的control.v1、认证WSS与应用专用TLS信任已实现；60 Rust/16前端/3Edge、完整构建/lint/默认及all-feature clippy、旧feature独立回归通过。公网TLS/邀请拒绝/双角色签票与本机两个TURN分配双向真实载荷通过；宽带+手机热点双机30秒视频、100事件与清理仍未执行。见docs/PHASE0_P006B_TEST_REPORT.md。
 - [ ] `P0-07` **doing** — 已交首轮 Spike 报告、实测数据和 ADR 0001；整个媒体链路与备选方案结论需 P0-03..06 后补齐。
 
-当前交付：P0父任务正式验收仍4/7（P001/02/03/05）；P004基线录屏差异保留，Phase0未通过退出条件。历史媒体/控制报告见README各阶段链接；TURN准备及G6分别见docs/PHASE0_P006A_TEST_REPORT.md、docs/PHASE0_G6_TEST_REPORT.md。本轮已完成获授权的G6，P006a达infrastructure-verified；停止等待审查，不进入P006b/c或Phase1。
+当前交付：P0父任务正式验收仍4/7（P001/02/03/05）；P004基线录屏差异保留，Phase0未通过退出条件。P006a/G6历史证据保留；本轮按用户新授权推进P006b，代码与自动检查完成，准备新版私有实验包进行真实跨网双机验证。不进入P006c或Phase1；最终需补实测证据并停止云端实验服务。
 
 ## Phase 1 · 工程与 UI
 

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-p006-stop"
+description = "Enables the p006_stop command without any pre-configured scope."
+commands.allow = ["p006_stop"]
+
+[[permission]]
+identifier = "deny-p006-stop"
+description = "Denies the p006_stop command without any pre-configured scope."
+commands.deny = ["p006_stop"]

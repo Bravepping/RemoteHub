@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-p006-ready"
+description = "Enables the p006_ready command without any pre-configured scope."
+commands.allow = ["p006_ready"]
+
+[[permission]]
+identifier = "deny-p006-ready"
+description = "Denies the p006_ready command without any pre-configured scope."
+commands.deny = ["p006_ready"]

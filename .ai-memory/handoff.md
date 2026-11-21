@@ -1,3 +1,10 @@
+# P0-06b 实现检查点（等待真实双机）
+
+- 用户新授权P006b，已准备宽带发送端与手机蜂窝热点接收端，并明确允许启动同ECS服务。ADR/协议先提交6f694de；续接保留未提交实现，fetch远端main仍4507fa9。沿用既有视频/control同一PC，默认关闭p006-relay，未做P006c/输入/P1。
+- 已实现：hub-probe-wire、隔离Axum WSS服务、relay_client、Session显式relay runtime与实际selected pair守卫、Rust控制路径授权、Tauri本轮原生同意/清理/私有统计、Vue双端实验。邀请码/HMAC/大小/速率/序号/时限/房间/连接上限，旧scope和4秒gather保留。epoch跨秒签票已固定同一issued_at。
+- 已验证：13组公开脚本scripts/p006b-checks.ps1全PASS；60 Rust + 旧桌面3、16前端、3Edge；私有MF1仍ignored。Ubuntu专用隔离vendor构建和4测试通过。首次Linux fixture未等sender Waiting触发race，已修正并保留失败摘要；首次公网8443入站无包，用户自行放行后实际TLS/错误CA/邀请拒绝/双角色短票通过。本机两个真实TURN分配/双向载荷/释放通过，明确不是双机视频。实际云端证据artifacts/p006b/cloud，自动artifacts/p006b/automatic。
+- 服务器：remotehub-p006b与remotehub-turn-g6非root临时运行且disabled；本轮邀请到期后3秒临时timer自动停两服务，结束测试还需主动核查。私有客户端配置.tools/p006b/p006b-private.json，TURN共享secret/TLS私钥留云端；密码仅SSH内存，不能归档.tools/g6/private日志。后续真实双机需每轮由用户亲自确认，先30秒720p30+100事件，再两端停止/接收端关窗/热点断网，仍未执行，不填PASS。Git最终SHA/包待本轮提交。
+
 # P0-06a / G6 交付检查点
 
 - 已完成带证据：准备基线079275d、ADR先行3a8f67f、实现5e05c09。用户后续单独授权指定ECS的G6，开工fetch仍5e05c09干净；实际Ubuntu24.04/coturn4.6.1、非root专用unit与EIP映射，Windows原生两轮各1 relay候选/gather81和92ms/close成功，真实UDP11项全部通过（无/错/过期401、错realm437专用原因、五危险peer403），Refresh释放。P006a现infrastructure-verified。完整17组回归达预期，54 Rust/13前端/3Edge/3配置Python+4协议Python，私有MF1ignored。apps/crates/锁和实测CLI二进制与5e05c09不变。

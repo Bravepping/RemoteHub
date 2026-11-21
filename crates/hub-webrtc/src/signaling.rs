@@ -91,16 +91,21 @@ pub fn validate_relay_description(
         return Err("SDP_SIZE_OR_ENCODING".into());
     }
     let mut count = 0;
+    let mut total = 0;
     for line in sdp.lines() {
         if line.starts_with("m=") {
             count = 0;
         }
         if line.starts_with("a=candidate:") {
             count += 1;
+            total += 1;
             if count > 16 || line.split_whitespace().count() > 32 {
                 return Err("RELAY_CANDIDATE_LIMIT".into());
             }
         }
+    }
+    if total == 0 {
+        return Err("RELAY_CANDIDATE_REQUIRED".into());
     }
     validate_policy(sdp, DescriptionScope::Relay(grant.target()), answer, true)
 }

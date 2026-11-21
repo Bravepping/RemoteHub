@@ -1,0 +1,9 @@
+{
+  "tlsVerified": true,
+  "wrongInvitationRejected": true,
+  "wrongCaRejected": true,
+  "pairedRoles": true,
+  "shortCredentials": true,
+  "closed": true,
+  "remainingCredentialTtl": 182
+}

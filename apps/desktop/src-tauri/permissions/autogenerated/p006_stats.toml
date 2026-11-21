@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-p006-stats"
+description = "Enables the p006_stats command without any pre-configured scope."
+commands.allow = ["p006_stats"]
+
+[[permission]]
+identifier = "deny-p006-stats"
+description = "Denies the p006_stats command without any pre-configured scope."
+commands.deny = ["p006_stats"]

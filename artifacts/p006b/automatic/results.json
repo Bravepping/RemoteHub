@@ -1,0 +1,67 @@
+[
+  {
+    "name": "frontend-typecheck",
+    "command": "pnpm --dir apps/desktop typecheck",
+    "exitCode": 0
+  },
+  {
+    "name": "frontend-unit",
+    "command": "pnpm --dir apps/desktop test",
+    "exitCode": 0
+  },
+  {
+    "name": "frontend-build",
+    "command": "pnpm --dir apps/desktop build",
+    "exitCode": 0
+  },
+  {
+    "name": "frontend-lint",
+    "command": "pnpm lint",
+    "exitCode": 0
+  },
+  {
+    "name": "browser",
+    "command": "pnpm test:e2e",
+    "exitCode": 0
+  },
+  {
+    "name": "fmt",
+    "command": "cargo fmt --all -- --check",
+    "exitCode": 0
+  },
+  {
+    "name": "clippy",
+    "command": "cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings",
+    "exitCode": 0
+  },
+  {
+    "name": "default-clippy",
+    "command": "cargo clippy --workspace --all-targets --locked --offline -- -D warnings",
+    "exitCode": 0
+  },
+  {
+    "name": "test",
+    "command": "cargo test --workspace --all-features --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "legacy-test",
+    "command": "cargo test -p remotehub-desktop --features p005-control --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "loopback-check",
+    "command": "cargo check -p remotehub-desktop --features p004-probe --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "lan-check",
+    "command": "cargo check -p remotehub-desktop --features p004-lan --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "build",
+    "command": "cargo build -p remotehub-desktop --profile probe --features custom-protocol,p006-relay --locked --offline",
+    "exitCode": 0
+  }
+]

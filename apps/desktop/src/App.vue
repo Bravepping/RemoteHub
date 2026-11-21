@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue';
 import LoopbackVideoProbe from './features/p004/LoopbackVideoProbe.vue';
 import LanVideoProbe from './features/p004/LanVideoProbe.vue';
+import RelayVideoProbe from './features/p006/RelayVideoProbe.vue';
 import {
   errorMessage,
   getRuntimeInfo,
@@ -68,16 +69,19 @@ onMounted(refresh);
       <p class="intro">
         {{
           runtime?.p004_lan_enabled
-            ? '两台电脑明确确认后，验证局域网实时视频。'
+            ? runtime?.p006_enabled
+              ? '两台电脑明确确认后，经加密中继验证跨网络视频与模拟事件。'
+              : '两台电脑明确确认后，验证局域网实时视频。'
             : '当前验证本机窗口与主屏采集，尚未开放设备连接。'
         }}
       </p>
+      <RelayVideoProbe v-if="runtime?.p006_enabled" />
       <LanVideoProbe
-        v-if="runtime?.p004_lan_enabled"
+        v-else-if="runtime?.p004_lan_enabled"
         :control-enabled="runtime?.p005_enabled ?? false"
       />
       <LoopbackVideoProbe v-else-if="runtime?.p004_enabled" />
-      <template v-if="!runtime?.p004_enabled">
+      <template v-if="!runtime?.p004_enabled && !runtime?.p006_enabled">
         <section class="runtime-card">
           <div class="monitor">▣</div>
           <div>
