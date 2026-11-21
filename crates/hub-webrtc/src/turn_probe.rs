@@ -17,6 +17,8 @@ use webrtc::peer_connection::{
     PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCIceGatheringState,
     RTCPeerConnectionIceEvent, SettingEngineBuilder,
 };
+#[path = "turn_lifecycle_connected.rs"]
+mod connected;
 #[derive(Clone, Default, Serialize)]
 pub struct Diagnostic {
     pub gather_elapsed_ms: Option<u64>,
@@ -38,9 +40,16 @@ struct Handler {
     target: crate::ice_policy::RelayTarget,
     state: Arc<Mutex<Diagnostic>>,
     complete: Arc<AtomicBool>,
+    incoming: tokio::sync::mpsc::Sender<Arc<dyn webrtc::data_channel::DataChannel>>,
 }
 #[async_trait::async_trait]
 impl PeerConnectionEventHandler for Handler {
+    async fn on_data_channel(&self, channel: Arc<dyn webrtc::data_channel::DataChannel>) {
+        if self.incoming.try_send(channel).is_err() {
+            self.state.lock().unwrap_or_else(|p| p.into_inner()).error =
+                Some("PROBE_EXTRA_CHANNEL".into());
+        }
+    }
     async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
         let c = event.candidate;
         let ok = c.typ.to_string() == "relay"
@@ -67,6 +76,8 @@ pub struct TurnProbe {
     complete: Arc<AtomicBool>,
     stopped: Arc<AtomicBool>,
     deadline: Instant,
+    incoming:
+        tokio::sync::Mutex<tokio::sync::mpsc::Receiver<Arc<dyn webrtc::data_channel::DataChannel>>>,
 }
 impl TurnProbe {
     /// Building alone does not gather or contact TURN. gather() is a separate explicit action.
@@ -76,6 +87,7 @@ impl TurnProbe {
         let state = Arc::new(Mutex::new(Diagnostic::default()));
         let complete = Arc::new(AtomicBool::new(false));
         let stopped = Arc::new(AtomicBool::new(false));
+        let (channel_tx, channel_rx) = tokio::sync::mpsc::channel(1);
         let deadline = Instant::now() + Duration::from_secs(config.expires_at - now);
         let runtime = RelayRuntime {
             base: PinnedRuntime {
@@ -102,6 +114,7 @@ impl TurnProbe {
                 target,
                 state: state.clone(),
                 complete: complete.clone(),
+                incoming: channel_tx,
             }))
             .build()
             .await
@@ -113,13 +126,35 @@ impl TurnProbe {
             complete,
             stopped,
             deadline,
+            incoming: tokio::sync::Mutex::new(channel_rx),
         })
     }
     pub async fn gather(self) -> Result<Diagnostic, String> {
+        self.gather_observed(Duration::ZERO, |_, _| {}).await
+    }
+    /// Explicit no-media lifecycle diagnostic. Events describe local PC state only,
+    /// not whether the server has released its TURN allocation.
+    pub async fn gather_observed(
+        self,
+        hold: Duration,
+        mut event: impl FnMut(&str, &Diagnostic),
+    ) -> Result<Diagnostic, String> {
+        if hold > Duration::from_secs(5) {
+            return Err("PROBE_HOLD_LIMIT".into());
+        }
+        let initial = self.state.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        event("before_gather", &initial);
         let started = Instant::now();
         let gathered = self.gather_once().await;
         let gather_elapsed_ms = started.elapsed().as_millis() as u64;
+        if let Ok(data) = &gathered {
+            event("allocation_gathered", data);
+            tokio::time::sleep(hold).await;
+        }
+        let closing = self.state.lock().unwrap_or_else(|p| p.into_inner()).clone();
+        event("pc_close_call", &closing);
         let closed = self.stop().await?;
+        event("pc_close_returned", &closed);
         if !closed.resources_released {
             return Err("TURN_PROBE_CLEANUP_INCOMPLETE".into());
         }

@@ -1,0 +1,8 @@
+{"case":"edge-connected","event":"before_gather","timeNs":"1795272915779000000","data":{}}
+{"case":"native-connected","data":{"local_type":"relay","matches_relay_policy":true,"protocol":"udp","remote_type":"relay"},"event":"connected_ping_pong","timeNs":1795272917866640400}
+{"case":"edge-connected","event":"connected_ping_pong","timeNs":"1795272917985000000","data":{"localType":"relay","remoteType":"relay","approvedPair":true,"connectionState":"connected","mediaTracks":0}}
+{"case":"edge-connected","event":"pc_close_call","timeNs":"1795272917986000000","data":{}}
+{"case":"edge-connected","event":"pc_close_returned","timeNs":"1795272917987000000","data":{"localPeerConnectionClosed":true}}
+{"case":"native-connected","data":null,"event":"pc_close_call","timeNs":1795272919491148800}
+{"case":"native-connected","data":{"localPeerConnectionReleased":true},"event":"pc_close_returned","timeNs":1795272919492170500}
+{"gather_elapsed_ms":null,"relay_candidates":1,"selected_pair":null,"round_trip_time":null,"packets_lost":null,"resources_released":true,"error":null}

@@ -1,4 +1,12 @@
-# P0-06b 双机收尾检查点
+# TURN生命周期 / P006c开工检查点
+
+- 用户明确接受接收端主动停止现场确认并要求跳过补测，保留原900帧独立提前停止证据限制，不再要求重复双机操作。P006b据此收尾，P006父项仍doing，P006c需后续开发。
+- 开工main ed6ff20干净，先提交ADR0008 dde4649。用户单独批准既有coturn最长60分钟/最多2分配/WSS关闭/无配置防火墙安全组业务修改。2026-11-21北京时间22:39至23:06真实完成6例：协议主动释放、停止续租、Windows原生/Edge gather后close、已连接Rust/Edge data-only双方close。5例Refresh0请求/成功回应+1.110至1.464秒首次观察socket消失；实际租约均600秒，不续租到期后0.318秒消失。原始deadline+15秒均无残留，同PID286888、最多2分配；判定结束前socket已0，未用服务停止冒充单例释放。
+- docs/TURN_ALLOCATION_LIFECYCLE_TEST_REPORT.md、artifacts/turn-lifecycle为真实证据；19组检查符合预期，61 Rust/16前端/3Edge/11Python，私有MF1ignored。Rust与Edge在同一物理Windows机器真实SCTP ping/pong、双方relay/relay；无采集，无新双机/WebView2视频负载实测，不能扩大解释。本轮未归因上轮遗留1socket。
+- 23:05:59已停专用coturn且disabled，WSS始终停用，timer取消，原始控制捕获和短票清理；shutdown.json证明配置/unit/防火墙hash、业务容器启动时间及服务集合不变。后续云端再次启动或变更需提交新具体范围取得授权。
+- 下一步：先独立提交并推送生命周期结果，再写P006c ADR/契约、实现P2P优先及TURN自动回退，尽可能无画面自动Windows测试；不能将尚未执行的真实双机验收标PASS。不进入输入注入或Phase1。
+
+# P0-06b 双机收尾检查点（历史）
 
 - 实现提交977f97fe3aac287283fa73da93cf60b9261e965b已推GitHub；源码/二进制本轮收尾不再修改。ADR先6f694de，基线4507fa9，沿用同一视频PC与control.v1，未做P006c/输入/P1。
 - 真实宽带+蜂窝热点双机5轮：两轮30秒各900帧完整发送/接收/解码/呈现，720p、lost0/freeze0；每轮真实双方relay/relay UDP、100条发送/接收/ACK/确认、1..101连续序号、异常0。三轮提前194/196/244帧，按用户给定顺序对应发送端停止/接收端关窗/热点断网，源/控制join回收。首个接收端停止尝试仍900帧；补测请求后用户称正常，无新增记录，只记现场确认，不标独立PASS。B本地final/window-close未收取，A browserClosed不冒充B证明。

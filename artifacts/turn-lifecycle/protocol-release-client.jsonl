@@ -1,0 +1,4 @@
+{"case": "protocol-release", "event": "client_start", "timeNs": 1795271976444462300, "monotonicNs": 50385251339800}
+{"case": "protocol-release", "event": "allocation_established", "timeNs": 1795271976521674600, "monotonicNs": 50385328551500, "grantedLifetime": 600, "relayPort": 49162, "transactionElapsedMs": 37.654}
+{"case": "protocol-release", "event": "refresh_zero_call", "timeNs": 1795271978521865700, "monotonicNs": 50387328743600}
+{"case": "protocol-release", "event": "refresh_zero_confirmed", "timeNs": 1795271978566882000, "monotonicNs": 50387373758900}

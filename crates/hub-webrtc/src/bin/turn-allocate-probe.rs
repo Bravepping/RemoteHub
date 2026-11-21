@@ -25,7 +25,7 @@ struct Target {
     port_min: u16,
     port_max: u16,
 }
-async fn run(path: &Path) -> Result<(), String> {
+async fn run(path: &Path, lifecycle: bool, connected: bool) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(path).map_err(|_| "PROBE_CONFIG_UNAVAILABLE")?;
     if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 16384 {
         return Err("PROBE_CONFIG_FILE_POLICY".into());
@@ -62,7 +62,16 @@ async fn run(path: &Path) -> Result<(), String> {
         true,
     )?;
     let probe = TurnProbe::new(&input.ice, grant, now).await?;
-    let result = probe.gather().await?;
+    let result = if connected {
+        probe.connected_lifecycle().await?
+    } else if lifecycle {
+        let origin = std::time::Instant::now();
+        probe.gather_observed(std::time::Duration::from_secs(2), |event, data| {
+            println!("{}", serde_json::json!({"case":"native-close","event":event,"timeNs":SystemTime::now().duration_since(UNIX_EPOCH).map_or(0,|x|x.as_nanos()),"elapsedMs":origin.elapsed().as_millis(),"relayCandidates":data.relay_candidates,"localPeerConnectionReleased":data.resources_released}));
+        }).await?
+    } else {
+        probe.gather().await?
+    };
     println!(
         "{}",
         serde_json::to_string(&result).map_err(|_| "PROBE_REPORT_ENCODING")?
@@ -74,14 +83,16 @@ async fn main() {
     let started = std::time::Instant::now();
     let args: Vec<_> = std::env::args().collect();
     if args.len() == 2 && args[1] == "--help" {
-        println!("turn-allocate-probe --approved-target PRIVATE_JSON\nRequires explicit ownership/authorization of that exact TURN endpoint and fresh short-term credentials.\nNo capture, remote SDP, control events or cloud deployment. Default invocation performs no network access.");
+        println!("turn-allocate-probe --approved-target PRIVATE_JSON [--lifecycle|--connected-lifecycle]\nRequires explicit ownership/authorization of that exact TURN endpoint and fresh short-term credentials.\n--lifecycle records gather/close timestamps; --connected-lifecycle uses a private local stdio data-only SDP broker and fixed ping/pong. Server release needs independent observation.\nNo capture, video, input injection or cloud deployment. Default invocation performs no network access.");
         return;
     }
-    if args.len() != 3 || args[1] != "--approved-target" {
+    let lifecycle = args.len() == 4 && args[3] == "--lifecycle";
+    let connected = args.len() == 4 && args[3] == "--connected-lifecycle";
+    if (args.len() != 3 && !lifecycle && !connected) || args[1] != "--approved-target" {
         eprintln!("PROBE_EXPLICIT_TARGET_APPROVAL_REQUIRED; use --help");
         std::process::exit(2);
     }
-    if let Err(error) = run(Path::new(&args[2])).await {
+    if let Err(error) = run(Path::new(&args[2]), lifecycle, connected).await {
         eprintln!(
             "{}",
             serde_json::json!({"status":"failed","error":error,"probe_elapsed_ms":started.elapsed().as_millis() as u64,"selected_pair":null,"round_trip_time":null})

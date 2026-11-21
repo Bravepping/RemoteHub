@@ -1,0 +1,5 @@
+{"case":"native-close","elapsedMs":0,"event":"before_gather","localPeerConnectionReleased":false,"relayCandidates":0,"timeNs":1795272633268855900}
+{"case":"native-close","elapsedMs":78,"event":"allocation_gathered","localPeerConnectionReleased":false,"relayCandidates":1,"timeNs":1795272633347749000}
+{"case":"native-close","elapsedMs":2087,"event":"pc_close_call","localPeerConnectionReleased":false,"relayCandidates":1,"timeNs":1795272635355882400}
+{"case":"native-close","elapsedMs":2087,"event":"pc_close_returned","localPeerConnectionReleased":true,"relayCandidates":1,"timeNs":1795272635356329100}
+{"gather_elapsed_ms":78,"relay_candidates":1,"selected_pair":null,"round_trip_time":null,"packets_lost":null,"resources_released":true,"error":null}

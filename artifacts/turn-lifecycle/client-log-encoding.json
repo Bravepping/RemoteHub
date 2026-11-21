@@ -1,0 +1,14 @@
+[
+  {
+    "file": "protocol-release-client.jsonl",
+    "originalEncoding": "UTF-16LE BOM from PowerShell Tee",
+    "originalSha256": "98f70ab8a9f0482e3d6d0bc86ab0c23caa8c48da30f5655bcc75a90972ba2223",
+    "utf8Sha256": "efad1e96ce78983bee29448a00718ec4f8d2108615e93b356f9d2246deb31704"
+  },
+  {
+    "file": "protocol-expiry-client.jsonl",
+    "originalEncoding": "UTF-16LE BOM from PowerShell Tee",
+    "originalSha256": "79689d8f66ab35dc5e431a84712a6aee168ac1cbb14088f9766cf39b7a5f3ec3",
+    "utf8Sha256": "a2b298c6b5e19215fd2b6624326f5f867f286576da0d2862d6f91dfbd9a79eec"
+  }
+]

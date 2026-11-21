@@ -1,0 +1,4 @@
+{"case":"edge-close","event":"before_gather","timeNs":"1795272641325000000","clockResolutionNs":1000000,"browser":"Edge Chromium; not embedded WebView2","mediaTracks":0}
+{"case":"edge-close","event":"allocation_gathered","timeNs":"1795272641473000000","clockResolutionNs":1000000,"relayPorts":[49246],"selectedPair":null,"remoteDescriptionSet":false}
+{"case":"edge-close","event":"pc_close_call","timeNs":"1795272643476000000","clockResolutionNs":1000000}
+{"case":"edge-close","event":"pc_close_returned","timeNs":"1795272643479000000","clockResolutionNs":1000000,"localPeerConnectionClosed":true}

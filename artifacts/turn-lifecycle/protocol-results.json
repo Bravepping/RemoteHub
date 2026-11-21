@@ -1,0 +1,33 @@
+[
+  {
+    "case": "protocol-expiry",
+    "allocationTimeNs": 1795271997757632000,
+    "grantedLifetimeSeconds": 600,
+    "latestLeaseDeadlineNs": 1795272597757632000,
+    "relayPort": 49190,
+    "sameServicePid": true,
+    "firstSocketPresentNs": 1795271998075698230,
+    "firstSocketAbsentNs": 1795272598075309245,
+    "refreshZeroRequestSeen": false,
+    "refreshZeroSuccessSeen": false,
+    "lastObservationNs": 1795272623031691401,
+    "classification": "lease_timeout",
+    "absenceRelativeToDeadlineSeconds": 0.317677245
+  },
+  {
+    "case": "protocol-release",
+    "allocationTimeNs": 1795271978279122000,
+    "grantedLifetimeSeconds": 600,
+    "latestLeaseDeadlineNs": 1795272578279122000,
+    "relayPort": 49162,
+    "sameServicePid": true,
+    "firstSocketPresentNs": 1795271978725447456,
+    "firstSocketAbsentNs": 1795271981780429536,
+    "refreshZeroRequestSeen": true,
+    "refreshZeroSuccessSeen": true,
+    "lastObservationNs": 1795272623031691401,
+    "classification": "refresh_zero_immediate",
+    "zeroResponseNs": 1795271980316514000,
+    "socketAbsenceAfterResponseSeconds": 1.463915536
+  }
+]

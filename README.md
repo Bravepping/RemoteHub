@@ -61,11 +61,19 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 宽带发送端与手机蜂窝热点接收端已真实验证：两轮30秒720p30视频各900帧全发送/接收/解码/呈现，丢包和冻结均0；5轮都为双方真实selected relay/relay UDP，同一视频PC上的100条control.v1发送/Rust接收/ACK/确认均100，序号连续、异常0，不执行实际输入。
 
-发送端停止、接收端关窗及热点断网分别在194/196/244帧提前回收。接收端单独主动停止有现场确认，但对应900帧记录不能独立证明提前停止，因此该专项不标PASS；也未证明每个PC关闭都会立即完成TURN Refresh(0)。这些限制在[完整报告](docs/PHASE0_P006B_TEST_REPORT.md)公开，P006b/P006完整验收仍保留doing，不推进P006c或Phase1。
+发送端停止、接收端关窗及热点断网分别在194/196/244帧提前回收。接收端主动停止由用户现场验证并明确跳过补测；对应900帧记录不能独立证明提前停止，原报告保留该限制，不追填日志。P006b按用户接受的现场确认收尾；原未归属TURN套接字保持历史记录，后续独立生命周期测试见下文。P006父项继续doing，按本轮要求进入P006c，尚不进入Phase1。
 
 60项Rust、16项前端、3项Edge及13组完整检查通过；Ubuntu隔离信令服务4测试和构建通过。结束后WSS/TURN已停止、保持disabled、实验socket清零。原基线26项服务仍运行，两个业务容器保持；新增观察到fwupd运行，未操作。源码不含实际节点地址、角色邀请、TURN共享secret或TLS私钥。
 
 操作见 [双机步骤](docs/P006B_RUNBOOK.md)，范围见 [ADR0007](docs/ADR/0007-p006b-cross-network-relay.md) 和 [协议](docs/P006B_CONTRACT.md)，真实统计位于artifacts/p006b/two-pc。复现自动检查：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b-checks.ps1`；显式构建：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b.ps1 -BuildOnly`。实验重新使用需要新的明确授权和私有限时配置，每轮双方亲自确认；验收归档不附带有效邀请。
+
+## TURN Allocation 生命周期验证
+
+按用户授权单独验证了6例：协议Refresh(0)、停止续租、Windows原生/Edge gather后close，以及已连接的Rust↔Edge data-only双方close。5例均真实观察到0请求/回应及约1.1–1.5秒内套接字消失；不续租例按实际授予600秒，到期后约0.318秒首次观察到回收。每例均留存基线、期间、关闭后、原租约到期及宽限后的资源状态，同一coturn PID贯穿测试，停服务不参与单例判定。
+
+完整[独立报告](docs/TURN_ALLOCATION_LIFECYCLE_TEST_REPORT.md)、[复现说明](docs/TURN_LIFECYCLE_RUNBOOK.md)及artifacts/turn-lifecycle区分真实云/Windows与离线fixture。19项检查达到预期，61 Rust/16前端/3 Edge/11 Python；本轮服务已停止、不开机自启，配置/业务容器启动时间/防火墙策略未变。没有屏幕采集或重复双机串流；Edge不是嵌入WebView2，不能将本轮data-only扩大为所有媒体负载保证。
+
+接收端主动停止按用户现场确认跳过补测，原独立日志限制保留，不再阻塞推进。本轮生命周期报告与代码独立提交后才进入P006c；P2P优先与自动回退状态另列，不由这些测试推断。
 
 ## P0-03 本机编码 probe
 

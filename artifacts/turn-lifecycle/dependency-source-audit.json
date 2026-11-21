@@ -1,0 +1,16 @@
+[
+  {
+    "package": "webrtc-0.21.1",
+    "file": "src/peer_connection/mod.rs",
+    "archiveMatchesCargoLock": true,
+    "extractedFileMatchesArchive": true,
+    "fileSha256": "360c56d83f7f52b84f04a762105327af1733d4b2177b1d824d7708f73113ee61"
+  },
+  {
+    "package": "rtc-turn-0.21.1",
+    "file": "src/client/relay.rs",
+    "archiveMatchesCargoLock": true,
+    "extractedFileMatchesArchive": true,
+    "fileSha256": "3f4cd041e3e6a55a7eab48501c8744aaec8cc1dcb48598f44872d004c3d360d0"
+  }
+]

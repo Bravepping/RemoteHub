@@ -1,0 +1,7 @@
+{
+  "eventFileSha256": "e63280ea81b5a2e06eefcc94e3489044e6a6ce02e730c23a00fe3738f1bc3bdb",
+  "eventCount": 3173,
+  "allSixCasesValidatedBeforeShutdown": true,
+  "rawCaptureDeleted": true,
+  "allCasesHaveBaselineAndNominalExpiryWitness": true
+}

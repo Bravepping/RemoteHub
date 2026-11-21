@@ -8,6 +8,8 @@
 
 先记录原行为，不为了获得即时释放而停止服务、修改服务器租约、改网络范围或修改下载的依赖源码。库close返回、进程退出、短票到期、Allocation租约到期分开记录。必要的客户端修复须在实际根因证据后决定，不将配置或理论当实测。
 
+进一步补强已连接状态：本机Rust与Edge通过私有stdio broker交换一次data-only SDP，逻辑候选仍仅批准relay范围，双方实际选择relay/relay并交换固定ping/pong，无屏幕/媒体/输入；Edge先关闭，Rust随后关闭。最多两个分配，默认客户端无新IPC入口。gather-only和已连接data-only分别记录，不冒充双机串流；完整SDP只在broker内存传递，禁止输出到交付日志。
+
 ## 证据
 
 云端专用临时观察器只看本次STUN Allocate/Refresh控制消息（不抓媒体）和专用turnserver的relay UDP socket。私有原始捕获与端点映射限本轮目录；导出的记录仅有相对测试ID、时间戳、事务散列、实际授予lifetime及socket存在/消失状态，不导出IP、短票、nonce、realm或密钥。客户端和云端分别记录UTC epoch纳秒/单调时间，另提供北京时间；记录观察采样与时钟偏差。
