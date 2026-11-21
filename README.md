@@ -1,6 +1,6 @@
 # RemoteHub · Phase 0 首次工程
 
-这是已生成并在本机编译测试的 Windows 原型：**最小 Tauri 客户端 + DXGI 主屏采集 + Media Foundation 720p30 H.264 本机编码实验**。目前不能连接另一台电脑。WebRTC、DataChannel、配对与服务端还没有实现，整个 Phase 0 尚未完成。
+这是已生成并在本机编译测试的 Windows 原型：**最小 Tauri 客户端 + DXGI 主屏采集 + Media Foundation 720p30 H.264 本机编码实验**。目前不能连接另一台电脑。P0-04a 的同机 WebRTC 实验代码已加入，Windows 真机验收待执行。双机串流、DataChannel、配对与服务端尚未完成，整个 Phase 0 尚未完成。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 
@@ -17,7 +17,20 @@ cargo build -p hub-encode-win --bin encode-probe --release --locked
 ./target/release/encode-probe.exe --consent --seconds 10 --encoder auto --name my-local-test
 ```
 
-`--encoder software` 可独立验证软件回退；`--stop-after-ms 2000` 用于主动停止测试，控制台 Ctrl+C 也请求正常停止并 drain。最长 30 秒，不覆盖已有样本。运动源复现、独立 FFmpeg 解码和统计口径见 P0-03 报告；FFmpeg 只用于开发验收，不是客户端运行依赖。原有 Tauri 采集窗口没有接入新编码器，本轮无需操作该窗口。
+`--encoder software` 可独立验证软件回退；`--stop-after-ms 2000` 用于主动停止测试，控制台 Ctrl+C 也请求正常停止并 drain。最长 30 秒，不覆盖已有样本。运动源复现、独立 FFmpeg 解码和统计口径见 P0-03 报告；FFmpeg 只用于开发验收，不是客户端运行依赖。P0-03 文件实验保持独立，不需要打开 Tauri 窗口。
+
+## P0-04a 同机 WebRTC 实验（默认关闭）
+
+在有 WebView2 Runtime 的 Windows x64 开发机上，预装下文工具链，从工程根目录运行：
+
+```powershell
+. ./scripts/use-toolchain.ps1
+pnpm install --frozen-lockfile
+pnpm --filter @remotehub/desktop tauri build --features p004-loopback,custom-protocol --no-bundle
+./target/release/remotehub-desktop.exe
+```
+
+打开「P0-04a 同机视频实验」，选择 15 秒或更久，点击开始并在 Windows 原生确认框允许当次采集。不需要也不应关闭防火墙或放开局域网。若提示无可用回环候选，记录 WebView2 版本与错误码，不扩大绑定范围。详细验收步骤和已运行测试见 [P0-04 报告](docs/PHASE0_P004_TEST_REPORT.md)。
 
 ## 使用已编译程序
 
@@ -62,6 +75,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Mode Captur
 
 - `apps/desktop`：Vue 3 / TypeScript / Tailwind / Tauri v2，受限本机 IPC。
 - `crates/hub-capture-win`：D3D11 / DXGI Desktop Duplication、限时实验、BGRA 读回及 BMP 导出。
+- `crates/hub-encode-win`：Media Foundation H.264，本机 CLI 及内存 AU 生产者。
+- `crates/hub-webrtc`：单路 H.264、IPv4 回环限定的 WebRTC 实验运输层。
 - `scripts`：环境检测、运行入口、可保存结果的验证脚本。
 - `artifacts`：非画面测试证据；`artifacts/private` 中的桌面样本不进 Git 或交付 ZIP。
 - `docs/ADR`：本机实验边界、未开放远控能力的原因及后续接入条件。

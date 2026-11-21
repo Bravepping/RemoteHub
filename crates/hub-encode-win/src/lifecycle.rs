@@ -40,6 +40,46 @@ impl Drop for ProbeLease<'_> {
     }
 }
 
+#[cfg(windows)]
+pub(crate) static GATE: ProbeGate = ProbeGate::new();
+
+/// A cross-process lease shared by the CLI and the local video stream that owns the desktop.
+#[cfg(windows)]
+pub(crate) struct ProcessLease(windows::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl ProcessLease {
+    pub(crate) fn acquire() -> Result<Self, EncodeError> {
+        use windows::{
+            core::w,
+            Win32::{
+                Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS},
+                System::Threading::CreateMutexW,
+            },
+        };
+        unsafe {
+            // Preserve the original mutex name for compatibility with an older P0-03 CLI.
+            let handle = CreateMutexW(None, true, w!("Local\\RemoteHub.P003.EncodeProbe"))?;
+            if GetLastError() == ERROR_ALREADY_EXISTS {
+                let _ = CloseHandle(handle);
+                return Err(EncodeError::Busy);
+            }
+            Ok(Self(handle))
+        }
+    }
+}
+
+#[cfg(windows)]
+impl Drop for ProcessLease {
+    fn drop(&mut self) {
+        use windows::Win32::{Foundation::CloseHandle, System::Threading::ReleaseMutex};
+        unsafe {
+            let _ = ReleaseMutex(self.0);
+            let _ = CloseHandle(self.0);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -74,6 +114,25 @@ mod tests {
         .validate(true)
         .is_err());
     }
+    #[test]
+    fn live_config_is_narrower_than_the_p003_file_probe() {
+        let c = EncoderConfig::default();
+        assert!(c.validate_stream(true).is_ok());
+        assert!(matches!(
+            c.validate_stream(false),
+            Err(EncodeError::ConsentRequired)
+        ));
+        let short = EncoderConfig { seconds: 2, ..c };
+        assert!(short.validate(true).is_ok());
+        assert!(short.validate_stream(true).is_err());
+        assert!(EncoderConfig {
+            bitrate: 3_000_000,
+            ..c
+        }
+        .validate_stream(true)
+        .is_err());
+    }
+
     #[test]
     fn fractional_frame_clock_never_drifts_or_reorders() {
         let c = EncoderConfig::default();

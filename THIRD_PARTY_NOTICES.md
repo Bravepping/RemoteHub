@@ -8,6 +8,12 @@
 | windows-rs | https://github.com/microsoft/windows-rs | MIT OR Apache-2.0 |
 | serde / serde_json | https://github.com/serde-rs | MIT OR Apache-2.0 |
 | thiserror | https://github.com/dtolnay/thiserror | MIT OR Apache-2.0 |
+| webrtc / rtc 0.21.1 | https://github.com/webrtc-rs/webrtc | MIT OR Apache-2.0 |
+| Tokio | https://github.com/tokio-rs/tokio | MIT |
+| bytes | https://github.com/tokio-rs/bytes | MIT |
+| async-trait | https://github.com/dtolnay/async-trait | MIT OR Apache-2.0 |
+| ring | https://github.com/briansmith/ring | Apache-2.0 AND ISC |
+| getrandom | https://github.com/rust-random/getrandom | MIT OR Apache-2.0 |
 | Vue / Vue Test Utils / vue-tsc | https://github.com/vuejs | MIT |
 | Vite / Vitest | https://github.com/vitejs / https://github.com/vitest-dev | MIT |
 | Tailwind CSS | https://github.com/tailwindlabs/tailwindcss | MIT |

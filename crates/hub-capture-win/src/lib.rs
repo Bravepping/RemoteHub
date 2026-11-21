@@ -1,5 +1,7 @@
 use serde::Serialize;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
 use thiserror::Error;
 
 #[cfg(windows)]

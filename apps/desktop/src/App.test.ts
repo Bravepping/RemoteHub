@@ -26,6 +26,20 @@ describe('local probe consent and truthful states', () => {
     expect(wrapper.get('[role="alert"]').text()).toContain('浏览器预览');
     expect(wrapper.get('input').attributes('disabled')).toBeDefined();
     expect(runCaptureProbe).not.toHaveBeenCalled();
+    expect(wrapper.find('#loopback-heading').exists()).toBe(false);
+  });
+
+  it('only shows the video experiment when the native runtime opts in', async () => {
+    vi.mocked(getRuntimeInfo).mockResolvedValue({
+      ...runtime,
+      p004_loopback_enabled: true,
+    });
+    const wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.get('#loopback-heading').text()).toContain(
+      'WebRTC 视频环路',
+    );
+    wrapper.unmount();
   });
 
   it('requires a fresh consent and only renders measurements returned by the core', async () => {

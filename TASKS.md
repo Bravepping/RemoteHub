@@ -7,7 +7,7 @@
 - [x] `P0-01` **done** — Cargo/pnpm 锁文件、Tauri v2 原生编译、真实 WebView2 窗口启动与 IPC 刷新通过（Windows 10 22H2）；Windows 11 尚未复测。
 - [x] `P0-02` **done（首个主屏捕获实验）** — AMD 主屏 2560×1440、30 帧/1059ms、28.315 观察 FPS、0 超时；本地 BMP/JSON；拒绝无同意和无效帧数。旋转/光标合成/HDR/桌面切换仍未支持或未验收，详见报告。
 - [x] `P0-03` **done（本机 720p30 编码实验）** — 实际 AMDh264Encoder 硬件 MFT、10 秒/300 帧/零丢帧、Baseline L3.1、颜色/PTS/GOP/完整解码通过；软件 MFT 短时回退验证通过。物理设备丢失和长稳测试未执行，详见 `docs/PHASE0_P003_TEST_REPORT.md`。
-- [ ] `P0-04` **todo** — 尚未实现 webrtc-rs 视频轨；依赖 P0-03 及受授权的信令实验设计，最终需两台 PC。
+- [ ] `P0-04` **doing** — [P0-04a](docs/PHASE0_P004_TEST_REPORT.md) 同机视频实验已编码，待 Windows WebView2 实测；[P0-04b](docs/PHASE0_P004B_PLAN.md) 需完成双机授权与两台 PC 的真实视频测试。
 - [ ] `P0-05` **todo** — 尚未实现 DataChannel；不能用本机函数调用代替通道实测。
 - [ ] `P0-06` **blocked** — 视频通路尚未实现，且未提供可用 coturn 测试节点或第二台 PC；本机未安装 Docker。没有修改云资源。
 - [ ] `P0-07` **doing** — 已交首轮 Spike 报告、实测数据和 ADR 0001；整个媒体链路与备选方案结论需 P0-03..06 后补齐。

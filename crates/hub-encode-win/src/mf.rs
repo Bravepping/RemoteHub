@@ -375,6 +375,19 @@ impl<'a> MfEncoder<'a> {
         pts: i64,
         duration: i64,
     ) -> Result<Vec<EncodedVideoFrame>, EncodeError> {
+        self.encode_until(nv12, pts, duration, || false)
+    }
+
+    pub(crate) fn encode_until(
+        &mut self,
+        nv12: &[u8],
+        pts: i64,
+        duration: i64,
+        stopped: impl Fn() -> bool,
+    ) -> Result<Vec<EncodedVideoFrame>, EncodeError> {
+        if stopped() {
+            return Err(EncodeError::Cancelled);
+        }
         if nv12.len() != self.expected_input_bytes
             || pts < 0
             || duration <= 0
@@ -387,6 +400,9 @@ impl<'a> MfEncoder<'a> {
         let deadline = Instant::now() + Duration::from_secs(2);
         let mut frames = Vec::new();
         while self.events.is_some() && self.input_credits == 0 {
+            if stopped() {
+                return Err(EncodeError::Cancelled);
+            }
             frames.extend(self.take_available()?);
             if self.input_credits > 0 {
                 break;
@@ -395,6 +411,9 @@ impl<'a> MfEncoder<'a> {
                 return Err(EncodeError::Timeout("waiting for MFT input credit"));
             }
             std::thread::sleep(Duration::from_millis(1));
+        }
+        if stopped() {
+            return Err(EncodeError::Cancelled);
         }
         let mut submitted;
         unsafe {
@@ -434,6 +453,16 @@ impl<'a> MfEncoder<'a> {
     }
 
     pub fn drain(&mut self) -> Result<Vec<EncodedVideoFrame>, EncodeError> {
+        self.drain_until(|| false)
+    }
+
+    pub(crate) fn drain_until(
+        &mut self,
+        stopped: impl Fn() -> bool,
+    ) -> Result<Vec<EncodedVideoFrame>, EncodeError> {
+        if stopped() {
+            return Err(EncodeError::Cancelled);
+        }
         unsafe {
             self.transform
                 .ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0)?;
@@ -443,6 +472,9 @@ impl<'a> MfEncoder<'a> {
         let deadline = Instant::now() + Duration::from_secs(3);
         let mut frames = Vec::new();
         loop {
+            if stopped() {
+                return Err(EncodeError::Cancelled);
+            }
             let new = self.take_available()?;
             let empty = new.is_empty();
             frames.extend(new);
@@ -504,7 +536,17 @@ pub fn select<'a>(
     mode: &str,
     real_nv12: &[u8],
 ) -> Result<(MfEncoder<'a>, Vec<CandidateDiagnostic>), EncodeError> {
-    select_with(runtime, config, mode, real_nv12, enumerate)
+    select_with(runtime, config, mode, real_nv12, || false, enumerate)
+}
+
+pub(crate) fn select_until<'a>(
+    runtime: &'a MfRuntime,
+    config: &EncoderConfig,
+    mode: &str,
+    real_nv12: &[u8],
+    stopped: impl Fn() -> bool,
+) -> Result<MfEncoder<'a>, EncodeError> {
+    select_with(runtime, config, mode, real_nv12, stopped, enumerate).map(|(encoder, _)| encoder)
 }
 
 fn select_with<'a>(
@@ -512,10 +554,14 @@ fn select_with<'a>(
     config: &EncoderConfig,
     mode: &str,
     real_nv12: &[u8],
+    stopped: impl Fn() -> bool,
     enumerator: impl Fn(bool) -> Result<Vec<(String, IMFActivate)>, EncodeError>,
 ) -> Result<(MfEncoder<'a>, Vec<CandidateDiagnostic>), EncodeError> {
     let mut diagnostics = Vec::new();
     for hardware in [true, false] {
+        if stopped() {
+            return Err(EncodeError::Cancelled);
+        }
         if mode == "software" && hardware || mode == "hardware" && !hardware {
             continue;
         }
@@ -538,25 +584,32 @@ fn select_with<'a>(
             });
         }
         for (name, activation) in candidates {
+            if stopped() {
+                return Err(EncodeError::Cancelled);
+            }
             let result = (|| {
                 let mut test =
                     MfEncoder::open(runtime, activation.clone(), name.clone(), hardware, config)?;
                 let mut frames = 0;
                 for i in 0..3 {
                     frames += test
-                        .encode(real_nv12, config.pts(i), config.duration(i))?
+                        .encode_until(real_nv12, config.pts(i), config.duration(i), &stopped)?
                         .len();
                 }
-                frames += test.drain()?.len();
+                frames += test.drain_until(&stopped)?.len();
                 if frames == 0 {
                     return Err(EncodeError::Unsupported(
                         "preflight produced no real-frame H264".into(),
                     ));
                 }
                 drop(test);
+                if stopped() {
+                    return Err(EncodeError::Cancelled);
+                }
                 MfEncoder::open(runtime, activation.clone(), name.clone(), hardware, config)
             })();
             match result {
+                Err(EncodeError::Cancelled) => return Err(EncodeError::Cancelled),
                 Ok(encoder) => {
                     diagnostics.push(CandidateDiagnostic {
                         name,
@@ -587,9 +640,14 @@ mod tests {
         {
             let runtime = MfRuntime::new().unwrap();
             assert!(unsafe { CoGetContextToken() }.is_ok());
-            let result = select_with(&runtime, &EncoderConfig::default(), "auto", &[], |_| {
-                Ok(Vec::new())
-            });
+            let result = select_with(
+                &runtime,
+                &EncoderConfig::default(),
+                "auto",
+                &[],
+                || false,
+                |_| Ok(Vec::new()),
+            );
             assert!(matches!(result, Err(EncodeError::Unsupported(_))));
         }
         assert!(unsafe { CoGetContextToken() }.is_err());

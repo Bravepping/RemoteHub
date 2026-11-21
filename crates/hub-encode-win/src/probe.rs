@@ -1,71 +1,25 @@
 use crate::{
-    color::bgra_to_nv12,
+    desktop::{pace_tick, DesktopCapture},
     h264::EncodedVideoFrame,
-    lifecycle::{ProbeGate, StopToken},
+    lifecycle::{ProcessLease, StopToken, GATE},
     mf::{self, MfRuntime},
     EncodeError, EncoderConfig,
 };
-use hub_capture_win::DxgiCapture;
 use serde::Serialize;
 use std::{
     collections::HashSet,
     hash::{Hash, Hasher},
     io::Write,
     path::Path,
-    time::{Duration, Instant},
+    time::Instant,
 };
-use windows::{
-    core::w,
-    Win32::{
-        Foundation::{CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, FILETIME, HANDLE},
-        System::{
-            ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
-            Threading::{CreateMutexW, GetCurrentProcess, GetProcessTimes, ReleaseMutex},
-        },
+use windows::Win32::{
+    Foundation::FILETIME,
+    System::{
+        ProcessStatus::{K32GetProcessMemoryInfo, PROCESS_MEMORY_COUNTERS},
+        Threading::{GetCurrentProcess, GetProcessTimes},
     },
 };
-
-static GATE: ProbeGate = ProbeGate::new();
-
-fn checked_capture(
-    fetch: impl FnOnce()
-        -> Result<Option<hub_capture_win::CapturedFrame>, hub_capture_win::CaptureError>,
-    width: u32,
-    height: u32,
-) -> Result<Option<hub_capture_win::CapturedFrame>, EncodeError> {
-    let frame = fetch()?;
-    if frame
-        .as_ref()
-        .is_some_and(|frame| frame.width != width || frame.height != height)
-    {
-        return Err(EncodeError::Native(
-            "display dimensions changed; restart probe".into(),
-        ));
-    }
-    Ok(frame)
-}
-
-struct ProcessLease(HANDLE);
-impl ProcessLease {
-    fn acquire() -> Result<Self, EncodeError> {
-        unsafe {
-            let handle = CreateMutexW(None, true, w!("Local\\RemoteHub.P003.EncodeProbe"))?;
-            if GetLastError() == ERROR_ALREADY_EXISTS {
-                let _ = CloseHandle(handle);
-                return Err(EncodeError::Busy);
-            }
-            Ok(Self(handle))
-        }
-    }
-}
-impl Drop for ProcessLease {
-    fn drop(&mut self) {
-        unsafe {
-            let _ = ReleaseMutex(self.0);
-            let _ = CloseHandle(self.0);
-        }
-    }
-}
 
 #[derive(Serialize)]
 pub struct FrameMetadata {
@@ -234,33 +188,14 @@ pub fn run(
     }
     let _process_lease = ProcessLease::acquire()?;
     let runtime = MfRuntime::new()?;
-    let mut capture = DxgiCapture::new()?;
-    let first_deadline = Instant::now() + Duration::from_secs(3);
-    let mut first = loop {
-        if stop.is_stopped() {
-            return Err(EncodeError::Native(
-                "stopped before first desktop frame".into(),
-            ));
-        }
-        if let Some(frame) = capture.next_frame(100)? {
-            break frame;
-        }
-        if Instant::now() >= first_deadline {
-            return Err(EncodeError::Timeout("first DXGI frame"));
-        }
-    };
-    let source_width = first.width;
-    let source_height = first.height;
-    let mut nv12 = bgra_to_nv12(
-        &first.bgra,
-        first.width,
-        first.height,
-        first.width as usize * 4,
-        config.width,
-        config.height,
-    )?;
+    let mut capture = DesktopCapture::start(&config, &stop).map_err(|error| match error {
+        EncodeError::Cancelled => EncodeError::Native("stopped before first desktop frame".into()),
+        error => error,
+    })?;
+    let source_width = capture.last_frame.width;
+    let source_height = capture.last_frame.height;
     // Compatibility preflight is encoded from this real DXGI image; preflight data is discarded.
-    let (mut encoder, candidates) = mf::select(&runtime, &config, mode, &nv12)?;
+    let (mut encoder, candidates) = mf::select(&runtime, &config, mode, &capture.nv12)?;
     std::fs::create_dir(output)?;
     let mut writer = SampleWriter {
         file: std::fs::File::create_new(output.join("desktop.h264"))?,
@@ -282,16 +217,10 @@ pub fn run(
     let start = Instant::now();
     let mut tick = 0u64;
     while tick < (config.seconds * config.fps) as u64 && !stop.is_stopped() {
-        let target = Duration::from_nanos(tick * 1_000_000_000 / config.fps as u64);
-        while start.elapsed() < target && !stop.is_stopped() {
-            if let Some(remaining) = target.checked_sub(start.elapsed()) {
-                std::thread::sleep(remaining.min(Duration::from_millis(5)));
-            }
-        }
-        if stop.is_stopped() {
+        let Some((selected, skipped, reuse_desktop)) = pace_tick(&config, tick, start, &stop)
+        else {
             break;
-        }
-        let (selected, skipped, reuse_desktop) = config.schedule(tick, start.elapsed());
+        };
         tick = selected;
         missed += skipped;
         if tick >= (config.seconds * config.fps) as u64 {
@@ -302,30 +231,22 @@ pub fn run(
             late_repeats += 1;
             None
         } else {
-            checked_capture(|| capture.next_frame(0), source_width, source_height)?
+            capture.poll()?
         };
         capture_times.push(cap_start.elapsed().as_secs_f64() * 1000.0);
         if let Some(frame) = update {
             let convert_start = Instant::now();
-            nv12 = bgra_to_nv12(
-                &frame.bgra,
-                frame.width,
-                frame.height,
-                frame.width as usize * 4,
-                config.width,
-                config.height,
-            )?;
+            capture.replace(frame, &config)?;
             convert_times.push(convert_start.elapsed().as_secs_f64() * 1000.0);
-            first = frame;
             desktop_updates += 1;
         } else {
             repeated += 1;
         }
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        first.bgra.hash(&mut hasher);
+        capture.last_frame.bgra.hash(&mut hasher);
         hashes.insert(hasher.finish());
         let encode_start = Instant::now();
-        writer.write(encoder.encode(&nv12, config.pts(tick), config.duration(tick))?)?;
+        writer.write(encoder.encode(&capture.nv12, config.pts(tick), config.duration(tick))?)?;
         encode_times.push(encode_start.elapsed().as_secs_f64() * 1000.0);
         peak = peak.max(memory());
         gpu.sample();
@@ -403,6 +324,7 @@ pub fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{desktop::checked_capture, lifecycle::ProbeGate};
     #[test]
     fn capture_access_lost_and_resize_failures_propagate_and_release_probe_lease() {
         let gate = ProbeGate::new();

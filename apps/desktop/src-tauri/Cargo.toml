@@ -7,6 +7,7 @@ license.workspace = true
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+p004-loopback = ["dep:hub-encode-win", "dep:hub-webrtc", "dep:tokio", "dep:windows-sys"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.6", features = [] }
@@ -15,3 +16,9 @@ tauri-build = { version = "=2.7.6", features = [] }
 tauri = { version = "=2.12.7", features = [] }
 serde.workspace = true
 hub-capture-win = { path = "../../../crates/hub-capture-win" }
+
+[target.'cfg(windows)'.dependencies]
+hub-encode-win = { path = "../../../crates/hub-encode-win", optional = true }
+hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
+tokio = { version = "=1.54.1", features = ["macros", "rt", "sync", "time"], optional = true }
+windows-sys = { version = "=0.61.2", features = ["Win32_UI_WindowsAndMessaging"], optional = true }

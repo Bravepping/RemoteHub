@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue';
+import LoopbackVideoProbe from './features/p004/LoopbackVideoProbe.vue';
 import {
   errorMessage,
   getRuntimeInfo,
@@ -129,6 +130,7 @@ onMounted(refresh);
           </p>
         </section>
       </div>
+      <LoopbackVideoProbe v-if="runtime?.p004_loopback_enabled === true" />
       <footer>本机显式授权 · 无后台共享 · 无模拟设备或网络指标</footer>
     </main>
   </div>

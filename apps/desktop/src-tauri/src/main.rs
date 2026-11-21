@@ -1,5 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(all(windows, feature = "p004-loopback", feature = "custom-protocol"))]
+mod p004;
+
 use hub_capture_win::ProbeReport;
 use serde::Serialize;
 use std::{
@@ -24,6 +27,7 @@ struct RuntimeInfo {
     arch: &'static str,
     capture_backend: &'static str,
     remote_access_enabled: bool,
+    p004_loopback_enabled: bool,
 }
 
 #[tauri::command]
@@ -34,6 +38,11 @@ fn get_runtime_info() -> RuntimeInfo {
         arch: std::env::consts::ARCH,
         capture_backend: "DXGI Desktop Duplication (probe on demand)",
         remote_access_enabled: false,
+        p004_loopback_enabled: cfg!(all(
+            windows,
+            feature = "p004-loopback",
+            feature = "custom-protocol"
+        )),
     }
 }
 
@@ -61,12 +70,16 @@ async fn run_capture_probe(
 }
 
 fn main() {
-    tauri::Builder::default()
-        .manage(std::sync::Arc::new(ProbeState::default()))
-        .invoke_handler(tauri::generate_handler![
-            get_runtime_info,
-            run_capture_probe
-        ])
-        .run(tauri::generate_context!())
+    let builder = tauri::Builder::default().manage(std::sync::Arc::new(ProbeState::default()));
+    let context = tauri::generate_context!();
+    #[cfg(all(windows, feature = "p004-loopback", feature = "custom-protocol"))]
+    let (builder, context) = p004::configure(builder, context);
+    #[cfg(not(all(windows, feature = "p004-loopback", feature = "custom-protocol")))]
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        get_runtime_info,
+        run_capture_probe
+    ]);
+    builder
+        .run(context)
         .expect("RemoteHub desktop startup failed");
 }

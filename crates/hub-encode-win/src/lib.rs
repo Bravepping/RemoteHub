@@ -1,4 +1,6 @@
 pub mod color;
+#[cfg(windows)]
+mod desktop;
 pub mod h264;
 pub mod lifecycle;
 #[cfg(windows)]
@@ -7,6 +9,10 @@ pub mod metrics;
 pub mod mf;
 #[cfg(windows)]
 pub mod probe;
+#[cfg(windows)]
+pub mod stream;
+#[cfg(any(windows, test))]
+mod stream_output;
 
 use thiserror::Error;
 
@@ -24,6 +30,10 @@ pub enum EncodeError {
     Timeout(&'static str),
     #[error("ENCODER_BUSY: another local encoding probe is active")]
     Busy,
+    #[error("ENCODER_CANCELLED: local encoding was stopped")]
+    Cancelled,
+    #[error("ENCODER_BACKPRESSURE: video consumer could not accept a complete access unit")]
+    Backpressure,
     #[error("INVALID_H264: {0}")]
     Bitstream(&'static str),
     #[error(transparent)]
@@ -69,6 +79,17 @@ impl EncoderConfig {
         {
             return Err(EncodeError::InvalidArgument(
                 "probe requires 1280x720@30, 100kbps..20Mbps, 1..30 seconds",
+            ));
+        }
+        Ok(())
+    }
+
+    /// Narrow contract for the in-memory live experiment; the older file probe has its own limits.
+    pub fn validate_stream(&self, consent: bool) -> Result<(), EncodeError> {
+        self.validate(consent)?;
+        if self.bitrate != 4_000_000 || !(5..=30).contains(&self.seconds) {
+            return Err(EncodeError::InvalidArgument(
+                "live probe requires 1280x720@30, 4 Mbps, and 5..30 seconds",
             ));
         }
         Ok(())

@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "crates/hub-capture-win", "crates/hub-encode-win"]
+members = ["apps/desktop/src-tauri", "crates/hub-capture-win", "crates/hub-encode-win", "crates/hub-webrtc"]
 resolver = "2"
 
 [workspace.package]

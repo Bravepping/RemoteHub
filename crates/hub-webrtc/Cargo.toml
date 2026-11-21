@@ -1,0 +1,17 @@
+[package]
+name = "hub-webrtc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait = "=0.1.89"
+bytes = "1"
+getrandom = "0.4"
+rtc = { version = "=0.21.1", default-features = false }
+ring = "=0.17.14"
+serde.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["macros", "rt", "sync", "time"] }
+webrtc = "=0.21.1"
