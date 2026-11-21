@@ -1,0 +1,8 @@
+{
+  "status": "PASS",
+  "full_sessions": 6,
+  "maximum_decoded_frames": 900,
+  "active_stop_verified": true,
+  "active_window_close_verified": true,
+  "original_desktop_media_included": false
+}

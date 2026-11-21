@@ -1,4 +1,4 @@
-param([ValidateRange(1,40)][int]$Seconds=16)
+param([ValidateRange(1,180)][int]$Seconds=16,[ValidateRange(0,8000)][int]$Left=80,[ValidateRange(0,4000)][int]$Top=80)
 # Development-only visible motion source, captured through the real Windows desktop/DXGI path.
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
@@ -8,7 +8,7 @@ $form=New-Object System.Windows.Forms.Form
 $form.AutoScaleMode='None'
 $form.Text='RemoteHub P0-03 - VISIBLE DESKTOP MOTION FIXTURE - closes automatically'
 $form.StartPosition='Manual'
-$form.Location=New-Object System.Drawing.Point(80,80)
+$form.Location=New-Object System.Drawing.Point($Left,$Top)
 $form.ClientSize=New-Object System.Drawing.Size(1280,720)
 $form.TopMost=$true
 $form.Add_Shown({

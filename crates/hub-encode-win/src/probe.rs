@@ -45,9 +45,9 @@ fn checked_capture(
     Ok(frame)
 }
 
-struct ProcessLease(HANDLE);
+pub(crate) struct ProcessLease(HANDLE);
 impl ProcessLease {
-    fn acquire() -> Result<Self, EncodeError> {
+    pub(crate) fn acquire() -> Result<Self, EncodeError> {
         unsafe {
             let handle = CreateMutexW(None, true, w!("Local\\RemoteHub.P003.EncodeProbe"))?;
             if GetLastError() == ERROR_ALREADY_EXISTS {

@@ -1,0 +1,18 @@
+[
+  {
+    "command": "cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings",
+    "exit_code": 0
+  },
+  {
+    "command": "cargo test --workspace --all-features --locked --offline",
+    "exit_code": 0
+  },
+  {
+    "command": "pnpm test:e2e",
+    "exit_code": 0
+  },
+  {
+    "command": "cargo build -p remotehub-desktop --profile probe --features custom-protocol,p004-probe --locked --offline",
+    "exit_code": 0
+  }
+]

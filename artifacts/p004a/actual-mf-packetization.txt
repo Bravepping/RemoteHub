@@ -1,0 +1,13 @@
+$ cargo test -p hub-webrtc --test real_mf_packetization --locked --offline -- --ignored --nocapture
+REMOTEHUB_MF_SAMPLE_DIR=absolute private directory
+
+running 1 test
+actual MF AUs=60 RTP packets=880 source SPS=42041f ignored_constraint_set5=true
+test actual_mf_access_units_packetize_without_changing_sps ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.22s
+     Running tests\real_mf_packetization.rs (target\debug\build\hub-webrtc/192bcf6d87951eaf\out\real_mf_packetization-192bcf6d87951eaf.exe)
+
+EXIT=0

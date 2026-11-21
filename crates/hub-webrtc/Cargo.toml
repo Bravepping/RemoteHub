@@ -1,0 +1,16 @@
+[package]
+name = "hub-webrtc"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+hub-encode-win = { path = "../hub-encode-win" }
+serde.workspace = true
+serde_json.workspace = true
+webrtc = "=0.21.1"
+rtc = { version = "=0.21.1", default-features = false }
+tokio = { version = "=1.54.1", features = ["rt-multi-thread", "sync", "time", "macros"] }
+async-trait = "=0.1.92"
+bytes = "=1.12.2"

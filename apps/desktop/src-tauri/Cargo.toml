@@ -7,6 +7,7 @@ license.workspace = true
 
 [features]
 custom-protocol = ["tauri/custom-protocol"]
+p004-probe = ["dep:hub-webrtc", "dep:tokio", "dep:uuid", "dep:windows", "dep:serde_json"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.6", features = [] }
@@ -15,3 +16,8 @@ tauri-build = { version = "=2.7.6", features = [] }
 tauri = { version = "=2.12.7", features = [] }
 serde.workspace = true
 hub-capture-win = { path = "../../../crates/hub-capture-win" }
+hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
+tokio = { version = "=1.54.1", features = ["sync", "time"], optional = true }
+uuid = { version = "=1.29.3", features = ["v4"], optional = true }
+serde_json = { workspace = true, optional = true }
+windows = { version = "=0.62.2", features = ["Win32_UI_WindowsAndMessaging"], optional = true }

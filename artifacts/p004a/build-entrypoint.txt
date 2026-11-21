@@ -1,0 +1,17 @@
+$ powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/p004.ps1 -BuildOnly
+vite v8.3.8 building client environment for production...
+transforming...
+✓ 20 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                  0.39 kB │ gzip:  0.28 kB
+dist/assets/index-Dlt6CY6Y.css   8.25 kB │ gzip:  2.71 kB
+dist/assets/index-D0s7jG-a.js   78.83 kB │ gzip: 31.17 kB
+
+✓ built in 144ms
+$ pnpm --filter @remotehub/desktop build
+$ vue-tsc --noEmit && vite build
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+    Finished `probe` profile [optimized] target(s) in 25.87s
+
+EXIT=0

@@ -7,6 +7,8 @@ pub mod metrics;
 pub mod mf;
 #[cfg(windows)]
 pub mod probe;
+#[cfg(windows)]
+pub mod stream;
 
 use thiserror::Error;
 

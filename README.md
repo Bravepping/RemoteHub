@@ -1,10 +1,26 @@
-# RemoteHub · Phase 0 首次工程
+# RemoteHub · Phase 0 技术验证
 
-这是已生成并在本机编译测试的 Windows 原型：**最小 Tauri 客户端 + DXGI 主屏采集 + Media Foundation 720p30 H.264 本机编码实验**。目前不能连接另一台电脑。WebRTC、DataChannel、配对与服务端还没有实现，整个 Phase 0 尚未完成。
+这是已生成并在本机编译测试的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2 同机视频环路**。目前不能连接另一台电脑。DataChannel、配对、服务端、双机与 TURN 尚未完成，整个 Phase 0 尚未通过。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 
 P0-03 新实测见 `docs/PHASE0_P003_TEST_REPORT.md`：AMD 硬件 MFT，10 秒 1280×720 / 300 帧 / 零丢帧，标准解码与八色条检查通过。原始裸流不能自带容器 PTS，请用 sidecar 中的 MF 时间戳；开发验证生成的 MP4 已检查为 30fps、10 秒。
+
+## P0-04a 同机视频实验
+
+本机原生 WebView2 已实测：五轮 15 秒各 450 帧、一轮 30 秒 900 帧全部接收/解码/呈现；实际选中 127.0.0.1、接收丢包 0，主动停止与播放中关窗回收通过。报告见 [P0-04a 测试报告](docs/PHASE0_P004_TEST_REPORT.md)。P0-04 两机任务仍为 doing。
+
+普通构建默认关闭此入口。显式构建实验版：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p004.ps1
+# 只构建、不打开窗口
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p004.ps1 -BuildOnly
+```
+
+窗口内每轮须重新勾选本次同意，并由原生确认框批准；5–30 秒，随时停止或关窗。视频经本机 WebRTC/SRTP 传送，未走磁盘视频或 IPC 像素。结束后仅在程序目录 `artifacts/private/p004/` 保存统计，不保存画面。直接运行本轮交付包的 `RemoteHub-P004a.exe` 可进入该实验。
+
+AMD 驱动实际 SPS 标识为 `42041f`，其中不适用约束位按 H.264 解码规则处理；不修改原 SPS，SDP 为 Baseline `42001f`。驱动瑕疵与互通边界见 [设计说明](docs/P004_FORMAT.md)。
 
 ## P0-03 本机编码 probe
 
@@ -62,6 +78,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Mode Captur
 
 - `apps/desktop`：Vue 3 / TypeScript / Tailwind / Tauri v2，受限本机 IPC。
 - `crates/hub-capture-win`：D3D11 / DXGI Desktop Duplication、限时实验、BGRA 读回及 BMP 导出。
+- `crates/hub-encode-win`：MF 编码、CLI 文件实验与无文件实时 AU 生产者。
+- `crates/hub-webrtc`：只绑定 loopback 的本机视频会话、SDP/RTP、3 AU 队列与清理。
 - `scripts`：环境检测、运行入口、可保存结果的验证脚本。
 - `artifacts`：非画面测试证据；`artifacts/private` 中的桌面样本不进 Git 或交付 ZIP。
 - `docs/ADR`：本机实验边界、未开放远控能力的原因及后续接入条件。

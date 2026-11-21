@@ -3,5 +3,5 @@
   "identifier": "main-window",
   "description": "Local Phase 0 window only; no shell, filesystem, network or remote access plugins",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "allow-get-runtime-info", "allow-run-capture-probe", "allow-p004-start-loopback-probe", "allow-p004-signal", "allow-p004-get-stats", "allow-p004-stop-loopback-probe", "allow-p004-save-report"]
 }

@@ -8,6 +8,8 @@
 
 P0-03 采用真实 MF MFT，AMD 硬件异步事件驱动与 Microsoft 软件同步回退，CPU 缩放/NV12；见 ADR 0002。真实 10 秒运动样本通过。视频时钟必须在 GPU 计数器初始化之后开始；允许有界短时落后复用最近真实 NV12。未来有实测瓶颈再评估 GPU 纹理路径。
 
+P0-04a 采用 webrtc/rtc 0.21.1 的新异步 driver API + StaticRTP，3 AU队列，Windows线程持有COM，90kHz以原MF PTS整数换算。只绑定127 UDP，拒绝外机SDP；原生MessageBox本轮授权；feature默认关闭。真实WebView2 157.0.4341.60已通过450/900帧视频与主动停止/关窗。P004父任务仍需双机。见ADR0003/P004_FORMAT。
+
 ## Convention Capture
 
 Rust fmt、TS strict、Vue/TS Prettier。模块依赖 Tauri -> hub-capture-win -> windows。输出样本放 artifacts/private 并排除 Git/打包。正确：测试返回值可来自 fixture；错误：产品显示固定假测量。每次以 artifacts 和当前实测结果更新 TASKS，不继承未实测的成功。
@@ -19,5 +21,7 @@ DXGI 目前 CPU staging、主屏、无光标合成、旋转拒绝、access lost 
 P003 raw Annex B 的 ffprobe r_frame_rate 是估计值，本机报告 60/1，不能覆盖实际 MF 30Hz PTS；MP4 已逐包检查 30fps/10 秒且解码帧与原始 AU 一致。AMD GPU 计数器叫 Video Codec 0，不能只看通用 VideoEncode 名称。WinForms 运动源必须 DPI aware / AutoScaleMode None，使用真实物理边界验证颜色。P0-03 不等于 WebRTC/浏览器或公网互通。
 
 ## Glossary
+
+AMD MFT SPS 42041f 的 constraint_set5 对 profile66 不适用；标准要求解码器忽略，不能逐字节等同42001f或暗改SPS。初始严格比较导致真实失败，已加回归。浏览器过滤host/mDNS候选后的空candidate offer可在本机经Rust127答案形成prflx，实测成功不等于跨机穿透。stop后异步授权/统计结果迟到必须撤销/忽略。私有真实MF测试的环境变量需绝对目录；普通cargo test保留ignored，不假报通过。未经有效测量计数不得把库RTT默认0当作实测0ms。
 
 观察 FPS：收到 DXGI 桌面更新的计数/实验总秒数，不能等同视频编码/传输/解码 FPS。首轮交付完成不等于 Phase 0 退出条件满足。

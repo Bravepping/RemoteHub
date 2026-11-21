@@ -1,0 +1,22 @@
+$ cargo test -p hub-webrtc --test real_mf_packetization --locked --offline -- --ignored --nocapture
+
+running 1 test
+test actual_mf_access_units_packetize_without_changing_sps ... FAILED
+
+failures:
+
+failures:
+    actual_mf_access_units_packetize_without_changing_sps
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.42s
+     Running tests\real_mf_packetization.rs (target\debug\build\hub-webrtc/192bcf6d87951eaf\out\real_mf_packetization-192bcf6d87951eaf.exe)
+
+thread 'actual_mf_access_units_packetize_without_changing_sps' (26136) panicked at crates\hub-webrtc\tests\real_mf_packetization.rs:13:82:
+called `Result::unwrap()` on an `Err` value: Os { code: 3, kind: NotFound, message: "系统找不到指定的路径。" }
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+error: test failed, to rerun pass `-p hub-webrtc --test real_mf_packetization`
+
+EXIT=101

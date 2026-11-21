@@ -6,6 +6,7 @@ export interface RuntimeInfo {
   arch: string;
   capture_backend: string;
   remote_access_enabled: boolean;
+  p004_enabled?: boolean;
 }
 
 export interface ProbeReport {

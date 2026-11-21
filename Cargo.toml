@@ -1,5 +1,5 @@
 [workspace]
-members = ["apps/desktop/src-tauri", "crates/hub-capture-win", "crates/hub-encode-win"]
+members = ["apps/desktop/src-tauri", "crates/hub-capture-win", "crates/hub-encode-win", "crates/hub-webrtc"]
 resolver = "2"
 
 [workspace.package]
@@ -17,3 +17,9 @@ thiserror = "=2.0.18"
 codegen-units = 1
 lto = "thin"
 strip = true
+
+# Native media experiments need optimized CPU conversion without repeated whole-app LTO.
+[profile.probe]
+inherits = "release"
+lto = false
+codegen-units = 16

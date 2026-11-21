@@ -29,3 +29,7 @@ Tauri `p004-probe` Cargo feature 默认关闭；仅显式构建的实验程序�
 失败后保留最后一轮非画面统计；再次开始生成新 sessionId。至少 10 秒真实播放、5 次启停、拒绝授权/并发/非法参数/关闭/编码与连接失败、旧 P0-03 回归和全 workspace 检查共同构成验收，未执行的项目必须列明。测试截图和完整 SDP 只保留本机忽略目录。
 
 参考：[webrtc 0.21.1](https://docs.rs/webrtc/0.21.1/webrtc/)、[PeerConnection API](https://docs.rs/webrtc/0.21.1/webrtc/peer_connection/trait.PeerConnection.html)、[RFC 6184](https://www.rfc-editor.org/rfc/rfc6184)。
+
+## 实测修订：AMD SPS 约束位
+
+首次原生协商选中 127.0.0.1，但在发送前因逐字节限定 `42001f` 而被本程序拒绝。复测真实 P0-03 CLI 得到 `42041f`，60 帧/2 秒/零丢 tick，标准解码通过；差异是 profile_idc=66 时的 constraint_set5_flag。ITU-T H.264 7.4.2.1.1 规定此 profile 的该位应为 0，同时规定解码器忽略它。故明确披露驱动的编码合规瑕疵，只在兼容性判断时忽略这一个不适用位；原 SPS 和媒体字节完全不改写，真实标识仍记录为 42041f，不伪称输出逐字节为 42001f。其他 profile、level 或约束位不匹配仍拒绝；是否能播放以 WebView2 实测为准。参见 [ITU-T H.264 2024](https://www.itu.int/rec/T-REC-H.264-202408-I/en)。

@@ -8,6 +8,10 @@
 | windows-rs | https://github.com/microsoft/windows-rs | MIT OR Apache-2.0 |
 | serde / serde_json | https://github.com/serde-rs | MIT OR Apache-2.0 |
 | thiserror | https://github.com/dtolnay/thiserror | MIT OR Apache-2.0 |
+| webrtc / rtc / rtc-* 0.21.1 | https://github.com/webrtc-rs/webrtc / https://github.com/webrtc-rs/rtc | MIT OR Apache-2.0 |
+| Tokio / async-trait | https://github.com/tokio-rs/tokio / https://github.com/dtolnay/async-trait | MIT / MIT OR Apache-2.0 |
+| bytes / uuid | https://github.com/tokio-rs/bytes / https://github.com/uuid-rs/uuid | MIT / Apache-2.0 OR MIT |
+| ring 0.17.14（传递密码依赖） | https://github.com/briansmith/ring | Apache-2.0 AND ISC |
 | Vue / Vue Test Utils / vue-tsc | https://github.com/vuejs | MIT |
 | Vite / Vitest | https://github.com/vitejs / https://github.com/vitest-dev | MIT |
 | Tailwind CSS | https://github.com/tailwindlabs/tailwindcss | MIT |

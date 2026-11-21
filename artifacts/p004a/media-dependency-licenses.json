@@ -1,0 +1,140 @@
+[
+  {
+    "name": "async-trait",
+    "version": "0.1.92",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/dtolnay/async-trait"
+  },
+  {
+    "name": "bytes",
+    "version": "1.12.2",
+    "license": "MIT",
+    "repository": "https://github.com/tokio-rs/bytes"
+  },
+  {
+    "name": "rcgen",
+    "version": "0.14.10",
+    "license": "MIT OR Apache-2.0",
+    "repository": "https://github.com/rustls/rcgen"
+  },
+  {
+    "name": "ring",
+    "version": "0.17.14",
+    "license": "Apache-2.0 AND ISC",
+    "repository": "https://github.com/briansmith/ring"
+  },
+  {
+    "name": "rtc",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-crypto",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-datachannel",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-dtls",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-ice",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-interceptor",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-mdns",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-media",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-rtcp",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-rtp",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-sctp",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-sdp",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-shared",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-srtp",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-stun",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rtc-turn",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/rtc"
+  },
+  {
+    "name": "rustls",
+    "version": "0.23.46",
+    "license": "Apache-2.0 OR ISC OR MIT",
+    "repository": "https://github.com/rustls/rustls"
+  },
+  {
+    "name": "tokio",
+    "version": "1.54.1",
+    "license": "MIT",
+    "repository": "https://github.com/tokio-rs/tokio"
+  },
+  {
+    "name": "webrtc",
+    "version": "0.21.1",
+    "license": "MIT/Apache-2.0",
+    "repository": "https://github.com/webrtc-rs/webrtc"
+  }
+]

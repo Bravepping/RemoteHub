@@ -155,6 +155,16 @@ fn media_type(config: &EncoderConfig, subtype: GUID) -> Result<IMFMediaType, Enc
 }
 
 impl<'a> MfEncoder<'a> {
+    /// Request the next keyframe on the owning COM thread. Some drivers may reject it.
+    pub fn request_keyframe(&self) -> Result<(), EncodeError> {
+        unsafe {
+            self.transform
+                .cast::<ICodecAPI>()?
+                .SetValue(&CODECAPI_AVEncVideoForceKeyFrame, &VARIANT::from(1u32))?;
+        }
+        Ok(())
+    }
+
     pub fn open(
         runtime: &'a MfRuntime,
         activation: IMFActivate,

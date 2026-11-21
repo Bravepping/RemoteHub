@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-p004-signal"
+description = "Enables the p004_signal command without any pre-configured scope."
+commands.allow = ["p004_signal"]
+
+[[permission]]
+identifier = "deny-p004-signal"
+description = "Denies the p004_signal command without any pre-configured scope."
+commands.deny = ["p004_signal"]

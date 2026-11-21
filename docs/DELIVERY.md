@@ -1,5 +1,7 @@
 # 首次交付清单
 
+当前 P0-04a 交付另见 `PHASE0_P004_TEST_REPORT.md`：`RemoteHub-P004a.exe` 为显式启用本机视频实验的原生程序，附源码、非画面统计、校验文件；P0-04 双机仍 doing。没有覆盖历史首次或 P003 ZIP。
+
 历史首次交付内容如下。P0-03 后续交付另见 `PHASE0_P003_TEST_REPORT.md`，新增独立 `encode-probe.exe` 与源码/非画面验证证据；没有更新首次交付 ZIP 或声称 WebRTC 已完成。
 
 - `RemoteHub.exe`：Windows x64 release 原生测试客户端，双击打开。
