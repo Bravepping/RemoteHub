@@ -5,7 +5,7 @@
 - 4实际云分配各授予600秒，Refresh0成功回应+1.140至1.394秒首次观察socket消失；同PID最多2，逐轮0再继续。后两轮4票无成功Allocate；本轮即时释放后提前停止，原租约deadline检查点null（上一轮6例完整期限证据独立保留）。最终shutdown证实停服务前socket0、coturn inactive/disabled、WSS始终停、timer取消、原配置/unit/FW策略/业务容器与服务集合不变，原始控制捕获/短票清理，SSH关闭。
 - 报告docs/PHASE0_P006C_TEST_REPORT.md，脱敏artifacts/p006c（真实云、local与offline/development分开）；24项最终检查/66 Rust、旧桌面3、16前端、3Edge、11Python；MF1ignored。最终审查后加EOF失败保护与真实闭PC回归，保留云前二进制/sourcehash及最终差异，未为此重启服务。首个component2拒绝及闭通道fixture类型/handler错误留development，修复后重跑。
 - 约束：用户明确跳过接收端主动停止补测，保留原独立日志限制。P006c完整视频/control.v1与WebView2接入、真实物理双机/NAT、trickle/restart/切网恢复未做，SDP外prflx仍拒绝。下一步复用旧视频链路接入，不进入输入或P1。新云启动仍需新范围授权。
-- 运维资料外部清单写入曾因自动审批工作区额度不足未执行，未绕过；仓库中的报告/交接证据完整保留。Git最终SHA以提交/对话为准，避免自引用。
+- 运维资料外部清单写入首次因自动审批工作区额度不足未执行，未绕过；后续Git上传审批恢复后，通过同一审批通道成功更新生命周期及P006c的真实结论/最终停用状态，未保存凭据。仓库报告/交接证据完整保留，Git最终SHA以提交/对话为准，避免自引用。
 
 # TURN生命周期 / P006c开工检查点（历史）
 
