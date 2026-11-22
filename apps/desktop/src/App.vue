@@ -62,24 +62,33 @@ onMounted(refresh);
       <header>
         <div>
           <p class="eyebrow">REMOTEHUB / ENGINEERING PREVIEW</p>
-          <h1>先让真实画面跑起来</h1>
+          <h1>
+            {{
+              runtime?.p007b_diag_enabled
+                ? '检查连接与最终统计'
+                : '先让真实画面跑起来'
+            }}
+          </h1>
         </div>
         <span class="badge">Phase 0</span>
       </header>
       <p class="intro">
         {{
-          runtime?.p004_lan_enabled
-            ? runtime?.p006_enabled
-              ? runtime?.p006c_enabled
-                ? '两台电脑明确确认后，优先直连并在需要时自动中继，验证视频与模拟事件。'
-                : '两台电脑明确确认后，经加密中继验证跨网络视频与模拟事件。'
-              : '两台电脑明确确认后，验证局域网实时视频。'
-            : '当前验证本机窗口与主屏采集，尚未开放设备连接。'
+          runtime?.p007b_diag_enabled
+            ? '只发送合成运动图案，检查连接原因与独立最终统计；不采集桌面，不执行键鼠输入。'
+            : runtime?.p004_lan_enabled
+              ? runtime?.p006_enabled
+                ? runtime?.p006c_enabled
+                  ? '两台电脑明确确认后，优先直连并在需要时自动中继，验证视频与模拟事件。'
+                  : '两台电脑明确确认后，经加密中继验证跨网络视频与模拟事件。'
+                : '两台电脑明确确认后，验证局域网实时视频。'
+              : '当前验证本机窗口与主屏采集，尚未开放设备连接。'
         }}
       </p>
       <RelayVideoProbe
         v-if="runtime?.p006_enabled"
         :direct-enabled="runtime?.p006c_enabled ?? false"
+        :diagnostic-only="runtime?.p007b_diag_enabled ?? false"
       />
       <LanVideoProbe
         v-else-if="runtime?.p004_lan_enabled"

@@ -1,6 +1,11 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export interface NativeStats {
+  direct_pair_diagnostic?: {
+    approved: boolean;
+    local: { reason: string };
+    remote: { reason: string };
+  };
   native_path?: {
     path: 'direct' | 'relay';
     local_type: string;

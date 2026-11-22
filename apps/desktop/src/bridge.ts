@@ -11,6 +11,7 @@ export interface RuntimeInfo {
   p005_enabled?: boolean;
   p006_enabled?: boolean;
   p006c_enabled?: boolean;
+  p007b_diag_enabled?: boolean;
 }
 
 export interface ProbeReport {

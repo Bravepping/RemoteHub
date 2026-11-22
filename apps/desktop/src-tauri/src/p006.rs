@@ -1,7 +1,9 @@
 use hub_probe_wire::{PathMode, Role};
+#[cfg(not(feature = "p007b-diag"))]
+use hub_webrtc::relay_client::PrivateConfig;
 use hub_webrtc::{
     lan::LanStatus,
-    relay_client::{BrowserReady, PrivateConfig, RelayClient},
+    relay_client::{BrowserReady, RelayClient},
 };
 use serde::{Deserialize, Serialize};
 use std::{
@@ -126,6 +128,8 @@ pub async fn p006_start(
     if !(5..=30).contains(&config.seconds) || !config.local_ip.is_private() {
         return Err("P006_CONFIG_INVALID".into());
     }
+    #[cfg(feature = "p007b-diag")]
+    crate::p007b_diag::validate(config.mode, config.seconds)?;
     if (config.mode == PathMode::DirectPreferred && !cfg!(feature = "p006-direct"))
         || config.peer_ip.is_some_and(|ip| !ip.is_private())
         || (config.mode == PathMode::RelayOnly && config.peer_ip.is_some())
@@ -149,11 +153,16 @@ pub async fn p006_start(
         .map_err(|_| "EXE_PATH")?
         .parent()
         .ok_or("EXE_PATH")?
-        .join(if cfg!(feature = "p006-direct") {
+        .join(if cfg!(feature = "p007b-diag") {
+            "r06-private.json"
+        } else if cfg!(feature = "p006-direct") {
             "p006c-private.json"
         } else {
             "p006b-private.json"
         });
+    #[cfg(feature = "p007b-diag")]
+    let private = crate::p007b_diag::load(&path)?;
+    #[cfg(not(feature = "p007b-diag"))]
     let private = PrivateConfig::load(&path)?;
     drop(
         std::net::UdpSocket::bind((config.local_ip, 0))
@@ -164,7 +173,9 @@ pub async fn p006_start(
     }
     let hwnd = window.hwnd().map_err(|_| "NATIVE_WINDOW_REQUIRED")?.0 as usize;
     let action = if config.role == Role::Sender {
-        if config.mode == PathMode::DirectPreferred {
+        if cfg!(feature = "p007b-diag") {
+            "仅生成并发送合成运动图案，不采集桌面、摄像头或麦克风"
+        } else if config.mode == PathMode::DirectPreferred {
             "采集本机主屏，优先加密直连，直连不可用时自动使用指定TURN中继"
         } else {
             "采集本机主屏并经加密 TURN 发送到你亲自配对的另一台电脑"
@@ -193,7 +204,11 @@ pub async fn p006_start(
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
             &HSTRING::from(message),
-            &HSTRING::from("RemoteHub · 本次跨网络视频实验"),
+            &HSTRING::from(if cfg!(feature = "p007b-diag") {
+                "RemoteHub · 本次合成图案连接诊断"
+            } else {
+                "RemoteHub · 本次跨网络视频实验"
+            }),
             MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION,
         ) == IDYES
     })
@@ -313,14 +328,7 @@ pub fn p006_save(
     let s = find(&state, &session_id)?;
     if let Some(e) = receiver_evidence {
         let name = s.save_receiver_evidence(&report_dir()?, &session_id, e)?;
-        return Ok(format!(
-            "artifacts/private/{}/{name}",
-            if cfg!(feature = "p006-direct") {
-                "p006c"
-            } else {
-                "p006b"
-            }
-        ));
+        return Ok(format!("artifacts/private/{}/{name}", report_kind()));
     }
     if let Some(c) = control {
         s.record_control(c)?;
@@ -336,11 +344,17 @@ fn report_dir() -> Result<std::path::PathBuf, String> {
         .map_err(|_| "REPORT_DIR")?
         .parent()
         .ok_or("REPORT_DIR")?
-        .join(if cfg!(feature = "p006-direct") {
-            "artifacts/private/p006c"
-        } else {
-            "artifacts/private/p006b"
-        }))
+        .join("artifacts/private")
+        .join(report_kind()))
+}
+fn report_kind() -> &'static str {
+    if cfg!(feature = "p007b-diag") {
+        "p007b-r06"
+    } else if cfg!(feature = "p006-direct") {
+        "p006c"
+    } else {
+        "p006b"
+    }
 }
 fn write(
     id: &str,
@@ -348,17 +362,13 @@ fn write(
     status: &LanStatus,
     browser_closed: Option<bool>,
 ) -> Result<String, String> {
-    let dir = std::env::current_exe()
-        .map_err(|_| "REPORT_DIR")?
-        .parent()
-        .ok_or("REPORT_DIR")?
-        .join(if cfg!(feature = "p006-direct") {
-            "artifacts/private/p006c"
-        } else {
-            "artifacts/private/p006b"
-        });
+    let dir = report_dir()?;
     std::fs::create_dir_all(&dir).map_err(|_| "REPORT_DIR")?;
-    let bytes=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":if cfg!(feature="p006-direct") {"p006c-v1"}else{"p006b-v1"},"native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_ENCODING")?;
+    let recorded_at_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| "REPORT_CLOCK")?
+        .as_millis();
+    let bytes=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":if cfg!(feature="p007b-diag") {"p007b-r06-v1"}else if cfg!(feature="p006-direct") {"p006c-v1"}else{"p006b-v1"},"recordedAtMs":recorded_at_ms,"native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_ENCODING")?;
     if bytes.len() > 160 * 1024 {
         return Err("REPORT_SIZE".into());
     }
@@ -373,11 +383,7 @@ fn write(
     f.write_all(&bytes).map_err(|_| "REPORT_WRITE")?;
     Ok(format!(
         "artifacts/private/{}/{id}-{event}.json",
-        if cfg!(feature = "p006-direct") {
-            "p006c"
-        } else {
-            "p006b"
-        }
+        report_kind()
     ))
 }
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {

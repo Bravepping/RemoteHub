@@ -1,0 +1,30 @@
+
+running 3 tests
+test p007b_diag::tests::dedicated_build_rejects_other_modes_and_durations ... ok
+test experiment_origin::tests::experimental_commands_only_accept_local_main_window ... ok
+test p007b_diag::tests::no_private_local_override_or_overlong_invitation ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling futures-util v0.3.34
+   Compiling rtc-dtls v0.21.1
+   Compiling wry v0.57.3
+   Compiling tauri-runtime v2.12.4
+   Compiling tao v0.37.3
+   Compiling tokio-rustls v0.26.6
+   Compiling hub-capture-win v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-capture-win)
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+   Compiling hub-probe-wire v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-probe-wire)
+   Compiling hub-encode-win v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-encode-win)
+   Compiling rtc v0.21.1
+   Compiling tauri-runtime-wry v2.12.5
+   Compiling tauri v2.12.7
+   Compiling futures-executor v0.3.34
+   Compiling tokio-tungstenite v0.28.0
+   Compiling futures v0.3.34
+   Compiling webrtc v0.21.1
+   Compiling hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
+    Finished `test` profile [unoptimized] target(s) in 10.22s
+     Running unittests src\main.rs (target\debug\build\remotehub-desktop/28967aacae095906\out\remotehub_desktop-28967aacae095906.exe)
+
+EXIT=0

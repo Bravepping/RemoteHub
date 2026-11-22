@@ -18,4 +18,5 @@
 /deploy/rendezvous-probe/private/
 **/p006b-private.json
 **/p006c-private.json
+**/r06-private.json
 __pycache__/

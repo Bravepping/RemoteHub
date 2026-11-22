@@ -1,0 +1,126 @@
+{
+  "recordedAt": "2026-11-22T12:26:47.754664+08:00",
+  "scope": "offline regression and one-PC local synthetic transport via existing harness; no cloud/new physical two-PC/native GUI test",
+  "automaticCommands": 41,
+  "rustPassed": 82,
+  "frontendPassed": 34,
+  "edgePassed": 3,
+  "pythonLifecyclePassed": 12,
+  "deliveryTests": "see delivery-tests.txt",
+  "localCases": [
+    {
+      "scenario": "auto",
+      "startedAt": "2026-11-22T04:20:35.320Z",
+      "finishedAt": "2026-11-22T04:20:48.921Z",
+      "sourceFrames": 240,
+      "decodedAtFinal": 240,
+      "capture": "live",
+      "errors": [],
+      "cleanup": {
+        "controlClosed": true,
+        "peerClosed": true,
+        "tracksStopped": true,
+        "nativeResourcesReleased": true
+      },
+      "expectedFailure": false,
+      "passed": true
+    },
+    {
+      "scenario": "sender-stop",
+      "startedAt": "2026-11-22T04:20:49.230Z",
+      "finishedAt": "2026-11-22T04:21:00.435Z",
+      "sourceFrames": 172,
+      "decodedAtFinal": 172,
+      "capture": "live",
+      "errors": [],
+      "cleanup": {
+        "controlClosed": true,
+        "peerClosed": true,
+        "tracksStopped": true,
+        "nativeResourcesReleased": true
+      },
+      "expectedFailure": false,
+      "passed": true
+    },
+    {
+      "scenario": "receiver-stop",
+      "startedAt": "2026-11-22T04:21:00.732Z",
+      "finishedAt": "2026-11-22T04:21:10.386Z",
+      "sourceFrames": 160,
+      "decodedAtFinal": 159,
+      "capture": "live",
+      "errors": [],
+      "cleanup": {
+        "controlClosed": true,
+        "peerClosed": true,
+        "tracksStopped": true,
+        "nativeResourcesReleased": true
+      },
+      "expectedFailure": false,
+      "passed": true
+    },
+    {
+      "scenario": "stats-failure",
+      "startedAt": "2026-11-22T04:21:10.726Z",
+      "finishedAt": "2026-11-22T04:21:20.756Z",
+      "sourceFrames": 173,
+      "decodedAtFinal": 161,
+      "capture": "last_known",
+      "errors": [
+        "DIAG_GETSTATS_FAILURE"
+      ],
+      "cleanup": {
+        "controlClosed": true,
+        "peerClosed": true,
+        "tracksStopped": true,
+        "nativeResourcesReleased": true
+      },
+      "expectedFailure": true,
+      "passed": true
+    },
+    {
+      "scenario": "wss-disconnect",
+      "startedAt": "2026-11-22T04:21:21.086Z",
+      "finishedAt": "2026-11-22T04:21:31.986Z",
+      "sourceFrames": 160,
+      "decodedAtFinal": 160,
+      "capture": "live",
+      "errors": [
+        "P006_WSS_CLOSED"
+      ],
+      "cleanup": {
+        "controlClosed": true,
+        "peerClosed": true,
+        "tracksStopped": true,
+        "nativeResourcesReleased": true
+      },
+      "expectedFailure": true,
+      "passed": true
+    }
+  ],
+  "programSha256": "61b6e4815e7339ca0823c6c304593368f2d2a28ba8bd1b666a0eea4169df54c5",
+  "selfCheck": {
+    "automaticNetworkStart": false,
+    "buildTag": "p007b-r06-v1",
+    "candidateValidation": "exact_authenticated_sdp",
+    "desktopCapture": false,
+    "inputInjection": false,
+    "maximumInvitationRemainingSeconds": 1200,
+    "mode": "direct_preferred",
+    "nativeConsentRequired": true,
+    "privateConfigFile": "r06-private.json",
+    "reportDirectory": "artifacts/private/p007b-r06",
+    "seconds": 8,
+    "sourceKind": "synthetic_nv12"
+  },
+  "productSourceDigest": "6aed39b67b466db48dd6e8548815f140e3214e424eef346172343caa9f2f9bf3",
+  "productSourceDigestScope": "sorted apps/crates paths + NUL + each current file SHA256; not a reproducible-binary claim",
+  "historicalReportsAndEvidenceUnchanged": true,
+  "localTemporaryCredentialsDeleted": true,
+  "cloudStarted": false,
+  "desktopCaptured": false,
+  "physicalTwoPcTest": "NOT_RUN",
+  "E04": "accepted_by_explicit_user_exception",
+  "R06": "OPEN",
+  "phase0Exit": "HOLD"
+}

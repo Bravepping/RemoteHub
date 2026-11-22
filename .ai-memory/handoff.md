@@ -1,3 +1,11 @@
+# P0-07-B 准备交付检查点（E04已批准，R06在线未授权）
+
+- 用户明确接受P004归档真实统计+本人观看替代录屏，限定既有阶段范围；新增PHASE0_P007B_DECISION.md，P004父项按例外done，正式父项5/7。旧未录屏事实/旧报告/规范/统计不改。R06未豁免，P006/P007及Phase0退出仍HOLD，不进Phase1。
+- 基线main dbea0e3干净，先ADR0013/契约9c0b87e。新p007b-diag专用Tauri gate固定8秒/DirectPreferred，复用load_operator_synthetic(false)、Session/MF/NV12/RelayProbe/认证WSS/DIAG。只能合成源，旧capture handler不注册，无桌面开关/故障开关/TLS或候选绕过。新r06-private.json最多1200秒，包不带有效配置；原生双向同意保留。
+- 41项完整默认/全feature/专用feature安全回归全过：82 Rust/34前端/3Edge/12Python，私有MF1ignored；旧桌面及专用3项单测分别保留。9项PowerShell/打包/隐私/SHA正负例过。五轮8秒本机localhost TLS/Session/MF/Edge/control合成真实传输过；正常240全帧/100ACK，短停止与故障保持真实计数/last_known；它们不是打包原生WebView2 GUI/两物理机/新云验证。无实际桌面、无阿里云登录/启动。临时TLS/测试目录已清理。
+- 原生报告专用目录artifacts/private/p007b-r06，时间/分侧原因，独立receiver-pre-close/final沿用受限journal。Export-R06Summary.ps1先验证本包程序hash，再按固定白名单导出；错误/未知/缺失不补真值。Verify-SHA256.ps1离线核对。package-p007b.py只复制白名单，验证专用EXE身份/当前验证SHA/测试/产品源码已提交。程序17,053,696字节 SHA61b6e4815e7339ca0823c6c304593368f2d2a28ba8bd1b666a0eea4169df54c5。
+- docs/P007B_R06_RUNBOOK/ONLINE_PLAN及PHASE0_P007B_TEST_REPORT已准备；未来最多20分钟/4alloc/最多两轮8秒，重点候选原因与独立终态，不要求100条完整串流，不重复旧停止补测；临时专用WSS/TURN启动仍需用户新授权。先准备待激活ZIP及SHA后提交GitHub，等审查，不自行扩展或在线复现。包与最终源码SHA以delivery.json/本轮交付为准。
+
 # P0-07-A 技术总评检查点（只做评审，不启动测试服务）
 
 - 基线GitHub/main 246dcea干净；本轮汇总真实证据、比较WebRTC与Sunshine/Moonlight/EasyTier备选，更新README过时状态。没有改业务/依赖/权限/原报告/原统计，没有云登录/启动、桌面采集或新双机，旧授权不能复用。

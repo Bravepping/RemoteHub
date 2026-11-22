@@ -13,6 +13,7 @@ p005-control = ["p004-lan"]
 p006-turn-probe = ["dep:hub-webrtc", "hub-webrtc/p006-turn-probe"]
 p006-relay = ["p005-control", "hub-webrtc/p006-relay", "dep:hub-probe-wire", "windows/Win32_NetworkManagement_IpHelper"]
 p006-direct = ["p006-relay", "hub-webrtc/p006-direct"]
+p007b-diag = ["p006-direct", "hub-webrtc/p006-session-probe"]
 
 [build-dependencies]
 tauri-build = { version = "=2.7.6", features = [] }

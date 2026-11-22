@@ -1,0 +1,1 @@
+Offline PowerShell delivery tests first run: 8 tests, 2 positive cases failed because Enum was parsed as the PowerShell keyword. Negative exits at this point were not accepted as security coverage. Renamed helper Safe-Enum and reran all positive/negative cases. No cloud/desktop actions.

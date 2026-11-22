@@ -1,0 +1,14 @@
+test_allowed_pair_diagnosis_retains_side_and_reason_only (test_p007b_delivery.DeliveryTests.test_allowed_pair_diagnosis_retains_side_and_reason_only) ... ok
+test_last_known_timestamp_and_unknown_cleanup_preserved (test_p007b_delivery.DeliveryTests.test_last_known_timestamp_and_unknown_cleanup_preserved) ... ok
+test_numeric_string_cannot_smuggle_private_payload (test_p007b_delivery.DeliveryTests.test_numeric_string_cannot_smuggle_private_payload) ... ok
+test_old_or_desktop_report_refused (test_p007b_delivery.DeliveryTests.test_old_or_desktop_report_refused) ... ok
+test_packager_refuses_existing_or_external_destination (test_p007b_delivery.DeliveryTests.test_packager_refuses_existing_or_external_destination) ... ok
+test_packager_refuses_non_diagnostic_identity (test_p007b_delivery.DeliveryTests.test_packager_refuses_non_diagnostic_identity) ... ok
+test_private_value_in_diagnostic_enum_refused (test_p007b_delivery.DeliveryTests.test_private_value_in_diagnostic_enum_refused) ... ok
+test_redaction_and_missing_final_stay_truthful (test_p007b_delivery.DeliveryTests.test_redaction_and_missing_final_stay_truthful) ... ok
+test_sha_check_detects_tampering (test_p007b_delivery.DeliveryTests.test_sha_check_detects_tampering) ... ok
+
+----------------------------------------------------------------------
+Ran 9 tests in 2.578s
+
+OK

@@ -2,7 +2,7 @@
 
 这是已构建和实测的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。真实双机局域网视频、同一PeerConnection上的DataChannel模拟控制、跨网强制TURN均已通过；P2P优先/受阻自动回退已通过真实云WSS/TURN合成视频测试，并有真实双机直连与手机热点中继成功轮。
 
-当前审查基线为`246dcea`：新增严格候选脱敏诊断和接收端独立最终统计，本机自动验证通过；该新增版本尚无新的云端/物理双机/嵌入WebView2关窗实测。P004原录屏缺失、P006c两次连接拒绝未归因及旧接收端独立final缺口仍保留。**最低媒体技术条件已有实测，正式Phase0退出待审查**，详见[P0-07-A总评](docs/PHASE0_P007A_REVIEW.md)和[ADR0012](docs/ADR/0012-p007a-phase0-exit-review.md)。尚无实际键鼠注入或持久设备身份服务，不是可发布远控成品。
+`246dcea`已新增严格候选脱敏诊断和接收端独立最终统计，本机自动验证通过；尚无该新增版本的云端/物理双机/嵌入WebView2关窗实测。用户现已明确批准P004以归档真实统计+现场确认替代录屏，在限定范围内按证据例外验收；历史未录屏事实保留。P006c两次连接拒绝未归因及旧接收端独立final缺口仍待审查。**父任务完成5/7，正式Phase0退出继续等待R06结论**，见[P0-07-A总评（当时结论）](docs/PHASE0_P007A_REVIEW.md)及[P0-07-B追加决议](docs/PHASE0_P007B_DECISION.md)。尚无实际键鼠注入或持久设备身份服务，不是可发布远控成品。
 
 下文按交付时间归档；各节的测试数量和限制仅适用于该轮，当前状态以上述总评为准。云服务最近一次核对已于2026-11-22 09:53:20停止、不自启，临时配置已清理；后续DIAG及总评未启动或实时复查云端，旧包不能自行恢复服务。
 
@@ -12,7 +12,7 @@ P0-03 新实测见 `docs/PHASE0_P003_TEST_REPORT.md`：AMD 硬件 MFT，10 秒 1
 
 ## P0-04a 同机视频实验
 
-本机原生 WebView2 已实测：五轮 15 秒各 450 帧、一轮 30 秒 900 帧全部接收/解码/呈现；实际选中 127.0.0.1、接收丢包 0，主动停止与播放中关窗回收通过。报告见 [P0-04a 测试报告](docs/PHASE0_P004_TEST_REPORT.md)。后续P004b双机视频已通过，P004父项保留doing的原因是原录屏证据偏差待审查。
+本机原生 WebView2 已实测：五轮 15 秒各 450 帧、一轮 30 秒 900 帧全部接收/解码/呈现；实际选中 127.0.0.1、接收丢包 0，主动停止与播放中关窗回收通过。报告见 [P0-04a 测试报告](docs/PHASE0_P004_TEST_REPORT.md)。P004b双机视频后续已通过；P004父项现按用户明确批准的证据例外验收，原未录屏事实不变。
 
 普通构建默认关闭此入口。显式构建实验版：
 
@@ -30,7 +30,7 @@ AMD 驱动实际 SPS 标识为 `42041f`，其中不适用约束位按 H.264 解�
 
 显式构建 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p004b.ps1 -BuildOnly`，生成的优化程序支持发送/接收两个角色。每轮两端原生确认、一次性码认证，原生TCP/UDP仅允许指定对端，连接中断或最长30秒后停止；统计保存到程序目录 `artifacts/private/p004b`。普通构建和 P004a 的网络范围不变。
 
-操作与限定防火墙设置见 [双机操作说明](docs/P004B_RUNBOOK.md)，范围/兼容性见 ADR0004。首轮RTCP候选校验错误已修复；v2真实双机30秒900帧全部接收/解码/呈现，1280×720、丢包0，主动停止/关窗/拔线回收通过。详见 [双机测试报告](docs/PHASE0_P004B_TEST_REPORT.md)。本轮不保存画面，基线要求的录屏未留存，P004父项仍保留证据差异。
+操作与限定防火墙设置见 [双机操作说明](docs/P004B_RUNBOOK.md)，范围/兼容性见 ADR0004。首轮RTCP候选校验错误已修复；v2真实双机30秒900帧全部接收/解码/呈现，1280×720、丢包0，主动停止/关窗/拔线回收通过。详见 [双机测试报告](docs/PHASE0_P004B_TEST_REPORT.md)。当时未保存画面，基线录屏未留存；现用户已接受真实统计+现场观看替代，仅用于本阶段限定范围，不补造录屏。
 
 ## P0-05 模拟控制 DataChannel
 
@@ -106,6 +106,12 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 保持原精确候选/UDP授权，新增分侧拒绝原因、地址类别和相等关系计数；无原地址、端口、SDP或凭据。旧失败集合缺host是已确认线索，但被拒绝pair未保留，不能判定历史根因或放宽匹配。新增接收端原生独立receiver-pre-close/receiver-final文件，关闭前真实getStats及清理状态落盘；读取失败保留带原时间的last_known或明确unavailable，写盘失败仍回收，停止不等待日志才撤销控制。
 
 完整35项回归及本机5轮真实合成传输通过（80 Rust/32前端/3 Edge/12 Python，1私有样本ignored），不采集桌面、不启动云端或重测物理双机。[DIAG报告](docs/PHASE0_P006C_DIAG_TEST_REPORT.md)、[ADR0011](docs/ADR/0011-p006c-diagnostics-final-evidence.md)、[契约](docs/P006C_DIAG_CONTRACT.md)、[最小在线方案（未授权）](docs/P006C_DIAG_MINIMUM_ONLINE_PLAN.md)。复现入口scripts/p006c-diag-checks.ps1；本机合成入口`node scripts/p006c-diag-local.mjs --local PRIVATE_INTERFACE_IPV4`，证据artifacts/p006c-diag。历史记录不追补；当前已进入P0-07-A技术总评，尚未签署正式退出或进入Phase1。
+
+## P0-07-B R06 定向诊断准备
+
+新增默认关闭`p007b-diag`专用Tauri构建，固定8秒合成运动图案、DirectPreferred和本次原生确认，不提供桌面源或丢包注入开关；不会读取旧p006c-private.json。复用现有Session/控制/认证WSS及独立最终统计；私有邀请剩余期不超过20分钟。待激活包不含有效配置，`--r06-self-check`只检查构建身份，不启动窗口或网络。
+
+[准备报告](docs/PHASE0_P007B_TEST_REPORT.md)、[操作说明](docs/P007B_R06_RUNBOOK.md)、[待授权20分钟方案](docs/P007B_R06_ONLINE_PLAN.md)、[交付SHA/成员清单](artifacts/p007b/delivery.json)。安全回归和本机合成结果与新物理双机NOT_RUN分开记录；本轮不启动阿里云、不要求现在操作两机、不采集真实桌面、不进入Phase1。包准备好后等待审查，R06保持开放。
 
 ## P0-03 本机编码 probe
 

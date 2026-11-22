@@ -4,7 +4,10 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { RelayProbe } from './relay';
 import type { LanStatus, LanReceiver } from '../p004/lan';
-const props = defineProps<{ directEnabled?: boolean }>();
+const props = defineProps<{
+  directEnabled?: boolean;
+  diagnosticOnly?: boolean;
+}>();
 const mode = ref<'relay_only' | 'direct_preferred'>(
   props.directEnabled ? 'direct_preferred' : 'relay_only',
 );
@@ -76,7 +79,7 @@ async function start() {
     role: role.value,
     consent: consent.value,
     localIp: localIp.value,
-    seconds: 30,
+    seconds: props.diagnosticOnly ? 8 : 30,
     pairingCode: inputCode.value,
     mode: mode.value,
     peerIp:
@@ -97,9 +100,11 @@ onBeforeUnmount(() => {
   <section class="relay-panel">
     <h2>
       {{
-        props.directEnabled
-          ? 'P0-06c · 直连优先双机实验'
-          : 'P0-06b · 跨网络 TURN 双机实验'
+        props.diagnosticOnly
+          ? 'R06 · 连接定向诊断（仅合成图案）'
+          : props.directEnabled
+            ? 'P0-06c · 直连优先双机实验'
+            : 'P0-06b · 跨网络 TURN 双机实验'
       }}
     </h2>
     <p>
@@ -108,10 +113,14 @@ onBeforeUnmount(() => {
           ? '优先直连，需要时自动中继'
           : '两端强制 TURN'
       }}
-      · 720p30 · 30秒 · 100条模拟事件 · 不执行键鼠输入
+      · 720p30 · {{ props.diagnosticOnly ? '最多8秒，可提前停止' : '30秒' }} ·
+      最多100条模拟事件 · 不执行键鼠输入
+    </p>
+    <p v-if="props.diagnosticOnly">
+      本构建只生成图案，不采集桌面、摄像头或麦克风。需等待另行授权并取得新配置后使用；每轮双方亲自确认。
     </p>
     <div class="relay-form">
-      <label v-if="props.directEnabled"
+      <label v-if="props.directEnabled && !props.diagnosticOnly"
         >连接方式<select v-model="mode" :disabled="busy">
           <option value="direct_preferred">优先直连，自动中继</option>
           <option value="relay_only">强制中继（对照）</option>
@@ -120,8 +129,12 @@ onBeforeUnmount(() => {
       <label
         >本机角色
         <select v-model="role" :disabled="busy">
-          <option value="sender">发送屏幕（宽带电脑）</option>
-          <option value="receiver">接收画面（热点电脑）</option>
+          <option value="sender">
+            {{ props.diagnosticOnly ? '发送合成图案' : '发送屏幕（宽带电脑）' }}
+          </option>
+          <option value="receiver">
+            {{ props.diagnosticOnly ? '接收合成图案' : '接收画面（热点电脑）' }}
+          </option>
         </select></label
       >
       <label
@@ -148,7 +161,11 @@ onBeforeUnmount(() => {
     </div>
     <label
       ><input v-model="consent" type="checkbox" :disabled="busy" />
-      我同意本次视频与模拟事件实验，明白不保存画面</label
+      {{
+        props.diagnosticOnly
+          ? '我同意本次合成图案连接诊断，明白不采集桌面'
+          : '我同意本次视频与模拟事件实验，明白不保存画面'
+      }}</label
     >
     <div class="relay-actions">
       <button :disabled="busy || !consent || !localIp" @click="start">
@@ -192,6 +209,13 @@ onBeforeUnmount(() => {
       × {{ receiver?.videoHeight ?? 0 }}
     </p>
     <p v-if="error" class="relay-error">{{ error }}</p>
+    <p v-if="props.diagnosticOnly">
+      原生发送端候选校验：本地
+      {{ status?.source?.direct_pair_diagnostic?.local.reason ?? '未获得' }} /
+      远端
+      {{ status?.source?.direct_pair_diagnostic?.remote.reason ?? '未获得' }}。
+      独立最终统计会在停止时保存；缺失不会显示为通过。
+    </p>
     <p v-if="saved">统计已保存：{{ saved }}</p>
     <video ref="video" autoplay muted playsinline></video>
   </section>

@@ -1,0 +1,6 @@
+turn-allocate-probe --approved-target PRIVATE_JSON [--lifecycle|--connected-lifecycle]
+Requires explicit ownership/authorization of that exact TURN endpoint and fresh short-term credentials.
+--lifecycle records gather/close timestamps; --connected-lifecycle uses a private local stdio data-only SDP broker and fixed ping/pong. Server release needs independent observation.
+No capture, video, input injection or cloud deployment. Default invocation performs no network access.
+
+EXIT=0

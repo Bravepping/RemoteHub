@@ -8,6 +8,8 @@ mod p004;
 mod p004_lan;
 #[cfg(feature = "p006-relay")]
 mod p006;
+#[cfg(feature = "p007b-diag")]
+mod p007b_diag;
 
 #[cfg(not(feature = "p006-relay"))]
 use hub_capture_win::ProbeReport;
@@ -43,6 +45,7 @@ struct RuntimeInfo {
     p005_enabled: bool,
     p006_enabled: bool,
     p006c_enabled: bool,
+    p007b_diag_enabled: bool,
 }
 
 #[tauri::command]
@@ -51,13 +54,18 @@ fn get_runtime_info() -> RuntimeInfo {
         app_version: env!("CARGO_PKG_VERSION"),
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
-        capture_backend: "DXGI Desktop Duplication (probe on demand)",
+        capture_backend: if cfg!(feature = "p007b-diag") {
+            "Synthetic NV12 diagnostic only (no desktop capture)"
+        } else {
+            "DXGI Desktop Duplication (probe on demand)"
+        },
         remote_access_enabled: false,
         p004_enabled: cfg!(feature = "p004-probe"),
         p004_lan_enabled: cfg!(feature = "p004-lan"),
         p005_enabled: cfg!(feature = "p005-control"),
         p006_enabled: cfg!(feature = "p006-relay"),
         p006c_enabled: cfg!(feature = "p006-direct"),
+        p007b_diag_enabled: cfg!(feature = "p007b-diag"),
     }
 }
 
@@ -105,6 +113,10 @@ async fn run_capture_probe(
 }
 
 fn main() {
+    #[cfg(feature = "p007b-diag")]
+    if p007b_diag::cli() {
+        return;
+    }
     let builder = tauri::Builder::default();
     #[cfg(not(feature = "p006-relay"))]
     let builder = builder.manage(std::sync::Arc::new(ProbeState::default()));
@@ -171,7 +183,11 @@ fn main() {
         .setup(|app| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
-                window.set_title("RemoteHub · P0-06b 跨网络 TURN 实验 v1")?;
+                window.set_title(if cfg!(feature = "p007b-diag") {
+                    "RemoteHub · R06 连接诊断（仅合成图案）"
+                } else {
+                    "RemoteHub · P0-06b 跨网络 TURN 实验 v1"
+                })?;
             }
             Ok(())
         })

@@ -32,6 +32,12 @@ fn synthetic_loopback_entry_is_explicit_and_cannot_be_enabled_by_private_json() 
             && operator.synthetic_source
             && operator.diagnostic_drop_direct
     );
+    let diagnostic = PrivateConfig::load_operator_synthetic(&path, false).unwrap();
+    assert!(
+        !diagnostic.is_local_synthetic()
+            && diagnostic.synthetic_source
+            && !diagnostic.diagnostic_drop_direct
+    );
     public["synthetic_source"] = serde_json::json!(true);
     std::fs::write(&path, serde_json::to_vec(&public).unwrap()).unwrap();
     assert!(PrivateConfig::load(&path).is_err());

@@ -40,6 +40,14 @@ if (
   throw new Error('EXPLICIT_WSS_CASE_AND_SCOPE_REQUIRED');
 const local = cloud ? args[3] : args[1],
   scenario = cloud ? args[5] : args[3];
+const shortLocal = process.env.REMOTEHUB_R06_SHORT_LOCAL;
+if (shortLocal !== undefined && (cloud || shortLocal !== '1'))
+  throw new Error('R06_SHORT_FIXTURE_LOCAL_ONLY');
+const seconds = shortLocal
+  ? 8
+  : ['auto', 'fallback'].includes(scenario)
+    ? 10
+    : 15;
 const startedAt = new Date().toISOString();
 if (
   !Object.values(networkInterfaces())
@@ -192,7 +200,7 @@ try {
       '--approved-local',
       local,
       '--seconds',
-      ['auto', 'fallback'].includes(scenario) ? '10' : '15',
+      String(seconds),
       ...(scenario === 'fallback' ? ['--drop-direct'] : []),
     ],
     { stdio: ['pipe', 'pipe', 'pipe'] },
@@ -327,7 +335,7 @@ try {
     },
     {
       local,
-      seconds: ['auto', 'fallback'].includes(scenario) ? 10 : 15,
+      seconds,
       cloud,
     },
   );
@@ -434,13 +442,13 @@ try {
         ? Boolean(final.error)
         : !final.error) &&
     (['auto', 'fallback'].includes(scenario)
-      ? source.frames_sent === 300 &&
-        source.stream.frames_input === 300 &&
-        source.stream.frames_encoded === 300 &&
-        final.receiver.framesReceived === 300 &&
-        final.receiver.framesDecoded === 300 &&
-        final.receiver.framesRendered === 300
-      : source.frames_sent > 0 && source.frames_sent < 450) &&
+      ? source.frames_sent === seconds * 30 &&
+        source.stream.frames_input === seconds * 30 &&
+        source.stream.frames_encoded === seconds * 30 &&
+        final.receiver.framesReceived === seconds * 30 &&
+        final.receiver.framesDecoded === seconds * 30 &&
+        final.receiver.framesRendered === seconds * 30
+      : source.frames_sent > 0 && source.frames_sent < seconds * 30) &&
     (scenario !== 'fallback' ||
       (source.native_path.path === 'relay' &&
         source.diagnostic_transport?.drop_direct &&
@@ -448,6 +456,7 @@ try {
     (scenario === 'fallback' || source.native_path.path === 'direct');
   const result = {
     scenario,
+    sourceDurationSeconds: seconds,
     startedAt,
     finishedAt: new Date().toISOString(),
     scope: cloud
