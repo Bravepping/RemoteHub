@@ -1,0 +1,70 @@
+{
+  "scope": "two physical Windows PCs, operator-approved DXGI/MF/Tauri/WebView2 video and control.v1",
+  "successfulRounds": [
+    {
+      "path": "direct",
+      "source": "desktop",
+      "senderFrames": 900,
+      "nativeSelectedPair": {
+        "local_type": "host",
+        "path": "direct",
+        "protocol": "udp",
+        "remote_type": "srflx"
+      },
+      "browserPeriodicPair": [
+        "srflx",
+        "srflx"
+      ],
+      "receiverLastPeriodicFrames": {
+        "framesReceived": 893,
+        "framesDecoded": 893,
+        "framesRendered": 893
+      },
+      "receiverLastPeriodicPacketsLost": 0,
+      "receiverLastPeriodicFreezeCount": 0,
+      "simulatedEventsSentReceivedAckConfirmed": 100,
+      "resourcesReleased": true,
+      "receiverIndependentFinalCollected": false,
+      "receiverFinalFrameCount": null
+    },
+    {
+      "path": "relay",
+      "source": "desktop",
+      "senderFrames": 900,
+      "nativeSelectedPair": {
+        "local_type": "relay",
+        "path": "relay",
+        "protocol": "udp",
+        "remote_type": "relay"
+      },
+      "browserPeriodicPair": [
+        "relay",
+        "relay"
+      ],
+      "receiverLastPeriodicFrames": {
+        "framesReceived": 880,
+        "framesDecoded": 880,
+        "framesRendered": 880
+      },
+      "receiverLastPeriodicPacketsLost": 0,
+      "receiverLastPeriodicFreezeCount": 0,
+      "simulatedEventsSentReceivedAckConfirmed": 100,
+      "resourcesReleased": true,
+      "receiverIndependentFinalCollected": false,
+      "receiverFinalFrameCount": null
+    }
+  ],
+  "earlierRejectedAttempts": 2,
+  "earlierFailure": "DIRECT_SELECTED_PAIR_NOT_APPROVED; zero source frames; exact endpoint guard stayed closed; cause not yet attributed",
+  "cloudAllocationCount": 8,
+  "cloudAllocationClassification": "refresh_zero_immediate",
+  "maximumConcurrentAllocations": 2,
+  "releaseObservationDelaySeconds": [
+    1.061513874,
+    1.465851294
+  ],
+  "cloudServicesStopped": true,
+  "receiverIndependentFinalCollected": false,
+  "limitations": "Source final/periodic authenticated receiver metrics plus human observation; no receiver final 900 claim, NAT compatibility and early rejected attempts remain limited evidence.",
+  "phase": "P0-06c; stop for review, no input injection or Phase1"
+}

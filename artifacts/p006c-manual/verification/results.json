@@ -1,0 +1,26 @@
+{
+  "checks": [
+    {
+      "name": "manual-evidence",
+      "command": "python scripts/p006c-manual-evidence.py",
+      "exitCode": 0,
+      "finishedAt": "2026-11-22T09:58:10.926223+08:00"
+    },
+    {
+      "name": "syntax",
+      "command": "python -m py_compile scripts/p006c-manual-evidence.py deploy/rendezvous-probe/p006c-manual-ops/manual-observe.py deploy/rendezvous-probe/p006c-manual-ops/manual-cleanup.py",
+      "exitCode": 0,
+      "finishedAt": "2026-11-22T09:58:10.975744+08:00"
+    },
+    {
+      "name": "public-evidence-private-data-scan",
+      "passed": true,
+      "finishedAt": "2026-11-22T09:58:10.979624+08:00"
+    }
+  ],
+  "productSourceChanged": false,
+  "productCodeCommit": "d805ecbffd8277acf4130bb2fc10e0584888343e",
+  "desktopSha256": "164e4bc7c7edcba5559083832f1790ba3aa453ab02374e62396b156afd948bf1",
+  "fullProductRegressionRerun": false,
+  "priorRegressionReport": "docs/PHASE0_P006C_VIDEO_CLOUD_TEST_REPORT.md"
+}

@@ -1,4 +1,14 @@
-# P006c 真实云视频自动验证交付检查点
+# P006c 真实双机手动验收收尾（当前服务已停）
+
+- 用户单独授权最多90分钟，本轮亲自批准两端采集；main基线65993e1，沿用d805ecb程序，未改产品源码/不代点。09:39:31启动独立低权transient WSS及既有专用TURN，09:53:20提前停服，expiry timer已取消，授权结束不得沿用重开。
+- 两真实Windows成功轮：LAN直连native host/srflx、浏览器认证周期srflx/srflx；B手机热点轮双方relay/relay。ICE All、desktop源DXGI/MF各900输入/编码/发送，720p，100发送/原生接收/ACK/确认，pingpong1/序号1..101/异常0、源控制join。用户观看变化画面并确认双方资源回收无错。
+- 接收端认证末周期分别893/880接收/解码/呈现，lost0/freeze0；B独立final未收取，不能写全链最终900或用源browserClosed冒充B关闭证明。更早两次DIRECT_SELECTED_PAIR_NOT_APPROVED失败，0帧/0控制，资源已回收，保留development；原因未归因，未改安全匹配或声称已修复。P006c保持doing、成功轮与本次操作收尾完成、待审查上述问题；P006/Phase0不提前全done，不进输入或Phase1，不要求重复旧P006b接收端停止补测。
+- 同coturn PID337919最多2分配，四次尝试8实际Allocation均Refresh0请求/成功回应+1.0615–1.4659秒首次socket消失；停服务前socket0。原租约600秒，本轮不声称所有deadline+15再测完，历史自动云9例完整期限及更早timeout单独保留。新旧WSS/coturn均停，旧disabled/新无持久unit、timer取消、端口0；原配置/unit/旧binary/FWhash/26服务集合/业务容器启动时间不变，云key/invitations/labels/rawpcap删、SSH关闭。
+- 独立报告docs/PHASE0_P006C_MANUAL_TEST_REPORT.md；artifacts/p006c-manual分LAN/hotspot/development/cloud/summary/local-cleanup与verification。scripts/p006c-manual-evidence.py离线从实际记录复算，无网络/采集。操作脚本归档deploy/rendezvous-probe/p006c-manual-ops，仅审查不用旧授权执行。
+- 本机已删除artifacts/private/p006c-manual-client-private.json、父目录已激活解压包的p006c-private.json及带凭据ZIP，程序和stats保留。第二台需用户删p006c-private.json及带凭据ZIP，actualSecondPcDeletionVerified=false，不能称Agent已删B文件；旧邀请服务端已清理。无凭据旧交付ZIP仍保留，未来需新授权/短期配置。
+- 本轮无产品代码变动，不重跑不冒称74Rust/24前端全套；核对日志/新离线脚本/凭据扫描完成。完成GitHub提交和运维记录后停止扩展等待审查，最终Git SHA以对话/提交为准，避免自引用。
+
+# P006c 真实云视频自动验证交付检查点（历史已收尾）
 
 - 用户明确授权90分钟/4alloc/自动合成WSS/TURN，明确禁止自动真实双机桌面采集；结束必须全停不自启、删临时凭据。开工fetch main f57674c干净，沿用ADR0010，无Rust/Tauri源码改动。新目录/opt/remotehub-p006c-video-20261122、旧工具chain/vendor离线编译WSS6tests/release过，低权transient WSS沿用8443，coturn配置/旧WSS/业务FW SG不改。
 - 2026-11-22 09:07:51启动；真实Windows单机两原生WSS角色+Session/MF/前端Edge合成图案。09:10:17正常host/host，09:10:59进程内直连阻断40包自动relay/relay；ICE All，两轮各300帧输入/编码/发送/接收/解码/呈现、720p30、100事件发送/原生接收/ACK/确认、连续1..101+pingpong1、异常0/lost0/freeze0。首帧观察2364.5/3040.2ms不能当纯RTT/任意NAT结论。测试浏览器fake设备权限只为VPN下物理接口曝光，不读实际设备，生产WebView2无该开关。

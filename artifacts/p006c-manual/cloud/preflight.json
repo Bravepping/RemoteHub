@@ -1,0 +1,10 @@
+{
+  "checkedAtNs": 1795311626752440000,
+  "tlsCertificateAndIpVerified": true,
+  "wssUpgradeVerified": true,
+  "senderRoleInvitationAndDirectModeVerified": true,
+  "onlyOneRoleJoined": true,
+  "turnCredentialsIssued": false,
+  "desktopCaptureStarted": false,
+  "physicalTwoPcPassed": false
+}

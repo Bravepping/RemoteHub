@@ -1,0 +1,96 @@
+{
+  "recordedAt": "2026-11-22T09:48:46.930141+08:00",
+  "userReport": "Two physical PCs on same LAN: changing picture, current direct, 100/100, pending0/anomalies0, both released and no errors in completed round.",
+  "scope": "actual Windows desktop DXGI/MF video and control.v1; sender final contains authenticated receiver periodic samples; receiver final file not yet collected",
+  "attempts": [
+    {
+      "result": "development/lan-attempt-1.json",
+      "originalSha256": "a04db0be7d1f4f7c58563301593eee8e5dc838843cb18084b1c8a9c6c128abd9",
+      "originalFileWrittenAt": "2026-11-22T09:44:33.396128+08:00",
+      "error": "DIRECT_SELECTED_PAIR_NOT_APPROVED",
+      "framesSent": 0,
+      "sourceKind": "desktop",
+      "nativePath": null,
+      "sourceControl": {
+        "accepted_moves": 0,
+        "acks_sent": 0,
+        "close_events": 1,
+        "close_requested": true,
+        "error_events": 0,
+        "last_error": null,
+        "last_rx_seq": 0,
+        "last_tx_seq": 0,
+        "message_events": 0,
+        "open_events": 1,
+        "pings_received": 0,
+        "pongs_sent": 0,
+        "rejected": 0,
+        "state": "closed",
+        "task_joined": true
+      },
+      "resourcesReleased": true
+    },
+    {
+      "result": "development/lan-attempt-2.json",
+      "originalSha256": "2b54040b7e20822b42363543e17ac232614127455162bd6cf1c6c28a56d0d4b2",
+      "originalFileWrittenAt": "2026-11-22T09:44:52.848984+08:00",
+      "error": "DIRECT_SELECTED_PAIR_NOT_APPROVED",
+      "framesSent": 0,
+      "sourceKind": "desktop",
+      "nativePath": null,
+      "sourceControl": {
+        "accepted_moves": 0,
+        "acks_sent": 0,
+        "close_events": 1,
+        "close_requested": true,
+        "error_events": 0,
+        "last_error": null,
+        "last_rx_seq": 0,
+        "last_tx_seq": 0,
+        "message_events": 0,
+        "open_events": 1,
+        "pings_received": 0,
+        "pongs_sent": 0,
+        "rejected": 0,
+        "state": "closed",
+        "task_joined": true
+      },
+      "resourcesReleased": true
+    },
+    {
+      "result": "lan/desktop-direct.json",
+      "originalSha256": "d04db3e6c76a09aff4ff669a6663242f0687d80948243eee14cea08f7c1029d7",
+      "originalFileWrittenAt": "2026-11-22T09:45:57.957439+08:00",
+      "error": null,
+      "framesSent": 900,
+      "sourceKind": "desktop",
+      "nativePath": {
+        "local_type": "host",
+        "path": "direct",
+        "protocol": "udp",
+        "remote_type": "srflx"
+      },
+      "sourceControl": {
+        "accepted_moves": 100,
+        "acks_sent": 100,
+        "close_events": 1,
+        "close_requested": true,
+        "error_events": 0,
+        "last_error": null,
+        "last_rx_seq": 101,
+        "last_tx_seq": 101,
+        "message_events": 101,
+        "open_events": 1,
+        "pings_received": 1,
+        "pongs_sent": 1,
+        "rejected": 0,
+        "state": "closed",
+        "task_joined": true
+      },
+      "resourcesReleased": true
+    }
+  ],
+  "cloudAllocationCases": 6,
+  "cloudAllocationsRefreshZeroReleased": true,
+  "next": "same package; receiver Ethernet unplugged and phone hotspot; clear both private-peer fields; choose actual hotspot interface; new pairing and human native consent"
+}

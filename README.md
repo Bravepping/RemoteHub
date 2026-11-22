@@ -93,6 +93,8 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 本次Windows交付为工作区根目录的RemoteHub_P006c_双机实验_v1_20261122.zip，源码提交d805ecb；ZIP/程序SHA和成员校验见artifacts/p006c-video/delivery.json。包内不含源码缓存和有效私有配置，全部源码及脱敏证据保存在GitHub。
 
+后续[真实双机手动报告](docs/PHASE0_P006C_MANUAL_TEST_REPORT.md)：用户亲自批准的直连、手机热点中继成功轮，各900源帧、100/100控制；实际pair已核对，8分配即时释放后09:53:20停服务且不自启。接收端末周期893/880帧及独立final缺失、两次更早候选校验拒绝原因未归因均保留，P006c待审查。云端/本机临时配置与带凭据ZIP已清理；第二台须用户删除配置/该ZIP。普通无凭据包仍可保留，未来联网需新授权和新配置，不自动恢复服务。
+
 见[独立测试报告](docs/PHASE0_P006C_VIDEO_TEST_REPORT.md)、[协议契约](docs/P006C_VIDEO_CONTRACT.md)、[复现与构建](docs/P006C_VIDEO_RUNBOOK.md)、[待授权云端范围](docs/P006C_VIDEO_CLOUD_PLAN.md)。构建入口`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video.ps1 -BuildOnly`；离线回归`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video-checks.ps1`。正式窗口每轮仍须亲自确认；合成源及故障注入只在独立操作员probe启用，无实际键鼠注入。
 
 ## P0-03 本机编码 probe
