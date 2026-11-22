@@ -1,12 +1,15 @@
-//! Loopback-only V2 transport with room-bound authenticated opaque signaling.
+//! Loopback V2 transport and explicit private-LAN WSS with room-bound
+//! authenticated opaque signaling.
 //! Neither a valid relay session nor a verified payload authorizes capture,
 //! input, or a network path. Validate SDP and ICE separately before use.
 
 use crate::lan_wire::{Codec, Key};
-use hub_signal_v2::{wire, LoopbackRelay, RelayEvent};
+use hub_signal_v2::{connect_private_lan_wss, wire, LoopbackRelay, PrivateLanRelay, RelayEvent};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-pub use hub_signal_v2::{ClientError, LoopbackTlsTrust, RelayToken, Role, RoomId, SignalKind};
+pub use hub_signal_v2::{
+    ClientError, LoopbackTlsTrust, PrivateLanEndpoint, RelayToken, Role, RoomId, SignalKind,
+};
 
 /// Payloads are intentionally not serializable or Debug; do not log raw SDP/ICE
 /// or send it through a diagnostic UI bridge.
@@ -20,8 +23,36 @@ pub enum AuthenticatedRelayEvent {
 pub struct AuthenticatedLoopbackRelay {
     // Move out across I/O so cancellation closes the TCP connection instead
     // of leaving partially sent frames or advanced sequence state reusable.
-    relay: Option<LoopbackRelay>,
+    relay: Option<RelayConnection>,
     codec: Codec,
+}
+
+enum RelayConnection {
+    Loopback(LoopbackRelay),
+    PrivateLan(PrivateLanRelay),
+}
+
+impl RelayConnection {
+    async fn send_signal(&mut self, kind: SignalKind, data: String) -> Result<(), ClientError> {
+        match self {
+            Self::Loopback(relay) => relay.send_signal(kind, data).await,
+            Self::PrivateLan(relay) => relay.send_signal(kind, data).await,
+        }
+    }
+
+    async fn next_event(&mut self, wait: Duration) -> Result<RelayEvent, ClientError> {
+        match self {
+            Self::Loopback(relay) => relay.next_event(wait).await,
+            Self::PrivateLan(relay) => relay.next_event(wait).await,
+        }
+    }
+
+    async fn leave(self) -> Result<(), ClientError> {
+        match self {
+            Self::Loopback(relay) => relay.leave().await,
+            Self::PrivateLan(relay) => relay.leave().await,
+        }
+    }
 }
 
 impl AuthenticatedLoopbackRelay {
@@ -53,6 +84,26 @@ impl AuthenticatedLoopbackRelay {
         Self::connect_with_trust(address, token, room, role, key, nonce, Some(trust)).await
     }
 
+    /// Connect only by exact IPv4 source and destination with explicitly
+    /// provisioned trust. This path never tries loopback, WS, DNS or redirects.
+    pub async fn connect_private_lan_wss(
+        endpoint: PrivateLanEndpoint,
+        token: &RelayToken,
+        room: RoomId,
+        role: Role,
+        key: Arc<Key>,
+        nonce: String,
+        trust: &LoopbackTlsTrust,
+    ) -> Result<Self, ClientError> {
+        let codec = Codec::new_v2(key, nonce, room.as_str(), role == Role::Host)
+            .map_err(|_| ClientError::Protocol)?;
+        let relay = connect_private_lan_wss(endpoint, token, room, role, trust).await?;
+        Ok(Self {
+            relay: Some(RelayConnection::PrivateLan(relay)),
+            codec,
+        })
+    }
+
     async fn connect_with_trust(
         address: SocketAddr,
         token: &RelayToken,
@@ -69,7 +120,7 @@ impl AuthenticatedLoopbackRelay {
             None => LoopbackRelay::connect(address, token, room, role).await?,
         };
         Ok(Self {
-            relay: Some(relay),
+            relay: Some(RelayConnection::Loopback(relay)),
             codec,
         })
     }

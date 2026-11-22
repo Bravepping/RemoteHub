@@ -1,8 +1,9 @@
-//! RemoteHub V2 P1: loopback-only signaling with an ephemeral relay token. No media or input API.
+//! V2 signaling relay: loopback by default; explicit WSS-only two-peer private LAN.
 use axum::{
     extract::{
+        rejection::ExtensionRejection,
         ws::{Message, WebSocket, WebSocketUpgrade},
-        State,
+        ConnectInfo, State,
     },
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
@@ -16,7 +17,7 @@ use hub_signal_v2::wire::{
 };
 use std::{
     collections::HashMap,
-    net::SocketAddr,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicUsize, Ordering},
@@ -79,8 +80,53 @@ struct Room {
     host: Option<Peer>,
     viewer: Option<Peer>,
 }
+#[derive(Clone, Copy)]
+struct PeerSources {
+    host: Ipv4Addr,
+    viewer: Ipv4Addr,
+}
+
+enum Access {
+    Loopback(Zeroizing<String>),
+    PrivateLan {
+        sources: PeerSources,
+        host_token: Zeroizing<String>,
+        viewer_token: Zeroizing<String>,
+    },
+}
+
+type SocketPeer = Result<ConnectInfo<SocketAddr>, ExtensionRejection>;
+
+impl Access {
+    fn credentials(&self, ip: IpAddr) -> Option<(Option<Role>, &str)> {
+        match self {
+            Self::Loopback(token) if ip.is_loopback() => Some((None, token.as_str())),
+            Self::PrivateLan {
+                sources,
+                host_token,
+                ..
+            } if ip == IpAddr::V4(sources.host) => Some((Some(Role::Host), host_token.as_str())),
+            Self::PrivateLan {
+                sources,
+                viewer_token,
+                ..
+            } if ip == IpAddr::V4(sources.viewer) => {
+                Some((Some(Role::Viewer), viewer_token.as_str()))
+            }
+            _ => None,
+        }
+    }
+
+    fn sources(&self) -> Option<PeerSources> {
+        match self {
+            Self::Loopback(_) => None,
+            Self::PrivateLan { sources, .. } => Some(*sources),
+        }
+    }
+}
+
 struct App {
-    token: Zeroizing<String>,
+    access: Access,
     rooms: Mutex<HashMap<String, Room>>,
     active: AtomicUsize,
 }
@@ -195,6 +241,16 @@ impl App {
             return Err("PEER_MISMATCH");
         }
         let to = target.as_ref().ok_or("PEER_NOT_JOINED")?;
+        // Private LAN accepts only the protocol path with challenges in both
+        // directions. Their cryptographic validity is still verified by peers.
+        if self.access.sources().is_some()
+            && matches!(
+                (room.negotiation, signal),
+                (Flow::BeforeOffer, SignalKind::Offer)
+            )
+        {
+            return Err("CHALLENGES_REQUIRED");
+        }
         let negotiation = room.negotiation.after(signal).ok_or("SIGNAL_ORDER")?;
         from.accept_seq(seq)?;
         to.tx
@@ -253,10 +309,19 @@ fn token_matches(expected: &str, given: &str) -> bool {
 }
 async fn upgrade(
     State(app): State<Arc<App>>,
+    peer: SocketPeer,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
-    // This probe is a native-client relay. Do not accept a browser Origin
+    // Only the socket peer supplied by the server may establish source
+    // identity. In particular, never consult Forwarded or X-Forwarded-For.
+    let Some((permitted_role, token)) = peer
+        .ok()
+        .and_then(|ConnectInfo(address)| app.access.credentials(address.ip()))
+    else {
+        return StatusCode::FORBIDDEN.into_response();
+    };
+    // This is a native-client relay. Do not accept a browser Origin
     // or two Authorization headers that proxies could interpret differently.
     if headers.contains_key(header::ORIGIN) {
         return StatusCode::FORBIDDEN.into_response();
@@ -268,7 +333,7 @@ async fn upgrade(
         .and_then(|v| v.to_str().ok())
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("");
-    if authorization.next().is_some() || !token_matches(&app.token, candidate) {
+    if authorization.next().is_some() || !token_matches(token, candidate) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
     if !app.reserve() {
@@ -279,7 +344,7 @@ async fn upgrade(
         .max_frame_size(MAX_WIRE)
         .on_upgrade(move |socket| async move {
             let _guard = guard;
-            connection(socket, app).await;
+            connection(socket, app, permitted_role).await;
         })
         .into_response()
 }
@@ -288,7 +353,7 @@ async fn send_error(socket: &mut WebSocket, code: &'static str) {
         let _ = tokio::time::timeout(Duration::from_secs(1), socket.send(message)).await;
     }
 }
-async fn connection(mut socket: WebSocket, app: Arc<App>) {
+async fn connection(mut socket: WebSocket, app: Arc<App>, permitted_role: Option<Role>) {
     let first = tokio::time::timeout(Duration::from_secs(5), socket.next()).await;
     let Some(Ok(Message::Text(first))) = first.ok().flatten() else {
         send_error(&mut socket, "HELLO_REQUIRED").await;
@@ -303,6 +368,10 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
         send_error(&mut socket, "HELLO_INVALID").await;
         return;
     };
+    if permitted_role.is_some_and(|expected| role != expected) {
+        send_error(&mut socket, "ROLE_SOURCE_MISMATCH").await;
+        return;
+    }
     let id = Uuid::new_v4();
     let (tx, mut rx) = mpsc::channel(16);
     let deadline = match app.join(&room, role, id, tx) {
@@ -348,33 +417,117 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
     app.leave(&room, id);
     let _ = tokio::time::timeout(Duration::from_secs(1), socket.close()).await;
 }
+fn valid_lan_ip(ip: Ipv4Addr) -> bool {
+    // Without subnet discovery, conservatively reject address forms often
+    // used as local network/broadcast endpoints; client applies same policy.
+    ip.is_private() && !matches!(ip.octets()[3], 0 | 255)
+}
+
 fn validate_bind(
     addr: SocketAddr,
     cert: Option<&Path>,
     key: Option<&Path>,
+    sources: Option<PeerSources>,
 ) -> Result<(), &'static str> {
     if cert.is_some() != key.is_some() {
         return Err("V2_TLS_PAIR_REQUIRED");
     }
-    // Shared bearer + unguessable room is only a lab gate; it does not
-    // establish a trusted endpoint or authorize screen sharing.
-    if !addr.ip().is_loopback() {
+    if let Some(sources) = sources {
+        if cert.is_none_or(|value| value.as_os_str().is_empty())
+            || key.is_none_or(|value| value.as_os_str().is_empty())
+        {
+            return Err("V2_LAN_TLS_REQUIRED");
+        }
+        if !matches!(addr, SocketAddr::V4(addr) if valid_lan_ip(*addr.ip()) && addr.port() != 0) {
+            return Err("V2_LAN_BIND_PRIVATE_IPV4_REQUIRED");
+        }
+        if !valid_lan_ip(sources.host)
+            || !valid_lan_ip(sources.viewer)
+            || sources.host == sources.viewer
+        {
+            return Err("V2_LAN_DISTINCT_PRIVATE_PEERS_REQUIRED");
+        }
+    } else if !addr.ip().is_loopback() {
         return Err("V2_BIND_LOOPBACK_ONLY");
     }
     Ok(())
 }
+
+async fn health(State(app): State<Arc<App>>, peer: SocketPeer) -> Response {
+    if peer
+        .ok()
+        .is_some_and(|ConnectInfo(address)| app.access.credentials(address.ip()).is_some())
+    {
+        "ok".into_response()
+    } else {
+        StatusCode::FORBIDDEN.into_response()
+    }
+}
+
 fn router(app: Arc<App>) -> Router {
     Router::new()
-        .route("/healthz", get(|| async { "ok" }))
+        .route("/healthz", get(health))
         .route(PATH, get(upgrade))
         .with_state(app)
 }
-async fn run() -> Result<(), &'static str> {
-    let token =
-        Zeroizing::new(std::env::var("REMOTEHUB_V2_TOKEN").map_err(|_| "V2_TOKEN_REQUIRED")?);
+
+fn read_lan_ip(name: &str) -> Result<Ipv4Addr, &'static str> {
+    std::env::var(name)
+        .map_err(|_| "V2_LAN_DISTINCT_PRIVATE_PEERS_REQUIRED")?
+        .parse()
+        .map_err(|_| "V2_LAN_DISTINCT_PRIVATE_PEERS_REQUIRED")
+}
+
+fn read_token(name: &str, lan: bool) -> Result<Zeroizing<String>, &'static str> {
+    let token = Zeroizing::new(std::env::var(name).map_err(|_| {
+        if lan {
+            "V2_LAN_ROLE_TOKENS_REQUIRED"
+        } else {
+            "V2_TOKEN_REQUIRED"
+        }
+    })?);
     if !signal_wire::valid_token(&token) {
-        return Err("V2_TOKEN_MUST_BE_64_HEX");
+        return Err(if lan {
+            "V2_LAN_ROLE_TOKENS_INVALID"
+        } else {
+            "V2_TOKEN_MUST_BE_64_HEX"
+        });
     }
+    if lan && token.bytes().any(|byte| byte.is_ascii_uppercase()) {
+        return Err("V2_LAN_ROLE_TOKENS_INVALID");
+    }
+    Ok(token)
+}
+
+fn read_access() -> Result<Access, &'static str> {
+    match std::env::var("REMOTEHUB_V2_MODE").as_deref() {
+        Err(std::env::VarError::NotPresent) | Ok("loopback") => {
+            Ok(Access::Loopback(read_token("REMOTEHUB_V2_TOKEN", false)?))
+        }
+        Ok("private-lan") => {
+            let sources = PeerSources {
+                host: read_lan_ip("REMOTEHUB_V2_LAN_HOST_IP")?,
+                viewer: read_lan_ip("REMOTEHUB_V2_LAN_VIEWER_IP")?,
+            };
+            // A role token is only an access gate. It neither asserts a device
+            // identity nor authorizes media/input; end users prove both separately.
+            let host_token = read_token("REMOTEHUB_V2_LAN_HOST_TOKEN", true)?;
+            let viewer_token = read_token("REMOTEHUB_V2_LAN_VIEWER_TOKEN", true)?;
+            if token_matches(host_token.as_str(), viewer_token.as_str()) {
+                return Err("V2_LAN_DISTINCT_ROLE_TOKENS_REQUIRED");
+            }
+            Ok(Access::PrivateLan {
+                sources,
+                host_token,
+                viewer_token,
+            })
+        }
+        _ => Err("V2_MODE_INVALID"),
+    }
+}
+
+async fn run() -> Result<(), &'static str> {
+    let access = read_access()?;
     let addr: SocketAddr = match std::env::var("REMOTEHUB_V2_BIND") {
         Ok(value) => value,
         Err(std::env::VarError::NotPresent) => "127.0.0.1:48620".into(),
@@ -384,9 +537,9 @@ async fn run() -> Result<(), &'static str> {
     .map_err(|_| "V2_BIND_INVALID")?;
     let cert = std::env::var_os("REMOTEHUB_V2_TLS_CERT").map(PathBuf::from);
     let key = std::env::var_os("REMOTEHUB_V2_TLS_KEY").map(PathBuf::from);
-    validate_bind(addr, cert.as_deref(), key.as_deref())?;
+    validate_bind(addr, cert.as_deref(), key.as_deref(), access.sources())?;
     let router = router(Arc::new(App {
-        token,
+        access,
         rooms: Mutex::new(HashMap::new()),
         active: AtomicUsize::new(0),
     }));
@@ -396,12 +549,12 @@ async fn run() -> Result<(), &'static str> {
             .await
             .map_err(|_| "V2_TLS_CONFIG_FAILED")?;
         axum_server::bind_rustls(addr, tls)
-            .serve(router.into_make_service())
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .map_err(|_| "V2_SERVER_FAILED")
     } else {
         axum_server::bind(addr)
-            .serve(router.into_make_service())
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .map_err(|_| "V2_SERVER_FAILED")
     }
@@ -441,12 +594,13 @@ mod tests {
     const ROOM: &str = "0123456789abcdef0123456789abcdef";
     pub(super) const TOKEN: &str =
         "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-    const WRONG_TOKEN: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    pub(super) const WRONG_TOKEN: &str =
+        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
     fn app() -> Arc<App> {
         Arc::new(App {
-            token: Zeroizing::new(TOKEN.into()),
+            access: Access::Loopback(Zeroizing::new(TOKEN.into())),
             rooms: Mutex::new(HashMap::new()),
             active: AtomicUsize::new(0),
         })
@@ -465,18 +619,155 @@ mod tests {
         let cert = Some(Path::new("example-cert"));
         let key = Some(Path::new("example-key"));
         let loopback = "127.0.0.1:0".parse().unwrap();
-        assert_eq!(validate_bind(loopback, None, None), Ok(()));
-        assert_eq!(validate_bind(loopback, cert, key), Ok(()));
+        assert_eq!(validate_bind(loopback, None, None, None), Ok(()));
+        assert_eq!(validate_bind(loopback, cert, key, None), Ok(()));
         assert_eq!(
-            validate_bind(loopback, cert, None),
+            validate_bind(loopback, cert, None, None),
             Err("V2_TLS_PAIR_REQUIRED")
         );
         for invalid in ["0.0.0.0:0", "[::]:0", "192.0.2.1:48620"] {
             assert_eq!(
-                validate_bind(invalid.parse().unwrap(), cert, key),
+                validate_bind(invalid.parse().unwrap(), cert, key, None),
                 Err("V2_BIND_LOOPBACK_ONLY")
             );
         }
+    }
+
+    #[test]
+    fn private_lan_requires_both_tls_files_distinct_peers_and_explicit_private_bind() {
+        let cert = Some(Path::new("test-cert"));
+        let key = Some(Path::new("test-key"));
+        let sources = PeerSources {
+            host: Ipv4Addr::new(192, 168, 10, 2),
+            viewer: Ipv4Addr::new(192, 168, 10, 3),
+        };
+        // The relay can run on the host PC; its address need not be a third machine.
+        let bind = "192.168.10.2:48620".parse().unwrap();
+        assert_eq!(validate_bind(bind, cert, key, Some(sources)), Ok(()));
+        assert_eq!(
+            validate_bind(bind, None, None, Some(sources)),
+            Err("V2_LAN_TLS_REQUIRED")
+        );
+        assert_eq!(
+            validate_bind(bind, cert, None, Some(sources)),
+            Err("V2_TLS_PAIR_REQUIRED")
+        );
+        assert_eq!(
+            validate_bind(bind, Some(Path::new("")), key, Some(sources)),
+            Err("V2_LAN_TLS_REQUIRED")
+        );
+        for invalid in [
+            "0.0.0.0:48620",
+            "127.0.0.1:48620",
+            "192.0.2.1:48620",
+            "100.64.1.1:48620",
+            "169.254.1.1:48620",
+            "192.168.10.2:0",
+            "192.168.10.0:48620",
+            "192.168.10.255:48620",
+            "[::]:48620",
+            "[fd00::1]:48620",
+            "[::ffff:192.168.10.2]:48620",
+        ] {
+            assert_eq!(
+                validate_bind(invalid.parse().unwrap(), cert, key, Some(sources)),
+                Err("V2_LAN_BIND_PRIVATE_IPV4_REQUIRED")
+            );
+        }
+        for viewer in [
+            sources.host,
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::new(192, 0, 2, 1),
+            Ipv4Addr::new(192, 168, 10, 0),
+            Ipv4Addr::new(192, 168, 10, 255),
+        ] {
+            assert_eq!(
+                validate_bind(bind, cert, key, Some(PeerSources { viewer, ..sources }),),
+                Err("V2_LAN_DISTINCT_PRIVATE_PEERS_REQUIRED")
+            );
+        }
+    }
+
+    pub(super) fn private_app(sources: PeerSources) -> Arc<App> {
+        Arc::new(App {
+            access: Access::PrivateLan {
+                sources,
+                host_token: Zeroizing::new(TOKEN.into()),
+                viewer_token: Zeroizing::new(WRONG_TOKEN.into()),
+            },
+            rooms: Mutex::new(HashMap::new()),
+            active: AtomicUsize::new(0),
+        })
+    }
+
+    #[test]
+    fn private_lan_role_and_token_are_bound_to_exact_source() {
+        let host = Ipv4Addr::new(10, 1, 2, 3);
+        let viewer = Ipv4Addr::new(10, 1, 2, 4);
+        let app = private_app(PeerSources { host, viewer });
+        let (role, token) = app.access.credentials(host.into()).unwrap();
+        assert_eq!(role, Some(Role::Host));
+        assert!(token_matches(token, TOKEN));
+        assert!(!token_matches(token, WRONG_TOKEN));
+        let (role, token) = app.access.credentials(viewer.into()).unwrap();
+        assert_eq!(role, Some(Role::Viewer));
+        assert!(token_matches(token, WRONG_TOKEN));
+        assert!(!token_matches(token, TOKEN));
+        assert!(app
+            .access
+            .credentials(Ipv4Addr::new(10, 1, 2, 5).into())
+            .is_none());
+        assert!(app
+            .access
+            .credentials(host.to_ipv6_mapped().into())
+            .is_none());
+    }
+
+    #[test]
+    fn private_lan_requires_two_challenges_before_offer() {
+        let app = private_app(PeerSources {
+            host: Ipv4Addr::new(10, 1, 2, 3),
+            viewer: Ipv4Addr::new(10, 1, 2, 4),
+        });
+        let (host_tx, _host_rx) = mpsc::channel(16);
+        let (viewer_tx, _viewer_rx) = mpsc::channel(16);
+        let host = Uuid::new_v4();
+        let viewer = Uuid::new_v4();
+        app.join(ROOM, Role::Host, host, host_tx).unwrap();
+        app.join(ROOM, Role::Viewer, viewer, viewer_tx).unwrap();
+        let offer = |seq| {
+            app.relay(
+                ROOM,
+                Role::Viewer,
+                viewer,
+                SignalKind::Offer,
+                seq,
+                "fixture".into(),
+            )
+        };
+        assert_eq!(offer(1), Err("CHALLENGES_REQUIRED"));
+        app.relay(
+            ROOM,
+            Role::Host,
+            host,
+            SignalKind::HostChallenge,
+            1,
+            "fixture".into(),
+        )
+        .unwrap();
+        assert_eq!(offer(1), Err("SIGNAL_ORDER"));
+        app.relay(
+            ROOM,
+            Role::Viewer,
+            viewer,
+            SignalKind::ViewerChallenge,
+            1,
+            "fixture".into(),
+        )
+        .unwrap();
+        assert_eq!(offer(2), Ok(()));
+        app.leave(ROOM, host);
+        assert!(app.rooms.lock().unwrap().is_empty());
     }
 
     #[test]
@@ -599,9 +890,37 @@ mod tests {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let task = tokio::spawn(async move {
-            axum::serve(listener, router).await.unwrap();
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await
+            .unwrap();
         });
         (address, app, task)
+    }
+
+    #[tokio::test]
+    async fn missing_socket_connect_info_fails_closed_before_reserving() {
+        let app = app();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        // Intentionally omit ConnectInfo, to exercise the fail-closed route.
+        let broken_router = router(app.clone());
+        let task = tokio::spawn(async move { axum::serve(listener, broken_router).await.unwrap() });
+        let mut candidate = request(address, Some(TOKEN));
+        candidate
+            .headers_mut()
+            .insert("x-forwarded-for", HeaderValue::from_static("127.0.0.1"));
+        let result = tokio::time::timeout(Duration::from_secs(3), connect_async(candidate))
+            .await
+            .unwrap();
+        assert!(
+            matches!(result, Err(WsError::Http(response)) if response.status() == StatusCode::FORBIDDEN)
+        );
+        assert_eq!(app.active.load(Ordering::Acquire), 0);
+        assert!(app.rooms.lock().unwrap().is_empty());
+        task.abort();
     }
 
     fn request(address: SocketAddr, token: Option<&str>) -> Request {

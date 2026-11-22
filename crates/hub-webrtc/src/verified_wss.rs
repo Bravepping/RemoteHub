@@ -1,10 +1,12 @@
 //! Opt-in native signaling for one device-verified SDP offer and answer over
-//! loopback WSS. Device proof does not authorize media, input, or ICE routes:
-//! callers still validate the authenticated bytes against their path policy.
+//! loopback or explicitly selected private-LAN WSS. Device proof does not
+//! authorize media, input, or ICE routes: callers still validate the
+//! authenticated bytes against their path policy.
 
 use crate::{
     authenticated_relay::{AuthenticatedLoopbackRelay, AuthenticatedRelayEvent},
     lan_wire::Key,
+    scope::LanScope,
 };
 use hub_identity::{
     pairing::VerifiedPeer,
@@ -25,7 +27,7 @@ use std::{
 use tokio::time::{timeout_at, Instant};
 
 pub use crate::authenticated_relay::{
-    ClientError, LoopbackTlsTrust, RelayToken, Role, RoomId, SignalKind,
+    ClientError, LoopbackTlsTrust, PrivateLanEndpoint, RelayToken, Role, RoomId, SignalKind,
 };
 
 const JOIN_WAIT: Duration = Duration::from_secs(5);
@@ -76,6 +78,31 @@ pub struct VerifiedWssConfig<'a> {
     pub peer: &'a VerifiedPeer,
 }
 
+impl VerifiedWssConfig<'_> {
+    fn binding(&self) -> Result<SessionBinding, VerifiedWssError> {
+        let room =
+            uuid::Uuid::parse_str(self.room.as_str()).map_err(|_| VerifiedWssError::Protocol)?;
+        Ok(self.peer.session_binding(
+            &self.local_identity.public(),
+            session_role(self.role),
+            *room.as_bytes(),
+            self.session_nonce,
+        )?)
+    }
+}
+
+fn private_endpoint(
+    scope: LanScope,
+    address: SocketAddr,
+) -> Result<PrivateLanEndpoint, ClientError> {
+    let scope =
+        LanScope::new(scope.local, scope.peer).map_err(|_| ClientError::PrivateLanEndpoint)?;
+    let SocketAddr::V4(address) = address else {
+        return Err(ClientError::PrivateLanEndpoint);
+    };
+    PrivateLanEndpoint::new(scope.local, *address.ip(), address.port())
+}
+
 /// Joined WSS transport that cannot send or receive SDP until both
 /// role-separated HMAC-authenticated challenges have been exchanged.
 pub struct PendingVerifiedWssSignaling<'a> {
@@ -114,16 +141,38 @@ impl<'a> VerifiedWssSignaling<'a> {
     pub async fn connect(
         config: VerifiedWssConfig<'a>,
     ) -> Result<PendingVerifiedWssSignaling<'a>, VerifiedWssError> {
-        let room =
-            uuid::Uuid::parse_str(config.room.as_str()).map_err(|_| VerifiedWssError::Protocol)?;
-        let binding = config.peer.session_binding(
-            &config.local_identity.public(),
-            session_role(config.role),
-            *room.as_bytes(),
-            config.session_nonce,
-        )?;
+        let binding = config.binding()?;
         let relay = AuthenticatedLoopbackRelay::connect_wss(
             config.address,
+            config.token,
+            config.room,
+            config.role,
+            config.pairing_key,
+            config.wire_nonce,
+            config.trust,
+        )
+        .await?;
+        Ok(PendingVerifiedWssSignaling {
+            relay,
+            role: config.role,
+            binding,
+            identity: config.local_identity,
+            host_registered: false,
+        })
+    }
+
+    /// Use a literal private-LAN WSS relay and bind its TCP source to the
+    /// selected local interface. The relay is independent of the distinct
+    /// media peer, and may run on the local interface itself. The caller must
+    /// still validate SDP/ICE and obtain consent before using the transport.
+    pub async fn connect_private_lan_wss(
+        scope: LanScope,
+        config: VerifiedWssConfig<'a>,
+    ) -> Result<PendingVerifiedWssSignaling<'a>, VerifiedWssError> {
+        let endpoint = private_endpoint(scope, config.address)?;
+        let binding = config.binding()?;
+        let relay = AuthenticatedLoopbackRelay::connect_private_lan_wss(
+            endpoint,
             config.token,
             config.room,
             config.role,
@@ -382,6 +431,36 @@ fn sdp_kind(role: Role) -> SignalKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_relay_route_is_not_the_distinct_media_peer() {
+        let local = "192.168.3.4".parse().unwrap();
+        let peer = "192.168.3.5".parse().unwrap();
+        let scope = LanScope::new(local, peer).unwrap();
+        let colocated = private_endpoint(scope, "192.168.3.4:443".parse().unwrap()).unwrap();
+        assert_eq!(colocated.source(), local);
+        assert_eq!(*colocated.relay().ip(), local);
+        assert!(private_endpoint(scope, "192.168.3.99:443".parse().unwrap()).is_ok());
+        for address in [
+            "192.168.3.4:0",
+            "127.0.0.1:443",
+            "8.8.8.8:443",
+            "[::1]:443",
+            "[::ffff:192.168.3.4]:443",
+        ] {
+            assert!(matches!(
+                private_endpoint(scope, address.parse().unwrap()),
+                Err(ClientError::PrivateLanEndpoint)
+            ));
+        }
+        assert!(matches!(
+            private_endpoint(
+                LanScope { local, peer: local },
+                "192.168.3.4:443".parse().unwrap()
+            ),
+            Err(ClientError::PrivateLanEndpoint)
+        ));
+    }
 
     #[test]
     fn challenge_parser_accepts_exactly_one_bounded_slot() {

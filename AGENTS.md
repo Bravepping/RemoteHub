@@ -21,7 +21,7 @@
 
 - `apps/desktop/src/features/desktop/RemoteWorkspace.vue` 与 `apps/desktop/src-tauri/src/p004_lan.rs`：有界 LAN 会话、原生同意、停止和报告，沿用既有 IPC，不增加宽泛权限。普通远控以 `p3-lan` 启用，身份核验视频以 `v2-verified-lan` 显式启用。
 - `crates/hub-capture-win` / `hub-encode-win`：DXGI + MF H.264。`hub-webrtc` 已有 LAN/ICE/PeerConnection、选中候选诊断、DataChannel、SendInput 与撤销清理。
-- `crates/hub-identity` 有 Ed25519 和 CurrentUser DPAPI 本地身份、完整指纹核验和会话证明；这不等于云认证。`v2_signaling.rs` 已通过实际本机 Axum 测试，仍只监听回环。
+- `crates/hub-identity` 有 Ed25519 和 CurrentUser DPAPI 本地身份、完整指纹核验和会话证明；这不等于云认证。`v2_signaling.rs` 已通过实际本机 Axum 测试；默认只监听回环。显式私网 WSS 是独立的传输准备，不代表已接入桌面或获准部署。
 - 原版 `main@d7dbc9b` 记录 853/900/900 帧和 29/81/132 条输入 ACK；这些计数是来源分支历史证据。精简分支 `77479f2` 的普通 LAN 双机视频、英文输入及结束已由用户确认正常，**P3-END-01 普通 LAN 回归已通过**。新模式、R06、DPI、公网与安装器尚未验收，实际结果详见根 `README.md`。
 
 ## 开发顺序（可连续推进）

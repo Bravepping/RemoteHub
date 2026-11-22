@@ -2,7 +2,10 @@
 //! a peer, screen sharing, input, or off-host network access.
 
 mod client;
-pub use client::{ClientError, LoopbackRelay, LoopbackTlsTrust, RelayEvent, RelayToken, RoomId};
+pub use client::{
+    connect_private_lan_wss, ClientError, LoopbackRelay, LoopbackTlsTrust, PrivateLanEndpoint,
+    PrivateLanRelay, RelayEvent, RelayToken, RoomId,
+};
 
 pub mod wire;
 pub use wire::{Role, SignalKind};

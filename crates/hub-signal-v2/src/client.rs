@@ -6,10 +6,14 @@ use rustls::{
     pki_types::{CertificateDer, ServerName},
     ClientConfig, RootCertStore,
 };
-use std::{net::SocketAddr, sync::Arc, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
+    sync::Arc,
+    time::Duration,
+};
 use tokio::{
     io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
+    net::{TcpSocket, TcpStream},
     time::{timeout, timeout_at, Instant},
 };
 use tokio_rustls::TlsConnector;
@@ -95,6 +99,12 @@ impl RoomId {
 pub enum ClientError {
     #[error("V2 relay endpoint must be a literal loopback socket")]
     Endpoint,
+    #[error(
+        "V2 private LAN relay requires literal RFC1918 source and relay IPv4 addresses and a port"
+    )]
+    PrivateLanEndpoint,
+    #[error("unable to bind or verify the private LAN relay source socket")]
+    PrivateLanBind,
     #[error("invalid relay token")]
     Token,
     #[error("invalid relay room")]
@@ -117,6 +127,123 @@ pub enum ClientError {
     Protocol,
     #[error("signaling payload is empty, invalid or oversized")]
     Payload,
+}
+
+/// Explicit relay route only; this is separate from the eventual media peer.
+/// A relay may deliberately be co-located on the bound source address.
+#[derive(Clone, Copy)]
+pub struct PrivateLanEndpoint {
+    source: Ipv4Addr,
+    relay: SocketAddrV4,
+}
+
+impl PrivateLanEndpoint {
+    pub fn new(source: Ipv4Addr, relay: Ipv4Addr, port: u16) -> Result<Self, ClientError> {
+        let private_host = |ip: Ipv4Addr| ip.is_private() && !matches!(ip.octets()[3], 0 | 255);
+        if !private_host(source) || !private_host(relay) || port == 0 {
+            return Err(ClientError::PrivateLanEndpoint);
+        }
+        Ok(Self {
+            source,
+            relay: SocketAddrV4::new(relay, port),
+        })
+    }
+
+    pub fn source(self) -> Ipv4Addr {
+        self.source
+    }
+
+    pub fn relay(self) -> SocketAddrV4 {
+        self.relay
+    }
+
+    fn matches_socket(self, local: SocketAddr, peer: SocketAddr) -> bool {
+        matches!(local, SocketAddr::V4(v4) if *v4.ip() == self.source && v4.port() != 0)
+            && peer == SocketAddr::V4(self.relay)
+    }
+
+    async fn dial(self) -> Result<TcpStream, ClientError> {
+        let socket = TcpSocket::new_v4().map_err(|_| ClientError::PrivateLanBind)?;
+        socket
+            .bind(SocketAddr::V4(SocketAddrV4::new(self.source, 0)))
+            .map_err(|_| ClientError::PrivateLanBind)?;
+        let tcp = socket
+            .connect(SocketAddr::V4(self.relay))
+            .await
+            .map_err(|_| ClientError::Transport)?;
+        let local = tcp.local_addr().map_err(|_| ClientError::PrivateLanBind)?;
+        let peer = tcp.peer_addr().map_err(|_| ClientError::PrivateLanBind)?;
+        if !self.matches_socket(local, peer) {
+            return Err(ClientError::PrivateLanBind);
+        }
+        Ok(tcp)
+    }
+}
+
+enum Route<'a> {
+    Loopback(SocketAddr, Option<&'a LoopbackTlsTrust>),
+    PrivateLan(PrivateLanEndpoint, &'a LoopbackTlsTrust),
+}
+
+impl Route<'_> {
+    fn server(&self) -> Result<SocketAddr, ClientError> {
+        match *self {
+            Self::Loopback(address, _) if address.ip().is_loopback() && address.port() != 0 => {
+                Ok(address)
+            }
+            Self::Loopback(..) => Err(ClientError::Endpoint),
+            Self::PrivateLan(endpoint, _) => Ok(SocketAddr::V4(endpoint.relay)),
+        }
+    }
+
+    fn trust(&self) -> Option<&LoopbackTlsTrust> {
+        match *self {
+            Self::Loopback(_, trust) => trust,
+            Self::PrivateLan(_, trust) => Some(trust),
+        }
+    }
+
+    async fn dial(&self, server: SocketAddr) -> Result<TcpStream, ClientError> {
+        match *self {
+            Self::Loopback(..) => TcpStream::connect(server)
+                .await
+                .map_err(|_| ClientError::Transport),
+            Self::PrivateLan(endpoint, _) => endpoint.dial().await,
+        }
+    }
+}
+
+/// Deliberately selected private-LAN route, always with verified TLS. This
+/// connection authenticates the relay only, not a device or media session.
+pub struct PrivateLanRelay(LoopbackRelay);
+
+/// Connect only to the specified numeric relay, from the specified source
+/// address. Verify its pinned CA and exact IPv4 SAN before sending the token.
+/// Does not resolve names, use a proxy or redirects, or fall back to WS.
+pub async fn connect_private_lan_wss(
+    endpoint: PrivateLanEndpoint,
+    token: &RelayToken,
+    room: RoomId,
+    role: Role,
+    trust: &LoopbackTlsTrust,
+) -> Result<PrivateLanRelay, ClientError> {
+    LoopbackRelay::connect_with_route(Route::PrivateLan(endpoint, trust), token, room, role)
+        .await
+        .map(PrivateLanRelay)
+}
+
+impl PrivateLanRelay {
+    pub async fn send_signal(&mut self, kind: SignalKind, data: String) -> Result<(), ClientError> {
+        self.0.send_signal(kind, data).await
+    }
+
+    pub async fn next_event(&mut self, wait: Duration) -> Result<RelayEvent, ClientError> {
+        self.0.next_event(wait).await
+    }
+
+    pub async fn leave(self) -> Result<(), ClientError> {
+        self.0.leave().await
+    }
 }
 
 /// Not serializable or Debug so raw signaling cannot accidentally reach logs
@@ -154,7 +281,7 @@ impl LoopbackRelay {
         room: RoomId,
         role: Role,
     ) -> Result<Self, ClientError> {
-        Self::connect_with_trust(address, token, room, role, None).await
+        Self::connect_with_route(Route::Loopback(address, None), token, room, role).await
     }
 
     /// Use WSS with an independently provisioned trust anchor. The HTTP
@@ -167,19 +294,16 @@ impl LoopbackRelay {
         role: Role,
         trust: &LoopbackTlsTrust,
     ) -> Result<Self, ClientError> {
-        Self::connect_with_trust(address, token, room, role, Some(trust)).await
+        Self::connect_with_route(Route::Loopback(address, Some(trust)), token, room, role).await
     }
 
-    async fn connect_with_trust(
-        address: SocketAddr,
+    async fn connect_with_route(
+        route: Route<'_>,
         token: &RelayToken,
         room: RoomId,
         role: Role,
-        trust: Option<&LoopbackTlsTrust>,
     ) -> Result<Self, ClientError> {
-        if !address.ip().is_loopback() || address.port() == 0 {
-            return Err(ClientError::Endpoint);
-        }
+        let address = route.server()?;
         let config = WebSocketConfig::default()
             .write_buffer_size(0)
             .max_write_buffer_size(MAX_WIRE * 2)
@@ -188,10 +312,8 @@ impl LoopbackRelay {
         let deadline = Instant::now() + ROOM_LIFETIME;
         let socket = timeout(IO_TIMEOUT, async {
             // SocketAddr makes the TCP target explicit independently of the HTTP Host.
-            let tcp = TcpStream::connect(address)
-                .await
-                .map_err(|_| ClientError::Transport)?;
-            let (scheme, stream): (&str, Box<dyn RelayIo>) = match trust {
+            let tcp = route.dial(address).await?;
+            let (scheme, stream): (&str, Box<dyn RelayIo>) = match route.trust() {
                 Some(trust) => {
                     let name = ServerName::IpAddress(address.ip().into());
                     let tls = TlsConnector::from(trust.0.clone())
@@ -380,5 +502,67 @@ impl LoopbackRelay {
             ServerFrame::Error { .. } => Err(ClientError::Rejected),
             _ => Err(ClientError::Protocol),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn private_routes_only_accept_literal_rfc1918_hosts_and_nonzero_ports() {
+        let src = Ipv4Addr::new(192, 168, 40, 11);
+        let dst = Ipv4Addr::new(192, 168, 40, 12);
+        assert!(PrivateLanEndpoint::new(src, dst, 48620).is_ok());
+        assert!(PrivateLanEndpoint::new(src, src, 48620).is_ok()); // Deliberate co-location.
+        assert!(matches!(
+            PrivateLanEndpoint::new(src, dst, 0),
+            Err(ClientError::PrivateLanEndpoint)
+        ));
+        for addr in [
+            Ipv4Addr::UNSPECIFIED,
+            Ipv4Addr::LOCALHOST,
+            Ipv4Addr::BROADCAST,
+            Ipv4Addr::new(169, 254, 3, 4),
+            Ipv4Addr::new(100, 64, 3, 4),
+            Ipv4Addr::new(192, 0, 2, 2),
+            Ipv4Addr::new(192, 168, 40, 0),
+            Ipv4Addr::new(192, 168, 40, 255),
+        ] {
+            assert!(matches!(
+                PrivateLanEndpoint::new(src, addr, 48620),
+                Err(ClientError::PrivateLanEndpoint)
+            ));
+            assert!(matches!(
+                PrivateLanEndpoint::new(addr, dst, 48620),
+                Err(ClientError::PrivateLanEndpoint)
+            ));
+        }
+    }
+
+    #[test]
+    fn connected_private_route_must_preserve_the_selected_source_and_relay_exactly() {
+        let addr = |value: &str| value.parse::<SocketAddr>().unwrap();
+        let src = "10.1.2.3".parse::<Ipv4Addr>().unwrap();
+        let dst = "10.1.2.4".parse::<Ipv4Addr>().unwrap();
+        let route = PrivateLanEndpoint::new(src, dst, 48620).unwrap();
+        assert_eq!(route.source(), src);
+        assert_eq!(route.relay(), SocketAddrV4::new(dst, 48620));
+        assert!(route.matches_socket(addr("10.1.2.3:40000"), addr("10.1.2.4:48620")));
+        for (local, peer) in [
+            ("10.1.2.8:40000", "10.1.2.4:48620"),
+            ("10.1.2.3:0", "10.1.2.4:48620"),
+            ("10.1.2.3:40000", "10.1.2.5:48620"),
+            ("10.1.2.3:40000", "10.1.2.4:48621"),
+            ("[::ffff:10.1.2.3]:40000", "10.1.2.4:48620"),
+        ] {
+            assert!(!route.matches_socket(addr(local), addr(peer)));
+        }
+        let colocated = PrivateLanEndpoint::new(src, src, 48620).unwrap();
+        assert!(colocated.matches_socket(addr("10.1.2.3:40000"), addr("10.1.2.3:48620")));
+        assert!(matches!(
+            Route::Loopback(addr("10.1.2.4:48620"), None).server(),
+            Err(ClientError::Endpoint)
+        ));
     }
 }
