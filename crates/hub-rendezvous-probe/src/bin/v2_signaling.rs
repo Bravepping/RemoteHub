@@ -1,6 +1,9 @@
-//! RemoteHub V2 P1: ephemeral, authenticated signaling only. No media or input API.
+//! RemoteHub V2 P1: loopback-only signaling with an ephemeral relay token. No media or input API.
 use axum::{
-    extract::{ws::{Message, WebSocket, WebSocketUpgrade}, State},
+    extract::{
+        ws::{Message, WebSocket, WebSocketUpgrade},
+        State,
+    },
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -11,10 +14,14 @@ use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     net::SocketAddr,
-    sync::{atomic::{AtomicUsize, Ordering}, Arc, Mutex},
-    time::{Duration, Instant},
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc, Mutex,
+    },
+    time::Duration,
 };
-use tokio::sync::mpsc;
+use tokio::{sync::mpsc, time::Instant};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
@@ -26,16 +33,31 @@ const ROOM_LIFETIME: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum Role { Host, Viewer }
+enum Role {
+    Host,
+    Viewer,
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-enum SignalKind { Offer, Answer, Ice }
+enum SignalKind {
+    Offer,
+    Answer,
+    Ice,
+}
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum ClientFrame {
-    Hello { version: u8, room: String, role: Role },
-    Signal { seq: u64, signal: SignalKind, data: String },
+    Hello {
+        version: u8,
+        room: String,
+        role: Role,
+    },
+    Signal {
+        seq: u64,
+        signal: SignalKind,
+        data: String,
+    },
     Leave,
 }
 #[derive(Serialize)]
@@ -43,12 +65,23 @@ enum ClientFrame {
 enum ServerFrame {
     Waiting,
     Paired,
-    Signal { from: Role, seq: u64, signal: SignalKind, data: String },
+    Signal {
+        from: Role,
+        seq: u64,
+        signal: SignalKind,
+        data: String,
+    },
     PeerLeft,
-    Error { code: &'static str },
+    Error {
+        code: &'static str,
+    },
 }
 fn wire(frame: &ServerFrame) -> Result<Message, &'static str> {
-    Ok(Message::Text(serde_json::to_string(frame).map_err(|_| "ENCODE_FAILED")?.into()))
+    let text = serde_json::to_string(frame).map_err(|_| "ENCODE_FAILED")?;
+    if text.len() > MAX_WIRE {
+        return Err("SIGNAL_SIZE");
+    }
+    Ok(Message::Text(text.into()))
 }
 
 struct Peer {
@@ -60,22 +93,51 @@ struct Peer {
 }
 impl Peer {
     fn new(id: Uuid, tx: mpsc::Sender<Message>) -> Self {
-        Self { id, tx, last_seq: 0, window: Instant::now(), events: 0 }
+        Self {
+            id,
+            tx,
+            last_seq: 0,
+            window: Instant::now(),
+            events: 0,
+        }
     }
     fn accept_seq(&mut self, seq: u64) -> Result<(), &'static str> {
-        if seq == 0 || seq != self.last_seq + 1 { return Err("SIGNAL_SEQUENCE"); }
+        if self.last_seq.checked_add(1) != Some(seq) {
+            return Err("SIGNAL_SEQUENCE");
+        }
         if self.window.elapsed() >= Duration::from_secs(1) {
             self.window = Instant::now();
             self.events = 0;
         }
-        if self.events >= 60 { return Err("SIGNAL_RATE_LIMIT"); }
+        if self.events >= 60 {
+            return Err("SIGNAL_RATE_LIMIT");
+        }
         self.events += 1;
         self.last_seq = seq;
         Ok(())
     }
 }
+#[derive(Default)]
+enum Negotiation {
+    #[default]
+    WaitingForOffer,
+    WaitingForAnswer,
+    Established,
+}
+impl Negotiation {
+    fn after(&self, signal: SignalKind) -> Result<Self, &'static str> {
+        match (self, signal) {
+            (Self::WaitingForOffer, SignalKind::Offer) => Ok(Self::WaitingForAnswer),
+            (Self::WaitingForAnswer, SignalKind::Answer) => Ok(Self::Established),
+            (Self::WaitingForAnswer, SignalKind::Ice) => Ok(Self::WaitingForAnswer),
+            (Self::Established, SignalKind::Ice) => Ok(Self::Established),
+            _ => Err("SIGNAL_ORDER"),
+        }
+    }
+}
 struct Room {
-    created: Instant,
+    deadline: Instant,
+    negotiation: Negotiation,
     host: Option<Peer>,
     viewer: Option<Peer>,
 }
@@ -88,75 +150,148 @@ impl App {
     fn reserve(&self) -> bool {
         let mut n = self.active.load(Ordering::Acquire);
         loop {
-            if n >= MAX_CONNECTIONS { return false; }
-            match self.active.compare_exchange_weak(n, n + 1, Ordering::AcqRel, Ordering::Acquire) {
+            if n >= MAX_CONNECTIONS {
+                return false;
+            }
+            match self
+                .active
+                .compare_exchange_weak(n, n + 1, Ordering::AcqRel, Ordering::Acquire)
+            {
                 Ok(_) => return true,
                 Err(actual) => n = actual,
             }
         }
     }
-    fn join(&self, key: &str, role: Role, id: Uuid, tx: mpsc::Sender<Message>) -> Result<(), &'static str> {
-        if key.len() != 32 || !key.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()) {
+    fn join(
+        &self,
+        key: &str,
+        role: Role,
+        id: Uuid,
+        tx: mpsc::Sender<Message>,
+    ) -> Result<Instant, &'static str> {
+        if key.len() != 32
+            || !key
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
             return Err("ROOM_FORMAT");
         }
         let mut rooms = self.rooms.lock().map_err(|_| "STATE_UNAVAILABLE")?;
         if !rooms.contains_key(key) {
-            if role != Role::Host { return Err("ROOM_NOT_FOUND"); }
-            if rooms.len() >= MAX_ROOMS { return Err("ROOM_LIMIT"); }
-            rooms.insert(key.to_owned(), Room { created: Instant::now(), host: None, viewer: None });
+            if role != Role::Host {
+                return Err("ROOM_NOT_FOUND");
+            }
+            if rooms.len() >= MAX_ROOMS {
+                return Err("ROOM_LIMIT");
+            }
+            rooms.insert(
+                key.to_owned(),
+                Room {
+                    deadline: Instant::now() + ROOM_LIFETIME,
+                    negotiation: Negotiation::default(),
+                    host: None,
+                    viewer: None,
+                },
+            );
         }
         let room = rooms.get_mut(key).ok_or("ROOM_NOT_FOUND")?;
-        if room.created.elapsed() >= ROOM_LIFETIME { return Err("ROOM_EXPIRED"); }
-        let occupied = match role { Role::Host => room.host.is_some(), Role::Viewer => room.viewer.is_some() };
-        if occupied { return Err("ROLE_OCCUPIED"); }
+        if Instant::now() >= room.deadline {
+            return Err("ROOM_EXPIRED");
+        }
+        let occupied = match role {
+            Role::Host => room.host.is_some(),
+            Role::Viewer => room.viewer.is_some(),
+        };
+        if occupied {
+            return Err("ROLE_OCCUPIED");
+        }
         let new_peer = Peer::new(id, tx);
-        match role { Role::Host => room.host = Some(new_peer), Role::Viewer => room.viewer = Some(new_peer) }
+        match role {
+            Role::Host => room.host = Some(new_peer),
+            Role::Viewer => room.viewer = Some(new_peer),
+        }
         if room.host.is_some() && room.viewer.is_some() {
             let msg = wire(&ServerFrame::Paired)?;
-            for peer in [room.host.as_ref(), room.viewer.as_ref()].into_iter().flatten() {
-                peer.tx.try_send(msg.clone()).map_err(|_| "CLIENT_BACKPRESSURE")?;
+            for peer in [room.host.as_ref(), room.viewer.as_ref()]
+                .into_iter()
+                .flatten()
+            {
+                peer.tx
+                    .try_send(msg.clone())
+                    .map_err(|_| "CLIENT_BACKPRESSURE")?;
             }
         } else {
-            let peer = match role { Role::Host => room.host.as_ref(), Role::Viewer => room.viewer.as_ref() };
-            peer.ok_or("ROLE_MISSING")?.tx.try_send(wire(&ServerFrame::Waiting)?)
+            let peer = match role {
+                Role::Host => room.host.as_ref(),
+                Role::Viewer => room.viewer.as_ref(),
+            };
+            peer.ok_or("ROLE_MISSING")?
+                .tx
+                .try_send(wire(&ServerFrame::Waiting)?)
                 .map_err(|_| "CLIENT_BACKPRESSURE")?;
         }
-        Ok(())
+        Ok(room.deadline)
     }
-    fn relay(&self, key: &str, role: Role, id: Uuid, signal: SignalKind, seq: u64, data: String)
-        -> Result<(), &'static str>
-    {
+    fn relay(
+        &self,
+        key: &str,
+        role: Role,
+        id: Uuid,
+        signal: SignalKind,
+        seq: u64,
+        data: String,
+    ) -> Result<(), &'static str> {
         if data.is_empty() || data.len() > MAX_SIGNAL || data.contains('\0') {
             return Err("SIGNAL_SIZE");
         }
-        if matches!((role, signal), (Role::Host, SignalKind::Offer) | (Role::Viewer, SignalKind::Answer)) {
+        if matches!(
+            (role, signal),
+            (Role::Host, SignalKind::Offer) | (Role::Viewer, SignalKind::Answer)
+        ) {
             return Err("SIGNAL_ROLE_DENIED");
         }
         let mut rooms = self.rooms.lock().map_err(|_| "STATE_UNAVAILABLE")?;
         let room = rooms.get_mut(key).ok_or("ROOM_NOT_FOUND")?;
-        if room.created.elapsed() >= ROOM_LIFETIME { return Err("ROOM_EXPIRED"); }
+        if Instant::now() >= room.deadline {
+            return Err("ROOM_EXPIRED");
+        }
         let (sender, target) = match role {
             Role::Host => (&mut room.host, &room.viewer),
             Role::Viewer => (&mut room.viewer, &room.host),
         };
         let from = sender.as_mut().ok_or("ROLE_MISSING")?;
-        if from.id != id { return Err("PEER_MISMATCH"); }
-        from.accept_seq(seq)?;
+        if from.id != id {
+            return Err("PEER_MISMATCH");
+        }
         let to = target.as_ref().ok_or("PEER_NOT_JOINED")?;
-        to.tx.try_send(wire(&ServerFrame::Signal { from: role, seq, signal, data })?)
-            .map_err(|_| "CLIENT_BACKPRESSURE")
+        let negotiation = room.negotiation.after(signal)?;
+        from.accept_seq(seq)?;
+        to.tx
+            .try_send(wire(&ServerFrame::Signal {
+                from: role,
+                seq,
+                signal,
+                data,
+            })?)
+            .map_err(|_| "CLIENT_BACKPRESSURE")?;
+        room.negotiation = negotiation;
+        Ok(())
     }
     fn leave(&self, key: &str, id: Uuid) {
-        let Ok(mut rooms) = self.rooms.lock() else { return; };
+        let Ok(mut rooms) = self.rooms.lock() else {
+            return;
+        };
         let owned = rooms.get(key).is_some_and(|room| {
-            room.host.as_ref().is_some_and(|p| p.id == id) ||
-            room.viewer.as_ref().is_some_and(|p| p.id == id)
+            room.host.as_ref().is_some_and(|p| p.id == id)
+                || room.viewer.as_ref().is_some_and(|p| p.id == id)
         });
         if owned {
             if let Some(room) = rooms.remove(key) {
                 if let Ok(msg) = wire(&ServerFrame::PeerLeft) {
                     for peer in [room.host, room.viewer].into_iter().flatten() {
-                        if peer.id != id { let _ = peer.tx.try_send(msg.clone()); }
+                        if peer.id != id {
+                            let _ = peer.tx.try_send(msg.clone());
+                        }
                     }
                 }
             }
@@ -165,20 +300,56 @@ impl App {
 }
 struct Lease(Arc<App>);
 impl Drop for Lease {
-    fn drop(&mut self) { self.0.active.fetch_sub(1, Ordering::AcqRel); }
+    fn drop(&mut self) {
+        self.0.active.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 fn token_matches(expected: &str, given: &str) -> bool {
-    given.len() == 64 &&
-        ring::constant_time::verify_slices_are_equal(expected.as_bytes(), given.as_bytes()).is_ok()
+    if given.len() != 64 || !given.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return false;
+    }
+    let message = b"RemoteHub.v2.SignalRelayToken";
+    let tag = ring::hmac::sign(
+        &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, expected.as_bytes()),
+        message,
+    );
+    ring::hmac::verify(
+        &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, given.as_bytes()),
+        message,
+        tag.as_ref(),
+    )
+    .is_ok()
 }
-async fn upgrade(State(app): State<Arc<App>>, headers: HeaderMap, ws: WebSocketUpgrade) -> Response {
-    let candidate = headers.get(header::AUTHORIZATION).and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer ")).unwrap_or("");
-    if !token_matches(&app.token, candidate) { return StatusCode::UNAUTHORIZED.into_response(); }
-    if !app.reserve() { return StatusCode::TOO_MANY_REQUESTS.into_response(); }
+async fn upgrade(
+    State(app): State<Arc<App>>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    // This probe is a native-client relay. Do not accept a browser Origin
+    // or two Authorization headers that proxies could interpret differently.
+    if headers.contains_key(header::ORIGIN) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    let authorization_values = headers.get_all(header::AUTHORIZATION);
+    let mut authorization = authorization_values.iter();
+    let candidate = authorization
+        .next()
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    if authorization.next().is_some() || !token_matches(&app.token, candidate) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
+    if !app.reserve() {
+        return StatusCode::TOO_MANY_REQUESTS.into_response();
+    }
     let guard = Lease(app.clone());
-    ws.max_message_size(MAX_WIRE).max_frame_size(MAX_WIRE)
-        .on_upgrade(move |socket| async move { let _guard = guard; connection(socket, app).await; })
+    ws.max_message_size(MAX_WIRE)
+        .max_frame_size(MAX_WIRE)
+        .on_upgrade(move |socket| async move {
+            let _guard = guard;
+            connection(socket, app).await;
+        })
         .into_response()
 }
 async fn send_error(socket: &mut WebSocket, code: &'static str) {
@@ -192,23 +363,35 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
         send_error(&mut socket, "HELLO_REQUIRED").await;
         return;
     };
-    let Ok(ClientFrame::Hello { version: 2, room, role }) = serde_json::from_str::<ClientFrame>(&first) else {
+    let Ok(ClientFrame::Hello {
+        version: 2,
+        room,
+        role,
+    }) = serde_json::from_str::<ClientFrame>(&first)
+    else {
         send_error(&mut socket, "HELLO_INVALID").await;
         return;
     };
     let id = Uuid::new_v4();
     let (tx, mut rx) = mpsc::channel(16);
-    if let Err(code) = app.join(&room, role, id, tx) {
-        app.leave(&room, id);
-        send_error(&mut socket, code).await;
-        return;
-    }
-    let started = Instant::now();
+    let deadline = match app.join(&room, role, id, tx) {
+        Ok(deadline) => deadline,
+        Err(code) => {
+            app.leave(&room, id);
+            send_error(&mut socket, code).await;
+            return;
+        }
+    };
     loop {
         tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(deadline) => break,
             outgoing = rx.recv() => {
                 let Some(message) = outgoing else { break; };
-                if !matches!(tokio::time::timeout(Duration::from_secs(2), socket.send(message)).await, Ok(Ok(()))) { break; }
+                let send_deadline = deadline.min(Instant::now() + Duration::from_secs(2));
+                if !matches!(tokio::time::timeout_at(send_deadline, socket.send(message)).await, Ok(Ok(()))) {
+                    break;
+                }
             }
             incoming = socket.next() => {
                 match incoming {
@@ -229,41 +412,66 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
                     _ => break,
                 }
             }
-            _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                if started.elapsed() > ROOM_LIFETIME { break; }
-            }
         }
     }
     app.leave(&room, id);
     let _ = tokio::time::timeout(Duration::from_secs(1), socket.close()).await;
 }
+fn validate_bind(
+    addr: SocketAddr,
+    cert: Option<&Path>,
+    key: Option<&Path>,
+) -> Result<(), &'static str> {
+    if cert.is_some() != key.is_some() {
+        return Err("V2_TLS_PAIR_REQUIRED");
+    }
+    // Shared bearer + unguessable room is only a lab gate; it does not
+    // establish a trusted endpoint or authorize screen sharing.
+    if !addr.ip().is_loopback() {
+        return Err("V2_BIND_LOOPBACK_ONLY");
+    }
+    Ok(())
+}
+fn router(app: Arc<App>) -> Router {
+    Router::new()
+        .route("/healthz", get(|| async { "ok" }))
+        .route("/v2/ws", get(upgrade))
+        .with_state(app)
+}
 async fn run() -> Result<(), &'static str> {
-    let token = std::env::var("REMOTEHUB_V2_TOKEN").map_err(|_| "V2_TOKEN_REQUIRED")?;
+    let token =
+        Zeroizing::new(std::env::var("REMOTEHUB_V2_TOKEN").map_err(|_| "V2_TOKEN_REQUIRED")?);
     if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("V2_TOKEN_MUST_BE_64_HEX");
     }
-    let addr: SocketAddr = std::env::var("REMOTEHUB_V2_BIND")
-        .unwrap_or_else(|_| "127.0.0.1:48620".into())
-        .parse().map_err(|_| "V2_BIND_INVALID")?;
-    let cert = std::env::var("REMOTEHUB_V2_TLS_CERT").ok();
-    let key = std::env::var("REMOTEHUB_V2_TLS_KEY").ok();
-    if cert.is_some() != key.is_some() { return Err("V2_TLS_PAIR_REQUIRED"); }
-    if !addr.ip().is_loopback() && cert.is_none() { return Err("V2_PUBLIC_BIND_REQUIRES_TLS"); }
-    let app = Arc::new(App {
-        token: Zeroizing::new(token),
+    let addr: SocketAddr = match std::env::var("REMOTEHUB_V2_BIND") {
+        Ok(value) => value,
+        Err(std::env::VarError::NotPresent) => "127.0.0.1:48620".into(),
+        Err(_) => return Err("V2_BIND_INVALID"),
+    }
+    .parse()
+    .map_err(|_| "V2_BIND_INVALID")?;
+    let cert = std::env::var_os("REMOTEHUB_V2_TLS_CERT").map(PathBuf::from);
+    let key = std::env::var_os("REMOTEHUB_V2_TLS_KEY").map(PathBuf::from);
+    validate_bind(addr, cert.as_deref(), key.as_deref())?;
+    let router = router(Arc::new(App {
+        token,
         rooms: Mutex::new(HashMap::new()),
         active: AtomicUsize::new(0),
-    });
-    let router = Router::new().route("/healthz", get(|| async { "ok" }))
-        .route("/v2/ws", get(upgrade)).with_state(app);
+    }));
     if let (Some(cert), Some(key)) = (cert, key) {
         let _ = rustls::crypto::ring::default_provider().install_default();
-        let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key).await
+        let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)
+            .await
             .map_err(|_| "V2_TLS_CONFIG_FAILED")?;
-        axum_server::bind_rustls(addr, tls).serve(router.into_make_service()).await
+        axum_server::bind_rustls(addr, tls)
+            .serve(router.into_make_service())
+            .await
             .map_err(|_| "V2_SERVER_FAILED")
     } else {
-        axum_server::bind(addr).serve(router.into_make_service()).await
+        axum_server::bind(addr)
+            .serve(router.into_make_service())
+            .await
             .map_err(|_| "V2_SERVER_FAILED")
     }
 }
@@ -277,86 +485,303 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    #[test]
-    fn token_requires_exact_secret() {
-        let s = "a".repeat(64);
-        assert!(token_matches(&s, &s));
-        assert!(!token_matches(&s, &"b".repeat(64)));
-        assert!(!token_matches(&s, "a"));
-    }
-    #[test]
-    fn two_roles_relay_and_reject_wrong_role_replay() {
-        let app = App { token: Zeroizing::new("a".repeat(64)),
-            rooms: Mutex::new(HashMap::new()), active: AtomicUsize::new(0) };
-        let room = "0123456789abcdef0123456789abcdef";
-        let (host_tx, mut host_rx) = mpsc::channel(8);
-        let (viewer_tx, mut viewer_rx) = mpsc::channel(8);
-        let host_id = Uuid::new_v4();
-        let viewer_id = Uuid::new_v4();
-        assert!(app.join(room, Role::Viewer, viewer_id, viewer_tx.clone()).is_err());
-        app.join(room, Role::Host, host_id, host_tx).unwrap();
-        app.join(room, Role::Viewer, viewer_id, viewer_tx).unwrap();
-        assert!(host_rx.try_recv().is_ok()); // waiting
-        assert!(host_rx.try_recv().is_ok()); // paired
-        assert!(viewer_rx.try_recv().is_ok()); // paired
-        assert!(app.relay(room, Role::Viewer, viewer_id, SignalKind::Offer, 1, "P1_TEST_ONLY".into()).is_ok());
-        assert!(host_rx.try_recv().is_ok());
-        assert!(app.relay(room, Role::Viewer, viewer_id, SignalKind::Offer, 1, "REPLAY".into()).is_err());
-        assert!(app.relay(room, Role::Host, host_id, SignalKind::Offer, 1, "WRONG_ROLE".into()).is_err());
-        app.leave(room, viewer_id);
-        assert!(host_rx.try_recv().is_ok()); // peer_left
-        assert!(app.rooms.lock().unwrap().is_empty());
-    }
-    #[test]
-    fn room_id_and_signal_validation_are_strict() {
-        let app = App { token: Zeroizing::new("a".repeat(64)),
-            rooms: Mutex::new(HashMap::new()), active: AtomicUsize::new(0) };
-        let (tx, _) = mpsc::channel(2);
-        assert!(app.join("123", Role::Host, Uuid::new_v4(), tx.clone()).is_err());
-        assert!(app.join(&"a".repeat(32), Role::Viewer, Uuid::new_v4(), tx).is_err());
-    }
-    #[tokio::test]
-    async fn real_loopback_ws_handshake_relay_and_disconnect() {
-        use tokio_tungstenite::{
-            connect_async,
-            tungstenite::{client::IntoClientRequest, http::HeaderValue, Message as WsMessage},
-        };
-        let app = Arc::new(App {
-            token: Zeroizing::new("a".repeat(64)),
+    use serde_json::{json, Value};
+    use tokio::net::{TcpListener, TcpStream};
+    use tokio_tungstenite::{
+        connect_async,
+        tungstenite::{
+            client::IntoClientRequest, handshake::client::Request, http::HeaderValue,
+            Error as WsError, Message as WsMessage,
+        },
+        MaybeTlsStream, WebSocketStream,
+    };
+
+    const ROOM: &str = "0123456789abcdef0123456789abcdef";
+    const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const WRONG_TOKEN: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+    fn app() -> Arc<App> {
+        Arc::new(App {
+            token: Zeroizing::new(TOKEN.into()),
             rooms: Mutex::new(HashMap::new()),
             active: AtomicUsize::new(0),
-        });
-        let router = Router::new().route("/v2/ws", get(upgrade)).with_state(app);
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
-        let request = || {
-            let mut req = format!("ws://{address}/v2/ws").into_client_request().unwrap();
-            req.headers_mut().insert(
-                header::AUTHORIZATION,
-                HeaderValue::from_str(&format!("Bearer {}", "a".repeat(64))).unwrap(),
+        })
+    }
+
+    #[test]
+    fn token_requires_exact_secret() {
+        assert!(token_matches(TOKEN, TOKEN));
+        assert!(!token_matches(TOKEN, WRONG_TOKEN));
+        assert!(!token_matches(TOKEN, "a"));
+        assert!(!token_matches(TOKEN, &"z".repeat(64)));
+    }
+
+    #[test]
+    fn rejects_non_loopback_even_with_tls_files_and_rejects_missing_tls_half() {
+        let cert = Some(Path::new("example-cert"));
+        let key = Some(Path::new("example-key"));
+        let loopback = "127.0.0.1:0".parse().unwrap();
+        assert_eq!(validate_bind(loopback, None, None), Ok(()));
+        assert_eq!(validate_bind(loopback, cert, key), Ok(()));
+        assert_eq!(
+            validate_bind(loopback, cert, None),
+            Err("V2_TLS_PAIR_REQUIRED")
+        );
+        for invalid in ["0.0.0.0:0", "[::]:0", "192.0.2.1:48620"] {
+            assert_eq!(
+                validate_bind(invalid.parse().unwrap(), cert, key),
+                Err("V2_BIND_LOOPBACK_ONLY")
             );
-            req
-        };
-        let (mut host, _) = connect_async(request()).await.unwrap();
-        let room = "0123456789abcdef0123456789abcdef";
-        host.send(WsMessage::Text(format!(r#"{{"type":"hello","version":2,"room":"{room}","role":"host"}}"#).into())).await.unwrap();
-        let waiting = tokio::time::timeout(Duration::from_secs(3), host.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
-        assert!(waiting.contains(r#""type":"waiting""#));
-        let (mut viewer, _) = connect_async(request()).await.unwrap();
-        viewer.send(WsMessage::Text(format!(r#"{{"type":"hello","version":2,"room":"{room}","role":"viewer"}}"#).into())).await.unwrap();
-        for socket in [&mut host, &mut viewer] {
-            let msg = tokio::time::timeout(Duration::from_secs(3), socket.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
-            assert!(msg.contains(r#""type":"paired""#));
         }
-        viewer.send(WsMessage::Text(r#"{"type":"signal","seq":1,"signal":"offer","data":"SDP_TEST_ONLY"}"#.into())).await.unwrap();
-        let relayed = tokio::time::timeout(Duration::from_secs(3), host.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
-        assert!(relayed.contains("SDP_TEST_ONLY"));
-        assert!(relayed.contains(r#""from":"viewer""#));
-        viewer.send(WsMessage::Text(r#"{"type":"leave"}"#.into())).await.unwrap();
-        let left = tokio::time::timeout(Duration::from_secs(3), host.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
-        assert!(left.contains(r#""type":"peer_left""#));
+    }
+
+    #[test]
+    fn relay_output_respects_encoded_size_limit() {
+        let oversized = ServerFrame::Signal {
+            from: Role::Host,
+            seq: 1,
+            signal: SignalKind::Answer,
+            // JSON escapes this control character into six bytes each.
+            data: "\u{1}".repeat(MAX_SIGNAL),
+        };
+        assert!(matches!(wire(&oversized), Err("SIGNAL_SIZE")));
+    }
+
+    #[test]
+    fn host_owns_room_and_both_peers_share_absolute_deadline() {
+        let app = app();
+        let (host_tx, mut host_rx) = mpsc::channel(8);
+        let (viewer_tx, mut viewer_rx) = mpsc::channel(8);
+        let host = Uuid::new_v4();
+        let viewer = Uuid::new_v4();
+        assert_eq!(
+            app.join("123", Role::Host, host, host_tx.clone()),
+            Err("ROOM_FORMAT")
+        );
+        assert_eq!(
+            app.join(ROOM, Role::Viewer, viewer, viewer_tx.clone()),
+            Err("ROOM_NOT_FOUND")
+        );
+        let deadline = app.join(ROOM, Role::Host, host, host_tx).unwrap();
+        assert_eq!(
+            app.join(ROOM, Role::Viewer, viewer, viewer_tx),
+            Ok(deadline)
+        );
+        assert_eq!(
+            read_server_frame(host_rx.try_recv().unwrap()),
+            json!({"type":"waiting"})
+        );
+        assert_eq!(
+            read_server_frame(host_rx.try_recv().unwrap()),
+            json!({"type":"paired"})
+        );
+        assert_eq!(
+            read_server_frame(viewer_rx.try_recv().unwrap()),
+            json!({"type":"paired"})
+        );
+
+        assert_eq!(
+            app.relay(ROOM, Role::Host, host, SignalKind::Offer, 1, "TEST".into()),
+            Err("SIGNAL_ROLE_DENIED")
+        );
+        assert_eq!(
+            app.relay(
+                ROOM,
+                Role::Viewer,
+                viewer,
+                SignalKind::Ice,
+                1,
+                "TEST".into()
+            ),
+            Err("SIGNAL_ORDER")
+        );
+        assert_eq!(
+            app.relay(ROOM, Role::Host, host, SignalKind::Answer, 1, "TEST".into()),
+            Err("SIGNAL_ORDER")
+        );
+        assert_eq!(
+            app.relay(
+                ROOM,
+                Role::Viewer,
+                host,
+                SignalKind::Offer,
+                1,
+                "TEST".into()
+            ),
+            Err("PEER_MISMATCH")
+        );
+        assert_eq!(
+            app.relay(
+                ROOM,
+                Role::Viewer,
+                viewer,
+                SignalKind::Offer,
+                1,
+                "x".repeat(MAX_SIGNAL + 1)
+            ),
+            Err("SIGNAL_SIZE")
+        );
+
+        app.rooms.lock().unwrap().get_mut(ROOM).unwrap().deadline = Instant::now();
+        assert_eq!(
+            app.relay(
+                ROOM,
+                Role::Viewer,
+                viewer,
+                SignalKind::Offer,
+                1,
+                "TEST".into()
+            ),
+            Err("ROOM_EXPIRED")
+        );
+        app.leave(ROOM, viewer);
+        assert_eq!(
+            read_server_frame(host_rx.try_recv().unwrap()),
+            json!({"type":"peer_left"})
+        );
+        assert!(app.rooms.lock().unwrap().is_empty());
+    }
+
+    fn read_server_frame(message: Message) -> Value {
+        let Message::Text(text) = message else {
+            panic!("expected text");
+        };
+        serde_json::from_str(&text).unwrap()
+    }
+
+    async fn start_server() -> (SocketAddr, Arc<App>, tokio::task::JoinHandle<()>) {
+        let app = app();
+        let router = router(app.clone());
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        (address, app, task)
+    }
+
+    fn request(address: SocketAddr, token: Option<&str>) -> Request {
+        let mut request = format!("ws://{address}/v2/ws")
+            .into_client_request()
+            .unwrap();
+        if let Some(token) = token {
+            request.headers_mut().insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {token}")).unwrap(),
+            );
+        }
+        request
+    }
+
+    async fn receive(client: &mut Client) -> Value {
+        let message = tokio::time::timeout(Duration::from_secs(3), client.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap()
+            .into_text()
+            .unwrap();
+        serde_json::from_str(&message).unwrap()
+    }
+
+    async fn send(client: &mut Client, value: Value) {
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            client.send(WsMessage::Text(value.to_string().into())),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn real_loopback_ws_rejects_missing_wrong_duplicate_and_browser_auth() {
+        let (address, app, task) = start_server().await;
+        let mut duplicate = request(address, Some(TOKEN));
+        duplicate.headers_mut().append(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer other"),
+        );
+        let mut browser = request(address, Some(TOKEN));
+        browser.headers_mut().insert(
+            header::ORIGIN,
+            HeaderValue::from_static("https://example.invalid"),
+        );
+        for (req, expected) in [
+            (request(address, None), StatusCode::UNAUTHORIZED),
+            (
+                request(address, Some(WRONG_TOKEN)),
+                StatusCode::UNAUTHORIZED,
+            ),
+            (duplicate, StatusCode::UNAUTHORIZED),
+            (browser, StatusCode::FORBIDDEN),
+        ] {
+            let outcome = tokio::time::timeout(Duration::from_secs(3), connect_async(req))
+                .await
+                .unwrap();
+            assert!(
+                matches!(outcome, Err(WsError::Http(response)) if response.status() == expected)
+            );
+        }
+        assert_eq!(app.active.load(Ordering::Acquire), 0);
+        assert!(app.rooms.lock().unwrap().is_empty());
         task.abort();
     }
 
+    #[tokio::test]
+    async fn real_loopback_ws_handshake_relays_both_directions_and_replay_closes_room() {
+        let (address, app, task) = start_server().await;
+        let (mut host, _) = connect_async(request(address, Some(TOKEN))).await.unwrap();
+        send(
+            &mut host,
+            json!({"type":"hello","version":2,"room":ROOM,"role":"host"}),
+        )
+        .await;
+        assert_eq!(receive(&mut host).await, json!({"type":"waiting"}));
+
+        let (mut viewer, _) = connect_async(request(address, Some(TOKEN))).await.unwrap();
+        send(
+            &mut viewer,
+            json!({"type":"hello","version":2,"room":ROOM,"role":"viewer"}),
+        )
+        .await;
+        for client in [&mut host, &mut viewer] {
+            assert_eq!(receive(client).await, json!({"type":"paired"}));
+        }
+
+        send(
+            &mut viewer,
+            json!({"type":"signal","seq":1,"signal":"offer","data":"TEST_ONLY_OFFER"}),
+        )
+        .await;
+        assert_eq!(
+            receive(&mut host).await,
+            json!({"type":"signal","from":"viewer","seq":1,"signal":"offer","data":"TEST_ONLY_OFFER"})
+        );
+        send(
+            &mut host,
+            json!({"type":"signal","seq":1,"signal":"answer","data":"TEST_ONLY_ANSWER"}),
+        )
+        .await;
+        assert_eq!(
+            receive(&mut viewer).await,
+            json!({"type":"signal","from":"host","seq":1,"signal":"answer","data":"TEST_ONLY_ANSWER"})
+        );
+        let ice = json!({"type":"signal","seq":2,"signal":"ice","data":"TEST_ONLY_ICE"});
+        send(&mut viewer, ice.clone()).await;
+        assert_eq!(
+            receive(&mut host).await,
+            json!({"type":"signal","from":"viewer","seq":2,"signal":"ice","data":"TEST_ONLY_ICE"})
+        );
+
+        send(&mut viewer, ice).await;
+        assert_eq!(
+            receive(&mut viewer).await,
+            json!({"type":"error","code":"SIGNAL_SEQUENCE"})
+        );
+        assert_eq!(receive(&mut host).await, json!({"type":"peer_left"}));
+        assert!(app.rooms.lock().unwrap().is_empty());
+        task.abort();
+    }
 }
