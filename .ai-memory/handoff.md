@@ -173,3 +173,18 @@
 - 相关文件：crates/hub-encode-win/{src/mf.rs,src/probe.rs,src/h264.rs,src/color.rs}；docs/P003_FORMAT.md；ADR 0002；TASKS.md。视频样本仅在 artifacts/private/p003-accepted，不能提交/上传。
 - 未完成：P0-04 WebRTC 视频、P0-05 DataChannel、P0-06 TURN、P0-07 全阶段结论。下一轮先做有界本机受授权 WebRTC -> WebView2；不进入 P1。恢复验证：设置 REMOTEHUB_VERIFY_DIR 到新证据目录，然后 pnpm verify。
 - 阻塞/限制：真实硬件丢失与 Windows 11 未测；raw ffprobe 速率估计不代表实际 FPS，MF PTS 和 MP4 已验证 30Hz。远程身份/配对/签名/ACL 尚未实现，不要把本机 consent 当作远程授权；两机/TURN 出口仍缺第二台 PC 与节点。
+
+## P1-06检查点（2026-11-22）
+- 已完成带证据：原生默认X退出/本次主动驻留/显示与退出幂等策略、普通采集互锁、视频实验不装托盘；ADR0021先于源码。用户确认P105窗口可见单独追加，旧证据不改。权限core默认集拆分，去除JS tray/menu访问，无新IPC。
+- 相关文件：lifecycle.rs/lifecycle_policy.rs/main.rs、capabilities/default.json、examples/lifecycle_native.rs、scripts/p106*、docs/P106_PLAN.md及C0_D1_D6_USER_DECISION_SHEET.md。
+- 未完成：完整47回归运行中，附加隐私/交付、报告/退出准备/证据检查/Git提交待完成。Phase1退出待用户审查，不进入Phase2。
+- 阻塞：自有原生探针两次启动均exit0xc0000139，无nativeJSON，托盘原生验收未完成；不等同P105窗口失败。没有实际采集/输入/云/双机/第三方运行；R06继续OPEN。
+
+## P1-06最终检查点 2026-11-22T18:10:57.812244+08:00
+- 已完成带证据：托盘/默认退出及采集互锁代码、权限收窄与C0决策单/退出准备；47主检查/7权限/88前端/18Edge、Rust全82/默认62各1ignored、12生命周期/12隐私/9交付通过。脚本p106-evidence离线审计通过，原生验收字段仍NOT_COMPLETED。
+- 相关文件：docs/P106_TEST_REPORT.md、PHASE1_EXIT_REVIEW_PREPARATION.md、C0_D1_D6_USER_DECISION_SHEET.md、ADR0021、artifacts/p106；生命周期Rust/原生example和p106脚本。
+- 未完成：原生托盘/退出真实验收、完整原生五页仍未完成，P1-06暂不勾选完成；C0用户决策/C1、Phase1正式退出和Phase2未获批准。剩余本轮步骤为最终证据/暂存核对及正常GitHub提交，之后等审查。
+- 阻塞：探针两次系统启动错误0xc0000139，根因未知，无nativeJSON，不重复盲启；先前窗口可见按USER_CONFIRMED_WINDOW_VISIBLE记录。R06开放，不放宽ICE，不启云/采集/输入/第三方。自有探针进程/临时目录0，未影响用户应用。
+
+## P1-06最终源码复核 2026-11-22T18:17:54.147082+08:00
+收紧取消驻留先显示再放开采集、工作线程显示不持策略锁、菜单对象克隆后不持对象锁跨UI调用；完整47主检查和7权限再次通过，另12隐私/9交付通过。最终探针重新编译通过、未再启动；早先失败程序SHA与最终构建SHA分别保留，均不冒充原生PASS。原生托盘验收待完成，提交后等审查。

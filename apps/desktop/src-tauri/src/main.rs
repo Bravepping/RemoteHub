@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-#[cfg(any(feature = "p004-probe", feature = "p006-relay"))]
 mod experiment_origin;
+#[cfg(not(feature = "p004-probe"))]
+mod lifecycle;
+#[cfg(not(feature = "p004-probe"))]
+mod lifecycle_policy;
 #[cfg(all(feature = "p004-probe", not(feature = "p006-relay")))]
 mod p004;
 #[cfg(all(feature = "p004-lan", not(feature = "p006-relay")))]
@@ -22,7 +25,7 @@ use std::{
 
 #[cfg(not(feature = "p006-relay"))]
 #[derive(Default)]
-struct ProbeState(AtomicBool);
+struct ProbeState(std::sync::Arc<AtomicBool>);
 
 #[cfg(not(feature = "p006-relay"))]
 struct ProbeLease<'a>(&'a AtomicBool);
@@ -30,6 +33,19 @@ struct ProbeLease<'a>(&'a AtomicBool);
 impl Drop for ProbeLease<'_> {
     fn drop(&mut self) {
         self.0.store(false, Ordering::Release);
+    }
+}
+
+#[cfg(all(test, not(feature = "p006-relay")))]
+mod lease_tests {
+    use super::*;
+    #[test]
+    fn capture_lease_releases_busy_on_early_return() {
+        let busy = AtomicBool::new(true);
+        {
+            let _lease = ProbeLease(&busy);
+        }
+        assert!(!busy.load(Ordering::Acquire));
     }
 }
 
@@ -79,6 +95,15 @@ async fn run_capture_probe(
     if !consent {
         return Err("CONSENT_REQUIRED: 需要同意本次本机采集".into());
     }
+    #[cfg(not(feature = "p004-probe"))]
+    {
+        use tauri::Manager;
+        experiment_origin::origin(&window)?;
+        window
+            .state::<std::sync::Arc<lifecycle::Lifecycle>>()
+            .reserve_capture()?;
+    }
+    #[cfg(feature = "p004-probe")]
     if state.0.swap(true, Ordering::AcqRel) {
         return Err("CAPTURE_BUSY: 已有采集实验正在进行".into());
     }
@@ -119,7 +144,11 @@ fn main() {
     }
     let builder = tauri::Builder::default();
     #[cfg(not(feature = "p006-relay"))]
-    let builder = builder.manage(std::sync::Arc::new(ProbeState::default()));
+    let probe = std::sync::Arc::new(ProbeState::default());
+    #[cfg(not(feature = "p004-probe"))]
+    let builder = lifecycle::install(builder, probe.0.clone());
+    #[cfg(not(feature = "p006-relay"))]
+    let builder = builder.manage(probe);
     #[cfg(not(feature = "p004-probe"))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         get_runtime_info,
@@ -204,6 +233,12 @@ fn main() {
         ])
         .on_window_event(p006::on_window_event);
     builder
-        .run(tauri::generate_context!())
-        .expect("RemoteHub desktop startup failed");
+        .build(tauri::generate_context!())
+        .expect("RemoteHub desktop startup failed")
+        .run(|app, event| {
+            #[cfg(not(feature = "p004-probe"))]
+            lifecycle::run_event(app, &event);
+            #[cfg(feature = "p004-probe")]
+            let _ = (app, event);
+        });
 }

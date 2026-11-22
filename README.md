@@ -2,17 +2,17 @@
 
 这是已构建和实测的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。真实双机局域网视频、同一PeerConnection上的DataChannel模拟控制、跨网强制TURN均已通过；P2P优先/受阻自动回退已通过真实云WSS/TURN合成视频测试，并有真实双机直连与手机热点中继成功轮。
 
-用户审查`767ff44`后已**接受R06尚未关闭的剩余风险并批准Phase0限定退出**，正式父项7/7；P1-01至04已交付，本轮仅实施用户批准的P1-05 + C0-DRAFT。P004已批准统计+现场观看替代录屏，历史未录屏事实保留。R06历史两次拒绝未复现/根因未知，技术问题仍开放；新版正常终态不追补旧文件。见[退出决议](docs/PHASE0_EXIT_DECISION.md)及[风险台账](docs/PHASE0_RISK_REGISTER.md)。尚无实际输入或持久设备身份服务，不是可发布成品。
+用户审查`767ff44`后已**接受R06尚未关闭的剩余风险并批准Phase0限定退出**，正式父项7/7；P1-01至05已交付，本轮仅实施用户批准的P1-06与退出评审准备。P004已批准统计+现场观看替代录屏，历史未录屏事实保留。R06历史两次拒绝未复现/根因未知，技术问题仍开放；新版正常终态不追补旧文件。见[退出决议](docs/PHASE0_EXIT_DECISION.md)及[风险台账](docs/PHASE0_RISK_REGISTER.md)。尚无实际输入或持久设备身份服务，不是可发布成品。
 
-**P1-05中文反馈与C0-DRAFT已交付，等待审查**：读取/刷新/超时/取消/失败/恢复提供固定中文反馈；原生IPC失败不再误提浏览器，新请求立即移除旧字段，代次隔离/5秒上限保持。未接入设备/会话仍为空态，未增加权限或依赖。见[报告及限制](docs/P105_TEST_REPORT.md)、[独立证据](artifacts/p105/verification.json)。
+**P1-06托盘与退出生命周期已实现，等待审查**：默认点击×真正退出；仅在Rust原生托盘菜单主动勾选“本次允许托盘驻留”后才隐藏。显示/退出幂等，驻留不持久化、不自动启动；视频实验构建不安装托盘隐藏逻辑，继续原关闭停止流程。前端菜单/托盘权限已收窄，未新增IPC或后台授权。见[P1-06报告](docs/P106_TEST_REPORT.md)、[独立证据](artifacts/p106/verification.json)。
 
-`pnpm verify:p105`完整47检查、88前端/18Edge及Windows编译通过；另有12隐私/9交付工具回归。**本轮原生五页补验未完成**：工具未返回可访问的目标窗口，未用Edge或旧原生结果补写PASS；本轮测试实例已清理。没有云/双机/桌面采集/远端输入。SDK状态截图有醒目标记，不作原生证据。[P1-04报告](docs/P104_TEST_REPORT.md)与旧报告保持归档。
+P1-05原生窗口按用户亲眼确认追加为 **USER_CONFIRMED_WINDOW_VISIBLE**；原自动化日志保持不变，五页逐页原生交互仍未完整验证，见[追加记录](docs/P105_USER_WINDOW_VISIBILITY_ADDENDUM.md)。本轮原生生命周期探针启动返回系统错误，未取得托盘/退出原生PASS；Edge及单元结果不替代该验收。没有云、双机、应用真实采集、实际远端输入或第三方软件运行。
 
-[C0兼容目标合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)明确原生Foundation Sunshine↔Moonlight V+ PC互操作、单入口/进程托管、EasyTier承载、版本/许可门槛及待用户决策；**DRAFT，不代表已兼容、已签署或已准许运行原型**。公开材料只读核对，未下载运行第三方程序，C1与P1-06未开始。
+[Phase 1退出评审准备](docs/PHASE1_EXIT_REVIEW_PREPARATION.md)区分实现、自动测试、用户确认与未验证项；**仅准备评审，未批准Phase 1退出或进入Phase 2**。[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)及[D1–D6用户决策单](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，第三方后端未启用，C1未完成。
 
 技术栈继续Tauri v2/Rust/Vue3/TypeScript，见[P1实施方案](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前指引](docs/DEVELOPMENT_GUIDE.md)。[Foundation / V+ PC / EasyTier评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)仍为提案；WebRTC不等于已兼容三件套，运行集成/多进程/驱动及分发范围未获本轮授权。
 
-下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论，批准记录另行追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新双机/媒体或应用真实采集/远控输入。辅助截图工具的异常及丢弃在P1-02报告中披露。旧包不能自行恢复服务，提交后不自动进入P1-06或第三方兼容原型。
+下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论，批准记录另行追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新双机/媒体或应用真实采集/远控输入。辅助截图工具的异常及丢弃在P1-02报告中披露。旧包不能自行恢复服务，提交后不自动进入Phase 2或第三方兼容原型。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 

@@ -1,11 +1,11 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P1-05 + C0-DRAFT）
-Phase0限定退出/父项7/7及P004例外已批准；R06技术OPEN_NOT_REPRODUCED/根因未定，风险接受不等于修复。P1-01至04已交付，9418db2之后仅批准P1-05中文反馈和C0草案，提交后等审查，不进入P1-06或兼容原型。
-当前入口docs/P105_PLAN.md、P105_TEST_REPORT.md、C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md、ADR0020、DEVELOPMENT_GUIDE和handoff。pnpm verify:p105独立artifacts/p105：47检查、88前端/18Edge、全feature82/默认56 Rust各1ignored、12生命周期Python、8真实Cargo配置/9隔离测试及默认Windows编译；另12隐私/9交付工具。无新依赖/锁、Rust/原生权限/CSP/媒体变更。
-新请求立即清runtime，loading/refreshing/ready/error/cancelled/idle有固定中文反馈；用户cancelRead取消当前等待，卸载reset静默失效。只读invoke不可撤销，代次隔离防旧成功/错误/finally覆盖新读取。只有BROWSER_UNAVAILABLE提浏览器；未知原生异常只按固定码重建，不显示端点/凭据/SDP。设备/会话未接入保持空态，Pinia不是权限边界。
-本轮默认Tauri两次启动后窗口工具无法返回目标，原生五页均NOT_COMPLETED，无原生文本/点击/键盘/截图，不用旧结果或Edge替代。普通/提升读取窗口句柄可见性不一致，原因未定；两个自有测试实例按路径/ID/精确启动时间清理，后续检查0，不动用户其他程序。避免继续盲目重启/绕过工具保护，需可靠观察入口后才原生补验。
-C0仅DRAFT未签署：Foundation Sunshine↔Moonlight V+ PC原生互操作和统一安装器/UI为目标；受管理进程/独立播放窗/EasyTier驱动权限均待用户决策及C1来源/许可。公开候选AlkaidLab/foundation-sunshine、qiin2333/moonlight-qt、EasyTier/EasyTier已只读观察repo/LICENSE头/commit/hash；qiin2333/moonlight-vplus为Android，不可混用。未绑定旧安装器、未实现/安装/启动第三方、未完成C1。旧报告/哈希清单保留，无云/双机/桌面/输入，旧云授权不复活。
+# 当前决议与恢复入口（2026-11-22，P1-06）
+Phase0限定退出/父项7/7与P004例外已批准，R06继续OPEN_NOT_REPRODUCED/根因未定；P1-01至05已交付。当前仅批准P1-06托盘/退出及退出准备；代码与离线完成，原生探针启动受阻，P1-06暂不勾选完成，不进入Phase2或兼容原型。
+当前入口docs/P106_TEST_REPORT.md、PHASE1_EXIT_REVIEW_PREPARATION.md、C0_D1_D6_USER_DECISION_SHEET.md、ADR0021。pnpm verify:p106独立artifacts/p106：47主检查/88前端/18Edge、全feature82/默认62 Rust各1ignored、12生命周期、8真实Cargo配置/9隔离测试；另7权限、12隐私/9交付通过。默认Windows EXE与独立原生探针编译通过。
+默认X退出，只有原生托盘主动勾选本次驻留才隐藏；无持久化/自启或前端开关/新IPC。图标可用前提、同锁采集互斥和重复退出合并；普通任务退出最多等待7秒，仍忙恢复可见，不假报资源释放。所有视频实验构建不安装托盘，原停止handler/底层媒体不变。core:default拆为既有7集合，实际允许命令114降80/新增0/JS tray与menu为0；自定义实验权限/CSP/锁不变。
+用户亲眼确认P105 Windows窗口显示，单独追加USER_CONFIRMED_WINDOW_VISIBLE，旧报告/日志不改；五页原生逐页交互仍未完整验证，不重测是否出现。本轮原生API探针两次exit0xc0000139，无native记录，根因未知，不能补写托盘PASS；自有测试进程/临时WebView目录核对0，未动用户应用。
+Pinia/严格只读IPC/5秒/代次隔离与空态保持。C0 D1–D6均待用户决定，C1/第三方运行未开始；自研WebRTC主线保留。退出准备PREPARED_AWAITING_USER_REVIEW，建议HOLD_FOR_NATIVE_TRAY_ACCEPTANCE，阶段退出与Phase2未批准。本轮无云/双机/应用真实桌面/实际远端输入/第三方/驱动/路由操作，旧云授权不复活。
 
 以下历史不覆盖本段及最新授权。
 

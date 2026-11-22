@@ -1,12 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-window",
-  "description": "Local Phase 0 window only; no shell, filesystem, network or remote access plugins",
+  "description": "Local main window; native Rust tray only, no JavaScript menu/tray, shell, filesystem or network plugins",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:default",
+    "core:path:default",
+    "core:event:default",
+    "core:window:default",
+    "core:webview:default",
+    "core:app:default",
+    "core:image:default",
+    "core:resources:default",
     "allow-get-runtime-info",
     "allow-run-capture-probe",
     "allow-p004-start-loopback-probe",

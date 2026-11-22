@@ -1,0 +1,11 @@
+{
+  "passed": true,
+  "previousAllowedCommands": 114,
+  "currentAllowedCommands": 80,
+  "addedAllowedCommands": 0,
+  "removedAllowedCommands": 34,
+  "jsTrayAndMenuCommandsAllowed": 0,
+  "customExperimentalPermissionsUnchanged": true,
+  "windowScope": "main-local-only",
+  "capabilitySha256": "b349cb6667aa7b555cd7942307f67e8210794e6337f9f9986f759488dc0f1cd3"
+}

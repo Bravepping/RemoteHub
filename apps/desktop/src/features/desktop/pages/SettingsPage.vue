@@ -66,11 +66,19 @@ defineEmits<{ refresh: [] }>();
       </div>
       <div>
         <dt>后台驻留</dt>
-        <dd>尚未提供设置</dd>
+        <dd>
+          {{
+            !runtime
+              ? '托盘状态未读取'
+              : runtime.p004_enabled || runtime.p006_enabled
+                ? '实验构建不提供托盘驻留'
+                : '由原生托盘菜单管理，仅本次有效'
+          }}
+        </dd>
       </div>
       <div>
         <dt>开机启动</dt>
-        <dd>尚未提供设置</dd>
+        <dd>不自动启用</dd>
       </div>
     </dl>
     <div class="inline-note">
@@ -79,5 +87,11 @@ defineEmits<{ refresh: [] }>();
         当前不提供权限开关。切换页面或检测本机信息不会启用采集、连接或远程控制。
       </p>
     </div>
+    <p class="card-description">
+      默认点击 ×
+      真正退出。普通桌面构建可在托盘菜单主动勾选“本次允许托盘驻留”，此后关窗仅隐藏；通过“显示
+      RemoteHub”返回，“真正退出
+      RemoteHub”结束程序。驻留不授予采集或远控权限，也不会保存到下次启动。
+    </p>
   </section>
 </template>

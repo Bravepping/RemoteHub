@@ -1,0 +1,19 @@
+{
+  "recordedAt": "2026-11-22T18:05:02.717455+08:00",
+  "nativeLifecycleAcceptance": "NOT_COMPLETED",
+  "launchAttempts": 2,
+  "exitCode": 3221225785,
+  "exitCodeHex": "0xc0000139",
+  "observedNativeLifecycleRecords": 0,
+  "rootCause": "NOT_DETERMINED",
+  "manualTrayClicks": "NOT_RUN",
+  "edgeCannotReplaceNative": true,
+  "applicationCaptureInvoked": false,
+  "remoteInputExecuted": false,
+  "attempts": [
+    "initial-launch.json",
+    "results.json"
+  ],
+  "testedBuild": "Before final offline lifecycle hardening",
+  "finalBuildExecution": "NOT_RUN_AFTER_SAME_LAUNCH_FAILURE_TWICE"
+}

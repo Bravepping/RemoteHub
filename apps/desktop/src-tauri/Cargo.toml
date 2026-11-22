@@ -19,7 +19,7 @@ p007b-diag = ["p006-direct", "hub-webrtc/p006-session-probe"]
 tauri-build = { version = "=2.7.6", features = [] }
 
 [dependencies]
-tauri = { version = "=2.12.7", features = [] }
+tauri = { version = "=2.12.7", features = ["tray-icon"] }
 serde.workspace = true
 hub-capture-win = { path = "../../../crates/hub-capture-win" }
 hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
