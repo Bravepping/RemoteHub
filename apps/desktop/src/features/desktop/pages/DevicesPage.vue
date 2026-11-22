@@ -5,6 +5,7 @@ import EmptyState from '../EmptyState.vue';
 import type { RuntimeInfo } from '../../../bridge';
 import LocalDeviceCard from '../LocalDeviceCard.vue';
 import PanelCard from '../PanelCard.vue';
+import V2PeerPairing from '../V2PeerPairing.vue';
 defineProps<{ runtime?: RuntimeInfo; loading: boolean }>();
 defineEmits<{ refresh: []; navigate: [page: PageId] }>();
 </script>
@@ -14,6 +15,7 @@ defineEmits<{ refresh: []; navigate: [page: PageId] }>();
     :loading="loading"
     @refresh="$emit('refresh')"
   />
+  <V2PeerPairing v-if="!loading && runtime?.v2_peer_pairing_enabled === true" />
   <PanelCard title="设备列表" icon="devices" label="尚未接入">
     <template #actions>
       <button disabled aria-describedby="device-unavailable">添加设备</button>

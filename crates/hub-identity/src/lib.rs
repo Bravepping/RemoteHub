@@ -5,6 +5,7 @@ use std::{fmt, path::Path};
 #[cfg(any(windows, test, feature = "ephemeral-test"))]
 use zeroize::Zeroizing;
 
+pub mod pairing;
 pub mod session;
 
 #[cfg(windows)]
@@ -72,10 +73,7 @@ impl Identity {
 
     pub fn public(&self) -> PublicIdentity {
         let public_key = self.key.verifying_key().to_bytes();
-        let fingerprint: String = Sha256::digest(public_key)
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
+        let fingerprint = public_fingerprint(&public_key);
         let short = fingerprint[..12].to_uppercase();
         PublicIdentity {
             device_id: format!("RH-{}-{}-{}", &short[..4], &short[4..8], &short[8..]),
@@ -111,6 +109,20 @@ impl Identity {
         }
         Ok(Self { key })
     }
+}
+
+fn public_fingerprint(public_key: &[u8; 32]) -> String {
+    lower_hex(&Sha256::digest(public_key))
+}
+
+fn lower_hex(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut text = String::with_capacity(bytes.len() * 2);
+    for &byte in bytes {
+        text.push(char::from(HEX[(byte >> 4) as usize]));
+        text.push(char::from(HEX[(byte & 0xf) as usize]));
+    }
+    text
 }
 
 fn proof_message(nonce: &[u8; 32]) -> Vec<u8> {

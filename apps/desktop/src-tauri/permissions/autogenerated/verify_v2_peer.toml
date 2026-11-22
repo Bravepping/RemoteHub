@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-verify-v2-peer"
+description = "Enables the verify_v2_peer command without any pre-configured scope."
+commands.allow = ["verify_v2_peer"]
+
+[[permission]]
+identifier = "deny-verify-v2-peer"
+description = "Denies the verify_v2_peer command without any pre-configured scope."
+commands.deny = ["verify_v2_peer"]

@@ -20,6 +20,8 @@ mod p006;
 mod p007b_diag;
 #[cfg(all(feature = "p004-lan", not(feature = "p006-relay")))]
 mod v2_loopback;
+#[cfg(all(feature = "p004-lan", not(feature = "p006-relay")))]
+mod v2_pairing;
 
 #[cfg(not(feature = "p006-relay"))]
 use hub_capture_win::ProbeReport;
@@ -70,6 +72,7 @@ struct RuntimeInfo {
     remote_access_enabled: bool,
     p3_enabled: bool,
     v2_loopback_diagnostic_enabled: bool,
+    v2_peer_pairing_enabled: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
@@ -107,6 +110,10 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
         p3_enabled: cfg!(all(feature = "p3-lan", not(feature = "p006-relay"))),
         v2_loopback_diagnostic_enabled: cfg!(all(
             feature = "v2-loopback-diagnostic",
+            not(feature = "p006-relay")
+        )),
+        v2_peer_pairing_enabled: cfg!(all(
+            feature = "v2-peer-pairing",
             not(feature = "p006-relay")
         )),
         p004_enabled: cfg!(feature = "p004-probe"),
@@ -184,6 +191,8 @@ fn main() {
         not(any(feature = "p004-probe", feature = "p006-turn-probe"))
     ))]
     let builder = builder.manage(identity::DesktopIdentity::initialize());
+    #[cfg(all(feature = "v2-peer-pairing", not(feature = "p006-relay")))]
+    let builder = builder.manage(v2_pairing::PairingState::default());
     #[cfg(not(feature = "p006-relay"))]
     let probe = std::sync::Arc::new(ProbeState::default());
     #[cfg(not(feature = "p004-probe"))]
@@ -249,7 +258,9 @@ fn main() {
             p004_lan::p004_lan_metrics,
             p004_lan::p004_lan_stop,
             p004_lan::p004_lan_save,
-            v2_loopback::run_v2_loopback_diagnostic
+            v2_loopback::run_v2_loopback_diagnostic,
+            v2_pairing::get_v2_pairing_card,
+            v2_pairing::verify_v2_peer
         ])
         .on_window_event(p004_lan::on_window_event);
     #[cfg(feature = "p006-relay")]

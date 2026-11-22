@@ -16,6 +16,8 @@ fn main() {
             "p004_lan_stop",
             "p004_lan_save",
             "run_v2_loopback_diagnostic",
+            "get_v2_pairing_card",
+            "verify_v2_peer",
             "p006_interfaces",
             "p006_start",
             "p006_ready",

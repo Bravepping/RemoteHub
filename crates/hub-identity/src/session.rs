@@ -124,7 +124,7 @@ impl SessionBinding {
     }
 }
 
-fn checked_key(bytes: &[u8; 32]) -> Result<VerifyingKey, SessionProofError> {
+pub(crate) fn checked_key(bytes: &[u8; 32]) -> Result<VerifyingKey, SessionProofError> {
     let key = VerifyingKey::from_bytes(bytes).map_err(|_| SessionProofError::Binding)?;
     let point = key.to_edwards();
     if key.is_weak() || !point.is_torsion_free() || point.compress().to_bytes() != *bytes {

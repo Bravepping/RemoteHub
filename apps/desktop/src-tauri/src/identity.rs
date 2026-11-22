@@ -11,28 +11,45 @@ pub(crate) enum IdentityView {
         error_code: &'static str,
     },
 }
-pub(crate) struct DesktopIdentity(IdentityView);
+pub(crate) struct DesktopIdentity {
+    view: IdentityView,
+    #[cfg(all(feature = "v2-peer-pairing", not(feature = "p006-relay")))]
+    public: Option<hub_identity::PublicIdentity>,
+}
+
 impl DesktopIdentity {
     pub(crate) fn initialize() -> Self {
         Self::from_result(hub_identity::open_default())
     }
     fn from_result(result: Result<hub_identity::Identity, hub_identity::Error>) -> Self {
-        Self(match result {
+        match result {
             Ok(identity) => {
                 let public = identity.public();
-                // The desktop caches public state only; drop/zeroize the signing key now.
-                IdentityView::Ready {
-                    device_id: public.device_id,
-                    fingerprint: public.fingerprint,
+                // Only the public half is retained; the signing key is dropped.
+                Self {
+                    view: IdentityView::Ready {
+                        device_id: public.device_id.clone(),
+                        fingerprint: public.fingerprint.clone(),
+                    },
+                    #[cfg(all(feature = "v2-peer-pairing", not(feature = "p006-relay")))]
+                    public: Some(public),
                 }
             }
-            Err(error) => IdentityView::Unavailable {
-                error_code: error.code(),
+            Err(error) => Self {
+                view: IdentityView::Unavailable {
+                    error_code: error.code(),
+                },
+                #[cfg(all(feature = "v2-peer-pairing", not(feature = "p006-relay")))]
+                public: None,
             },
-        })
+        }
     }
     pub(crate) fn view(&self) -> IdentityView {
-        self.0.clone()
+        self.view.clone()
+    }
+    #[cfg(all(feature = "v2-peer-pairing", not(feature = "p006-relay")))]
+    pub(crate) fn public(&self) -> Option<&hub_identity::PublicIdentity> {
+        self.public.as_ref()
     }
 }
 

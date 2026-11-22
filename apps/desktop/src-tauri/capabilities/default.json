@@ -28,6 +28,8 @@
     "allow-p004-lan-stop",
     "allow-p004-lan-save",
     "allow-run-v2-loopback-diagnostic",
+    "allow-get-v2-pairing-card",
+    "allow-verify-v2-peer",
     "allow-p006-interfaces",
     "allow-p006-start",
     "allow-p006-ready",

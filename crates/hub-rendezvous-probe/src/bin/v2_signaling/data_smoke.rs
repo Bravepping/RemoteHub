@@ -4,6 +4,7 @@ use super::{
     tls_smoke::{fixture, make_ca, start_tls},
 };
 use hub_identity::{
+    pairing::PairingCandidate,
     session::{
         PendingSessionProof, SessionBinding, SessionChallenge, SessionRole, CHALLENGE_BYTES,
     },
@@ -90,7 +91,8 @@ impl Peer {
 }
 
 struct TestDevices {
-    binding: SessionBinding,
+    host_binding: SessionBinding,
+    viewer_binding: SessionBinding,
     host: Identity,
     viewer: Identity,
 }
@@ -115,12 +117,20 @@ struct Proof<'a> {
 }
 impl DeviceProofs<'_> {
     fn for_signal(&mut self, role: SessionRole, index: usize) -> Proof<'_> {
-        let (identity, direction) = match role {
-            SessionRole::Host => (&self.devices.host, &mut self.from_host),
-            SessionRole::Viewer => (&self.devices.viewer, &mut self.from_viewer),
+        let (identity, binding, direction) = match role {
+            SessionRole::Host => (
+                &self.devices.host,
+                &self.devices.host_binding,
+                &mut self.from_host,
+            ),
+            SessionRole::Viewer => (
+                &self.devices.viewer,
+                &self.devices.viewer_binding,
+                &mut self.from_viewer,
+            ),
         };
         Proof {
-            binding: &self.devices.binding,
+            binding,
             identity,
             role,
             challenge: direction.received[index],
@@ -165,8 +175,8 @@ async fn exchange_challenges<'a>(
     host: &mut AuthenticatedLoopbackRelay,
     viewer: &mut AuthenticatedLoopbackRelay,
 ) -> DeviceProofs<'a> {
-    let pending_viewer = issue(&devices.binding, SessionRole::Viewer);
-    let pending_host = issue(&devices.binding, SessionRole::Host);
+    let pending_viewer = issue(&devices.host_binding, SessionRole::Viewer);
+    let pending_host = issue(&devices.viewer_binding, SessionRole::Host);
     let received_viewer =
         forward_challenges(host, viewer, SignalKind::HostChallenge, &pending_viewer).await;
     let received_host =
@@ -412,15 +422,39 @@ async fn native_peers_round_trip(
         let mut session_nonce = [0; 32];
         session_nonce[..16].copy_from_slice(first_nonce.as_bytes());
         session_nonce[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
-        let binding = SessionBinding::new(
-            *room.as_bytes(),
-            session_nonce,
-            host.public().public_key,
-            viewer.public().public_key,
-        )
-        .unwrap();
+        let host_public = host.public();
+        let viewer_public = viewer.public();
+        let host_verified_viewer = host_public
+            .verify_peer(
+                &PairingCandidate::parse(&viewer_public.pairing_code()).unwrap(),
+                &viewer_public.fingerprint,
+            )
+            .unwrap();
+        let viewer_verified_host = viewer_public
+            .verify_peer(
+                &PairingCandidate::parse(&host_public.pairing_code()).unwrap(),
+                &host_public.fingerprint,
+            )
+            .unwrap();
+        let host_binding = host_verified_viewer
+            .session_binding(
+                &host_public,
+                SessionRole::Host,
+                *room.as_bytes(),
+                session_nonce,
+            )
+            .unwrap();
+        let viewer_binding = viewer_verified_host
+            .session_binding(
+                &viewer_public,
+                SessionRole::Viewer,
+                *room.as_bytes(),
+                session_nonce,
+            )
+            .unwrap();
         TestDevices {
-            binding,
+            host_binding,
+            viewer_binding,
             host,
             viewer,
         }

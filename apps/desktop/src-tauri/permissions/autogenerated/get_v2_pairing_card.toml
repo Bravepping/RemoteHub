@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-get-v2-pairing-card"
+description = "Enables the get_v2_pairing_card command without any pre-configured scope."
+commands.allow = ["get_v2_pairing_card"]
+
+[[permission]]
+identifier = "deny-get-v2-pairing-card"
+description = "Denies the get_v2_pairing_card command without any pre-configured scope."
+commands.deny = ["get_v2_pairing_card"]

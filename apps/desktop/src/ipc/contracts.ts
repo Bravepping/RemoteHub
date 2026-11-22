@@ -18,6 +18,7 @@ export interface RuntimeInfo {
   identity?: DeviceIdentity;
   p3_enabled?: boolean;
   v2_loopback_diagnostic_enabled?: boolean;
+  v2_peer_pairing_enabled?: boolean;
   app_version: string;
   os: string;
   arch: string;
@@ -67,6 +68,7 @@ const stringLimits = {
 const flags = [
   'p3_enabled',
   'v2_loopback_diagnostic_enabled',
+  'v2_peer_pairing_enabled',
   'p004_enabled',
   'p004_lan_enabled',
   'p005_enabled',
