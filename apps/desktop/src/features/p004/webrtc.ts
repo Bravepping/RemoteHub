@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export interface NativeStats {
+  input_pair_approved?: boolean | null;
   direct_pair_diagnostic?: {
     approved: boolean;
     local: { reason: string };

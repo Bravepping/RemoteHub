@@ -1,0 +1,10 @@
+{
+    "recordedAt":  "2026-11-22T20:30:53.7933561+08:00",
+    "stage":  "user-ready-before-first-session",
+    "instances":  [
+
+                  ],
+    "applicationStartedByAgent":  false,
+    "captureStartedByAgent":  false,
+    "inputInjectedByAgent":  false
+}

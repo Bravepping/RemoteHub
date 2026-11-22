@@ -43,6 +43,10 @@ pub use direct::DirectSettings;
 
 #[derive(Clone, Default, Serialize)]
 pub struct Stats {
+    #[cfg(feature = "p3-lan")]
+    pub input_pair_approved: Option<bool>,
+    #[cfg(feature = "p3-lan")]
+    pub input_pair_diagnostic: Option<crate::input_pair::PairDiagnostic>,
     #[cfg(feature = "p006-direct")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub direct_pair_diagnostic: Option<crate::direct_diagnostics::PairDiagnostic>,
@@ -215,6 +219,25 @@ impl Session {
             Some(session),
         )
     }
+    #[cfg(feature = "p3-lan")]
+    pub fn new_lan_input(
+        seconds: u32,
+        scope: crate::scope::LanScope,
+        id: String,
+    ) -> Result<Arc<Self>, String> {
+        let mut this = Self::configured(
+            seconds,
+            crate::scope::NetworkScope::Lan(scope),
+            Some(id.clone()),
+        )?;
+        let inner = Arc::get_mut(&mut this).ok_or("SESSION_ALREADY_SHARED")?;
+        inner.control = Some(crate::control_channel::Endpoint::new_input(
+            id,
+            inner.shared.stop.clone(),
+            seconds,
+        )?);
+        Ok(this)
+    }
     fn with_network(
         seconds: u32,
         network: crate::scope::NetworkScope,
@@ -295,6 +318,10 @@ impl Session {
     }
     pub fn cancel(&self) {
         self.shared.stop.stop();
+        #[cfg(feature = "p3-lan")]
+        if let Some(c) = &self.control {
+            c.revoke_input();
+        }
     }
 
     pub async fn signal(self: &Arc<Self>, offer: String) -> Result<String, String> {
@@ -402,6 +429,10 @@ impl Session {
             .await
             .unwrap_or_else(|_| Err("SESSION_DEADLINE".into()));
             self.shared.stop.stop();
+            #[cfg(feature = "p3-lan")]
+            if let Some(c) = &self.control {
+                c.revoke_input();
+            }
             // Let DCEP/SCTP close finish while ICE/DTLS are still alive. Closing
             // the PC first turns a normal source stop into a browser channel error.
             let control_ok = if let Some(mut task) = control_task {
@@ -454,7 +485,10 @@ impl Session {
                 if s.error.is_none() {
                     s.error = self.control.as_ref().and_then(|c| c.stats().last_error);
                 }
-                s.resources_released = close_ok && join_ok && control_ok;
+                s.resources_released = close_ok
+                    && join_ok
+                    && control_ok
+                    && self.control.as_ref().is_none_or(|c| c.cleanup_complete());
                 s.state = if s.error.is_some() {
                     "failed"
                 } else {
@@ -610,6 +644,8 @@ impl Session {
         pc.add_track(track.clone())
             .await
             .map_err(|e| e.to_string())?;
+        #[cfg(feature = "p3-lan")]
+        let input_offer = offer.clone();
         pc.set_remote_description(RTCSessionDescription::offer(offer).map_err(|e| e.to_string())?)
             .await
             .map_err(|e| e.to_string())?;
@@ -687,6 +723,8 @@ impl Session {
         });
         #[cfg(feature = "p006-direct")]
         self.publish_direct_candidate_stats();
+        #[cfg(feature = "p3-lan")]
+        let input_answer = answer.clone();
         if let Some(tx) = answer_tx.take() {
             tx.send(Ok(answer)).map_err(|_| "UI_SIGNAL_CANCELLED")?;
         }
@@ -712,6 +750,46 @@ impl Session {
         #[cfg(feature = "p006-direct")]
         if self.is_direct() {
             self.verify_direct_pair(pc).await?;
+        }
+        #[cfg(feature = "p3-lan")]
+        if let Some(c) = &self.control {
+            if c.is_input() {
+                let sctp = pc.sctp().await.ok_or("INPUT_SCTP_MISSING")?;
+                let pair = sctp
+                    .transport()
+                    .ice_transport()
+                    .get_selected_candidate_pair()
+                    .await
+                    .map_err(|_| "INPUT_PAIR_READ_FAILED")?
+                    .ok_or("INPUT_PAIR_MISSING")?;
+                let crate::scope::NetworkScope::Lan(scope) = self.network else {
+                    return Err("INPUT_LAN_SCOPE_REQUIRED".into());
+                };
+                let diagnostic =
+                    |sdp: &str, c: &webrtc::peer_connection::RTCIceCandidate, expected| {
+                        crate::input_pair::diagnose(
+                            sdp,
+                            &c.address,
+                            c.port,
+                            &c.protocol.to_string(),
+                            &c.typ.to_string(),
+                            expected,
+                        )
+                    };
+                let diagnostic = crate::input_pair::PairDiagnostic {
+                    local: diagnostic(&input_answer, pair.local(), scope.local),
+                    remote: diagnostic(&input_offer, pair.remote(), scope.peer),
+                };
+                let pair_ok = diagnostic.local.approved && diagnostic.remote.approved;
+                self.shared.update(|s| {
+                    s.input_pair_approved = Some(pair_ok);
+                    s.input_pair_diagnostic = Some(diagnostic);
+                });
+                if !pair_ok {
+                    return Err("INPUT_SELECTED_PAIR_NOT_APPROVED".into());
+                }
+                c.approve_verified_path();
+            }
         }
         let (tx, mut rx) = mpsc::channel(3);
         let shared = self.shared.clone();
@@ -980,7 +1058,9 @@ impl rtc::interceptor::Interceptor for Feedback {
 #[cfg(test)]
 mod tests {
     use super::*;
-    async fn data_pair() -> (
+    async fn data_pair(
+        input: bool,
+    ) -> (
         Arc<Session>,
         Arc<dyn PeerConnection>,
         Arc<dyn PeerConnection>,
@@ -995,7 +1075,25 @@ mod tests {
             local: "127.0.0.1".parse().unwrap(),
             peer: "127.0.0.1".parse().unwrap(),
         };
-        let host = Session::new_lan_control(30, scope, id.clone()).unwrap();
+        #[cfg(feature = "p3-lan")]
+        let host = if input {
+            Session::new_lan_input(30, scope, id.clone()).unwrap()
+        } else {
+            Session::new_lan_control(30, scope, id.clone()).unwrap()
+        };
+        #[cfg(not(feature = "p3-lan"))]
+        let host = {
+            let _ = input;
+            Session::new_lan_control(30, scope, id.clone()).unwrap()
+        };
+        #[cfg(feature = "p3-lan")]
+        let label = if input {
+            crate::remote_input::LABEL
+        } else {
+            crate::control::LABEL
+        };
+        #[cfg(not(feature = "p3-lan"))]
+        let label = crate::control::LABEL;
         let a = host.build_pc(102).await.unwrap();
         let browser_fixture = Session::new(30).unwrap();
         let b = browser_fixture.build_pc(102).await.unwrap();
@@ -1029,9 +1127,9 @@ mod tests {
         .unwrap();
         let dc = b
             .create_data_channel(
-                crate::control::LABEL,
+                label,
                 Some(RTCDataChannelInit {
-                    protocol: crate::control::LABEL.into(),
+                    protocol: label.into(),
                     ..Default::default()
                 }),
             )
@@ -1102,11 +1200,48 @@ mod tests {
         .unwrap();
         (host, a, b, dc, task, id)
     }
+    #[cfg(feature = "p3-lan")]
+    #[tokio::test]
+    async fn actual_input_sctp_release_only_and_revocation_without_any_input_injection() {
+        use webrtc::data_channel::DataChannelEvent;
+        let (host, a, b, dc, task, id) = data_pair(true).await;
+        let endpoint = host.control.as_ref().unwrap();
+        assert!(endpoint.is_input());
+        // This fixture bypasses capture and selected-pair gating only for a release_all on an
+        // empty injector. No key/mouse packet is sent; SendInput is never invoked.
+        endpoint.approve_verified_path();
+        dc.send_text(
+            &serde_json::json!({"v":1,"seq":1,"session_id":id,"event":{"kind":"release_all"}})
+                .to_string(),
+        )
+        .await
+        .unwrap();
+        let response = timeout(Duration::from_secs(2), async {
+            loop {
+                if let Some(DataChannelEvent::OnMessage(m)) = dc.poll().await {
+                    break m;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            serde_json::from_slice::<crate::control::Message>(&response.data).unwrap(),
+            crate::control::Message::Ack { ack_seq: 1, .. }
+        ));
+        assert_eq!(endpoint.stats().accepted_moves, 1);
+        host.cancel();
+        task.await.unwrap();
+        assert!(endpoint.cleanup_complete());
+        a.close().await.unwrap();
+        b.close().await.unwrap();
+        assert_eq!(host.stats().stream.frames_input, 0);
+    }
     #[tokio::test]
     async fn actual_sctp_hundred_events_ping_and_protocol_rejections_without_screen_capture() {
         use crate::control::Message;
         use webrtc::data_channel::DataChannelEvent;
-        let (host, a, b, dc, task, id) = data_pair().await;
+        let (host, a, b, dc, task, id) = data_pair(false).await;
         for seq in 1..=100 {
             let text = serde_json::to_string(&Message::Move {
                 v: 1,
@@ -1200,7 +1335,7 @@ mod tests {
     #[tokio::test]
     async fn actual_sctp_rejects_wrong_session_oversized_and_malformed_messages() {
         for case in 0..3 {
-            let (host, a, b, dc, task, id) = data_pair().await;
+            let (host, a, b, dc, task, id) = data_pair(false).await;
             let (text, error) = match case {
                 0 => (
                     serde_json::to_string(&crate::control::Message::Ping {
@@ -1240,7 +1375,7 @@ mod tests {
     }
     #[tokio::test]
     async fn actual_sctp_rate_limit_and_closed_session_cannot_continue() {
-        let (host, a, b, dc, task, id) = data_pair().await;
+        let (host, a, b, dc, task, id) = data_pair(false).await;
         for seq in 1..=61 {
             let data = serde_json::to_string(&crate::control::Message::Ping {
                 v: 1,

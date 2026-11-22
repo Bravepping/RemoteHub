@@ -1,0 +1,45 @@
+Diff in \\?\C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc\src\video.rs:145:
+     #[test]
+     fn constrained_baseline_level31_is_a_baseline_decoder_subset_without_sps_rewrite() {
+         for constraints in [0x00, 0x80, 0x40, 0xc0, 0xe0, 0xf0, 0x04, 0xc4] {
+-            let mut au=frame(0); au.annex_b[6]=constraints;
+-            let mut p=Packetizer::default();
+-            let packets=p.packets(au,102).expect("Baseline-family constraints require no extra decoder tools");
+-            assert_eq!(p.source_sps_profile_level_id,Some(format!("42{constraints:02x}1f")));
+-            assert!(packets.iter().any(|packet|packet.payload.windows(4).any(|b|b==[0x67,0x42,constraints,0x1f])));
+-            assert_eq!(p.ignored_constraint_set5,constraints&4!=0);
++            let mut au = frame(0);
++            au.annex_b[6] = constraints;
++            let mut p = Packetizer::default();
++            let packets = p
++                .packets(au, 102)
++                .expect("Baseline-family constraints require no extra decoder tools");
++            assert_eq!(
++                p.source_sps_profile_level_id,
++                Some(format!("42{constraints:02x}1f"))
++            );
++            assert!(packets.iter().any(|packet| packet
++                .payload
++                .windows(4)
++                .any(|b| b == [0x67, 0x42, constraints, 0x1f])));
++            assert_eq!(p.ignored_constraint_set5, constraints & 4 != 0);
+         }
+-        for (idc,constraints,level)in [(0x4d,0xc0,0x1f),(0x64,0,0x1f),(0x42,0xc0,0x20),(0x42,0xc1,0x1f),(0x42,0xc2,0x1f),(0x42,0xc8,0x1f)] {
+-            let mut au=frame(0);au.annex_b[5..8].copy_from_slice(&[idc,constraints,level]);
+-            assert!(Packetizer::default().packets(au,102).is_err());
++        for (idc, constraints, level) in [
++            (0x4d, 0xc0, 0x1f),
++            (0x64, 0, 0x1f),
++            (0x42, 0xc0, 0x20),
++            (0x42, 0xc1, 0x1f),
++            (0x42, 0xc2, 0x1f),
++            (0x42, 0xc8, 0x1f),
++        ] {
++            let mut au = frame(0);
++            au.annex_b[5..8].copy_from_slice(&[idc, constraints, level]);
++            assert!(Packetizer::default().packets(au, 102).is_err());
+         }
+     }
+     #[test]
+
+EXIT=1

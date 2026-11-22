@@ -1,0 +1,182 @@
+[
+  {
+    "file": "local-2f9438d8-b566-47e0-bf88-64dcc34bdf92-final.json",
+    "event": "final",
+    "control": {
+      "state": "failed",
+      "openEvents": 1,
+      "messageEvents": 81,
+      "closeEvents": 1,
+      "errorEvents": 1,
+      "sendClosed": false,
+      "lastError": "CONTROL_CHANNEL_ERROR",
+      "sentMoves": 81,
+      "ackReceived": 81,
+      "pending": 0
+    },
+    "nativeBrowser": {
+      "state": "failed",
+      "openEvents": 1,
+      "messageEvents": 81,
+      "closeEvents": 1,
+      "errorEvents": 1,
+      "sendClosed": true,
+      "lastError": "CONTROL_CHANNEL_ERROR",
+      "sentMoves": 81,
+      "ackReceived": 81,
+      "pending": 0
+    },
+    "elapsed": 32464.89999999851,
+    "nativeElapsed": 31448
+  },
+  {
+    "file": "local-2f9438d8-b566-47e0-bf88-64dcc34bdf92-native-final.json",
+    "event": "native-final",
+    "control": {
+      "state": null,
+      "openEvents": null,
+      "messageEvents": null,
+      "closeEvents": null,
+      "errorEvents": null,
+      "sendClosed": null,
+      "lastError": null,
+      "sentMoves": null,
+      "ackReceived": null,
+      "pending": null
+    },
+    "nativeBrowser": {
+      "state": "failed",
+      "openEvents": 1,
+      "messageEvents": 81,
+      "closeEvents": 1,
+      "errorEvents": 1,
+      "sendClosed": true,
+      "lastError": "CONTROL_CHANNEL_ERROR",
+      "sentMoves": 81,
+      "ackReceived": 81,
+      "pending": 0
+    },
+    "elapsed": null,
+    "nativeElapsed": 31448
+  },
+  {
+    "file": "local-36c243a0-8e2e-475b-a110-635dd93da4b8-final.json",
+    "event": "final",
+    "control": {
+      "state": "open",
+      "openEvents": 1,
+      "messageEvents": 29,
+      "closeEvents": 0,
+      "errorEvents": 0,
+      "sendClosed": false,
+      "lastError": null,
+      "sentMoves": 29,
+      "ackReceived": 29,
+      "pending": 0
+    },
+    "nativeBrowser": {
+      "state": "closed",
+      "openEvents": 1,
+      "messageEvents": 29,
+      "closeEvents": 1,
+      "errorEvents": 0,
+      "sendClosed": true,
+      "lastError": null,
+      "sentMoves": 29,
+      "ackReceived": 29,
+      "pending": 0
+    },
+    "elapsed": 31623.60000000149,
+    "nativeElapsed": 30616
+  },
+  {
+    "file": "local-36c243a0-8e2e-475b-a110-635dd93da4b8-native-final.json",
+    "event": "native-final",
+    "control": {
+      "state": null,
+      "openEvents": null,
+      "messageEvents": null,
+      "closeEvents": null,
+      "errorEvents": null,
+      "sendClosed": null,
+      "lastError": null,
+      "sentMoves": null,
+      "ackReceived": null,
+      "pending": null
+    },
+    "nativeBrowser": {
+      "state": "closed",
+      "openEvents": 1,
+      "messageEvents": 29,
+      "closeEvents": 1,
+      "errorEvents": 0,
+      "sendClosed": true,
+      "lastError": null,
+      "sentMoves": 29,
+      "ackReceived": 29,
+      "pending": 0
+    },
+    "elapsed": null,
+    "nativeElapsed": 30616
+  },
+  {
+    "file": "local-fe9c5590-0c1c-49f0-b893-fe3b0b534a8a-final.json",
+    "event": "final",
+    "control": {
+      "state": "failed",
+      "openEvents": 1,
+      "messageEvents": 132,
+      "closeEvents": 1,
+      "errorEvents": 1,
+      "sendClosed": false,
+      "lastError": "CONTROL_CHANNEL_ERROR",
+      "sentMoves": 132,
+      "ackReceived": 132,
+      "pending": 0
+    },
+    "nativeBrowser": {
+      "state": "failed",
+      "openEvents": 1,
+      "messageEvents": 132,
+      "closeEvents": 1,
+      "errorEvents": 1,
+      "sendClosed": true,
+      "lastError": "CONTROL_CHANNEL_ERROR",
+      "sentMoves": 132,
+      "ackReceived": 132,
+      "pending": 0
+    },
+    "elapsed": 31997.70000000298,
+    "nativeElapsed": 31404
+  },
+  {
+    "file": "local-fe9c5590-0c1c-49f0-b893-fe3b0b534a8a-native-final.json",
+    "event": "native-final",
+    "control": {
+      "state": null,
+      "openEvents": null,
+      "messageEvents": null,
+      "closeEvents": null,
+      "errorEvents": null,
+      "sendClosed": null,
+      "lastError": null,
+      "sentMoves": null,
+      "ackReceived": null,
+      "pending": null
+    },
+    "nativeBrowser": {
+      "state": "failed",
+      "openEvents": 1,
+      "messageEvents": 132,
+      "closeEvents": 1,
+      "errorEvents": 1,
+      "sendClosed": true,
+      "lastError": "CONTROL_CHANNEL_ERROR",
+      "sentMoves": 132,
+      "ackReceived": 132,
+      "pending": 0
+    },
+    "elapsed": null,
+    "nativeElapsed": 31404
+  }
+]

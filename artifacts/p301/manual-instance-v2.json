@@ -1,0 +1,15 @@
+{
+  "observedAt": "2026-11-22T20:52:42.139324+08:00",
+  "buildTag": "p3-lan-v2",
+  "matchingInstances": [
+    {
+      "processId": 18096,
+      "startTime": "2026-11-22T12:51:42.3070488Z",
+      "programSha256": "cdc223534b9b9c322f554498ca78032ef9de4a06a037c54a8eb99452b6b85b70"
+    }
+  ],
+  "otherHashInstances": 0,
+  "windowVisibleSource": "USER_RESPONSE",
+  "agentStartedProgram": false,
+  "agentStartedCaptureOrInput": false
+}

@@ -1,0 +1,23 @@
+
+running 3 tests
+test p007b_diag::tests::dedicated_build_rejects_other_modes_and_durations ... ok
+test experiment_origin::tests::experimental_commands_only_accept_local_main_window ... ok
+test p007b_diag::tests::no_private_local_override_or_overlong_invitation ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Compiling hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+warning: unused dependency `hub-identity`
+  --> apps\desktop\src-tauri\Cargo.toml:26:1
+   |
+26 | hub-identity = { path = "../../../crates/hub-identity" }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_dependencies` is set to `warn` by default
+help: consider removing the dependency on `hub-identity`
+warning: `remotehub-desktop` (manifest) generated 1 warning
+    Finished `test` profile [unoptimized] target(s) in 4.58s
+     Running unittests src\main.rs (target\debug\build\remotehub-desktop/dac5bda67ba66da1\out\remotehub_desktop-dac5bda67ba66da1.exe)
+
+EXIT=0

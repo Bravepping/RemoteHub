@@ -1,0 +1,3 @@
+{"automaticNetworkStart":false,"buildTag":"p007b-r06-v1","candidateValidation":"exact_authenticated_sdp","desktopCapture":false,"inputInjection":false,"maximumInvitationRemainingSeconds":1200,"mode":"direct_preferred","nativeConsentRequired":true,"privateConfigFile":"r06-private.json","reportDirectory":"artifacts/private/p007b-r06","seconds":8,"sourceKind":"synthetic_nv12"}
+
+EXIT=0

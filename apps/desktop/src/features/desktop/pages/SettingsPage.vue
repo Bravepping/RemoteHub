@@ -58,11 +58,13 @@ defineEmits<{ refresh: [] }>();
           {{
             loading
               ? '读取中…'
-              : runtime
-                ? runtime.remote_access_enabled
-                  ? '状态展示尚未接入'
-                  : '关闭'
-                : '未读取'
+              : runtime?.p3_enabled
+                ? '仅本次会话授权，未开启无人值守'
+                : runtime
+                  ? runtime.remote_access_enabled
+                    ? '状态展示尚未接入'
+                    : '关闭'
+                  : '未读取'
           }}
         </dd>
       </div>

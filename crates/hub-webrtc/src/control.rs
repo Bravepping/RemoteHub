@@ -119,6 +119,11 @@ pub struct Protocol {
     pub stats: ControlStats,
 }
 impl Protocol {
+    #[cfg(feature = "p3-lan")]
+    pub(crate) fn session_id(&self) -> &str {
+        &self.session
+    }
+
     pub fn new(session: String, lifetime: Duration) -> Result<Self, String> {
         uuid::Uuid::parse_str(&session).map_err(|_| "CONTROL_SESSION_INVALID")?;
         Ok(Self {

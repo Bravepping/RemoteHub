@@ -4,15 +4,19 @@
 
 Phase0限定退出及P004录屏证据例外已批准，R06历史可靠性问题继续OPEN。用户审查`d7ce2e0`后已接受P1-06人工结果/保留限制，并**批准Phase 1限定退出**；批准只追加记录，见[Phase 1决议](docs/PHASE1_EXIT_DECISION.md)，旧[人工报告](docs/P106_MANUAL_TEST_REPORT.md)/[最终评审](docs/PHASE1_FINAL_EXIT_REVIEW.md)不改当时结论。
 
-**本轮P2-01：本地Ed25519/DPAPI身份已实现，等待审查。** 普通Windows启动创建/恢复当前用户身份；私钥以DPAPI密文保存，提交标记绑定完整公钥摘要，损坏/丢失/意外替换不静默换ID。首页/设置只读真实公开标识/指纹或固定错误，短ID不作认证凭据。未增加IPC权限/命令，实验构建不初始化生产身份。尚无正式服务器登录、配对/信任库或信令签名，远程访问仍关闭。
+**Phase3 最小真实局域网远控已跑通。** 用户已接受 `382aac0` 的 P2-01，并明确暂缓 P2-02–06。显式 `p3-lan` 构建复用产品五页界面、DXGI/MF、同一 WebRTC PeerConnection 与 DataChannel，增加每轮两端原生批准的基本键鼠输入；默认普通构建仍关闭远控。只限指定 LAN 对端、一次码 HMAC、30 秒和主屏 720p30，无云、无人值守或正式信任库。用户已确认英文真实同步，首轮实际853帧/29条输入及ACK一致；其余点位/暂停与清理结果及限制见[单份汇总报告](docs/PHASE3_MINIMAL_REMOTE_CONTROL_REPORT.md)。
 
-本轮47项完整检查、100前端/20Edge、Rust全feature95/默认77各1ignored通过；另有真实Windows DPAPI13项（与workspace重叠）、两个独立进程恢复/签名验证、7权限和12隐私/9交付回归。仅使用并清理临时测试身份，**未启动原生身份页面或访问生产身份目录**；跨账户/跨机迁移未测，SDK界面替身不冒充原生。见[报告与限制](docs/P201_TEST_REPORT.md)、[证据](artifacts/p201/verification.json)、[开发说明](docs/P201_IDENTITY_GUIDE.md)。
+v1因已发布候选缺失被严格拒绝；v2候选两侧均 `EXACT_MATCH` 后因合法 `42c01f` SPS被过严规则拒绝。v3修复后实际3轮解码/呈现853、900、900帧，输入/ACK为29/29、81/81、132/132，资源均回收；后两轮末尾仍记录通道错误。保留两轮失败及P3-END-01 OPEN、独立短轮覆盖不足、多DPI未测，不宣称完整Phase3退出。完整离线回归及准确包SHA见汇总；历史 R06 继续 OPEN。
 
-[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)与[D1–D6](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，未启用第三方兼容后端。R06仍OPEN_NOT_REPRODUCED/根因未知，身份模块不修补或放宽ICE。只完成P2-01，不启动P2-02、阿里云、真实采集、实际输入、双机或第三方运行。
+P2-01 本地 Ed25519/DPAPI 身份已获用户接受。普通版及显式产品远控版启动创建/恢复当前用户身份；私钥以 DPAPI 密文保存，提交标记绑定完整公钥摘要，损坏/丢失/意外替换不静默换 ID。首页/设置只读真实公开标识/指纹或固定错误，短 ID 不作认证凭据。其他旧实验构建继续不初始化生产身份；本次配对未冒充正式签名身份或持久信任。
+
+P2-01 历史交付的47项完整检查、100前端/20Edge、Rust全feature95/默认77各1ignored通过；另有真实Windows DPAPI13项（与workspace重叠）、两个独立进程恢复/签名验证、7权限和12隐私/9交付回归。当时仅使用并清理临时测试身份，未启动原生身份页面或访问生产身份目录；跨账户/跨机迁移未测。原结论见[报告与限制](docs/P201_TEST_REPORT.md)、[证据](artifacts/p201/verification.json)、[开发说明](docs/P201_IDENTITY_GUIDE.md)。本次用户已手动启动产品远控程序，不能沿用当时“未访问生产身份”的范围声明。
+
+[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)与[D1–D6](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，未启用第三方兼容后端。R06仍OPEN_NOT_REPRODUCED/历史根因未知；Phase3 的局部故障定位不直接关闭 R06。本轮不启动阿里云或第三方软件，不修改防火墙、路由或驱动；真实采集和输入仅由用户在两端逐次亲自批准。
 
 技术栈继续Tauri v2/Rust/Vue3/TypeScript，见[P1实施方案](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前指引](docs/DEVELOPMENT_GUIDE.md)。[Foundation / V+ PC / EasyTier评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)仍为提案；WebRTC不等于已兼容三件套，运行集成/多进程/驱动及分发范围未获本轮授权。
 
-下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论，批准记录另行追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新双机/媒体或应用真实采集/远控输入。辅助截图工具的异常及丢弃在P1-02报告中披露。旧包不能自行恢复服务，提交后不自动进入P2-02或第三方兼容原型。
+下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论。上次云实测停服/清理事实保留，本轮没有云端操作。Phase3 新尝试与原生运行范围以当前汇总报告为准。辅助截图工具的异常及丢弃在P1-02报告中披露；旧包不能自行恢复云服务，不自动进入 Phase4 或第三方兼容原型。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 

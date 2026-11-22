@@ -1,0 +1,4 @@
+video-session-probe --synthetic --approved-local PRIVATE_IPV4 --seconds 5..15
+No desktop capture, input injection, TURN or WSS access. Default invocation performs no networking. Private local stdio SDP broker only.
+
+EXIT=0

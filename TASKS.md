@@ -51,9 +51,11 @@ P1-05窗口显示依据用户亲眼确认追加为`USER_CONFIRMED_WINDOW_VISIBLE
 
 - [x] `C0-DRAFT` **prepared（合同草案，非正式目标签署或兼容实现）** — Foundation Sunshine↔Moonlight V+ PC原生互操作、单安装器/统一UI、受管理进程/窗口例外、EasyTier承载、版本来源/许可证门槛与D1–D6待决事项已写明；公开来源/许可证头只读观察归档，未绑定旧安装器。C0正式批准/C1来源冻结/第三方原型仍未完成，未安装或启动三件套。
 
-## Phase 2 · 认证与信令（仅P2-01交付，等待审查）
+## Phase 2 · 认证与信令（P2-01已接受，其余按用户决议暂缓）
 
-- [x] `P2-01` **done（本机身份实现与本地自动验证，待审）** — hub-identity系统随机Ed25519/CurrentUser DPAPI、私有ACL/锁/同步无覆盖发布、公钥摘要提交标记、缺失/损坏/替换拒绝、重开稳定与固定错误。普通启动公开状态接原runtime IPC，前端严格合同/Pinia代次、首页/设置真实公开信息，无新capability/命令/签名导出。47主检查/100前端/20Edge、Rust全95/默认77各1ignored、核心13及真实两进程恢复/签名通过（统计重叠不相加），7权限/12隐私/9交付通过。仅临时测试身份且清理，未测原生身份GUI/跨账户/跨机迁移；未访问生产身份目录，不启动云/采集/输入/第三方后端。原包版本未升级，新增11注册表包/许可/OSV增量记录；见docs/P201_TEST_REPORT.md及artifacts/p201。
+用户已审查并接受382aac0，明确跳过/暂缓P2-02–06，直接做Phase3最小闭环；不把这些任务勾选完成，也不以临时LAN配对冒充正式服务端/身份信令/持久ACL。每个子任务不再分别生成Plan/ADR/Contract/Evidence，最终提交单份Phase3汇总，连续推进已授权任务。
+
+- [x] `P2-01` **done（382aac0已审查接受）** — hub-identity系统随机Ed25519/CurrentUser DPAPI、私有ACL/锁/同步无覆盖发布、公钥摘要提交标记、缺失/损坏/替换拒绝、重开稳定与固定错误。普通启动公开状态接原runtime IPC，前端严格合同/Pinia代次、首页/设置真实公开信息，无新capability/命令/签名导出。47主检查/100前端/20Edge、Rust全95/默认77各1ignored、核心13及真实两进程恢复/签名通过（统计重叠不相加），7权限/12隐私/9交付通过。仅临时测试身份且清理，未测原生身份GUI/跨账户/跨机迁移；未访问生产身份目录，不启动云/采集/输入/第三方后端。原包版本未升级，新增11注册表包/许可/OSV增量记录；见docs/P201_TEST_REPORT.md及artifacts/p201。
 - [ ] `P2-02` Axum/SQLite/WS 服务端
 - [ ] `P2-03` presence、心跳与限流
 - [ ] `P2-04` 首次配对/批准/撤销
@@ -62,12 +64,14 @@ P1-05窗口显示依据用户亲眼确认追加为`USER_CONFIRMED_WINDOW_VISIBLE
 
 ## Phase 3 · 远控闭环
 
-- [ ] `P3-01` 集成 DXGI+MF+webrtc-rs
-- [ ] `P3-02` 会话窗口收流与播放
-- [ ] `P3-03` DataChannel 键盘鼠标注入
-- [ ] `P3-04` 多 DPI/窗口缩放处理
-- [ ] `P3-05` 断开与资源清理
-- [ ] `P3-06` 被控端提示/一键停止
+当前 **最小真实远控已通过，完整Phase3退出未声明**：用户确认v3画面/英文同步；3轮独立接收final为853/900/900帧、29/81/132输入及ACK一致/未确认0/资源回收true。四项人工停止与点位/暂停获“正常”确认，独立日志不能映射4个提前结束短轮，后两轮CONTROL_CHANNEL_ERROR保留P3-END-01 OPEN。v1候选失败/v2 SPS失败原样保留。见docs/PHASE3_MINIMAL_REMOTE_CONTROL_REPORT.md及artifacts/p301；多DPI/长稳/完整清理矩阵未补PASS，R06 OPEN/C0待决，不进Phase4。
+
+- [x] `P3-01` **done（最小LAN范围）** — 原DXGI/MF/WebRTC接入产品界面，v3真实收流；SPS合法Baseline-family兼容修复，不改源SPS/媒体权限，旧实验保留。
+- [x] `P3-02` **done（当前Windows主屏）** — WebView2真实720p视频/解码/呈现，独立final在PC关闭前落盘；未承诺全部网络/设备/长稳。
+- [x] `P3-03` **done（有界基本输入）** — 原生批准+严格候选后remote-input.v1实际SendInput与ACK，用户确认英文同步，非模拟；无Win/Alt系统组合/Unicode批量/剪贴板/提权。
+- [ ] `P3-04` **doing** — 主屏物理坐标/视频黑边算法与纯函数测试、当前点位人工正常；多物理DPI/显示缩放矩阵未验收。
+- [ ] `P3-05` **doing（回收正常，收尾问题仍OPEN）** — 已取3轮native/browser回收true，用户确认四项停止正常；独立短轮无法一一对应，2轮末尾通道错误P3-END-01未定向复现，不宣称全场景零异常。
+- [x] `P3-06` **done（当前限定范围）** — 可见授权提示/停止/关窗、物理CtrlAltF12、失焦撤销，禁止托盘后台采集；用户确认清单正常，独立场景日志覆盖限制同P3-05。
 
 ## Phase 4 · 公网 P2P/中继
 

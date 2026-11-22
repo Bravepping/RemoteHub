@@ -232,3 +232,40 @@ Phase1批准追加、P201报告/开发说明、README/TASKS/当前指引已更�
 
 ## P2-01交付前复核 2026-11-22T19:48:59.630156+08:00
 最终main/origin仍d7ce2e0；47主检查、100前端/20Edge、Rust全95/默认77各1ignored、13真实身份测试和两个独立进程稳定恢复/签名通过；权限0新增/旧包版本不升级，隐私/交付通过，临时存储/测试进程0。新文档/证据审计通过，旧P1/P0证据和媒体源码不变。即将暂存核对并提交GitHub，之后等待用户审查，P2-02未开始。
+
+## Phase3闭环开发检查点
+用户已接受382aac0/P201并明确跳过P202–06直接做Phase3，子任务不再逐个Plan/ADR/Contract/Evidence；按用户优先，以一份最终汇总交付，阶段顺序旧本地约束不阻止本轮。仅本次局域网，两端指定地址/一次码HMAC/显式原生批准、30秒主屏与基本键鼠、严格SDP/选中候选、不开放云/持久信任。
+已新增p3-lan独立feature、remote-input.v1验证与Windows SendInput（只允许基础键/按钮/归一化坐标）、既有LAN/Session/DataChannel接线、产品RemoteWorkspace和主动启用/失焦释放/本地CtrlAltF12停止。首轮p3编译、100前端/构建通过，未触发实际采集/注入。Endpoint停止锁/释放失败不假报清理已加，待完整测试。
+用户确认：本机控制端、第二台Win10同LAN，具体端点只存本地私密配置，不公开报告。原P0模拟路径仍独立，未默认启实际输入；P201保留产品身份，真实会话不用它冒充正式配对。
+剩余：安全负例/真实无输入SCTP验证、产品UI测试/完整回归、生成双机包，用户两端亲自批准后实际远控验收；未测不记PASS。R06 OPEN/C0待决，P202–06暂缓不done。
+
+## Phase3回归收口检查点
+产品UI和有界输入已接线，102前端/21Edge（后者以最终日志为准）以及p3核心29/桌面6定向通过；真实SCTP仅空release测试，无实际键鼠/采集自动动作。新增extra字段负例曾实际失败，修为struct空变体后通过；保留artifacts/p301/initial/release-extra-field.txt。输入撤销在同锁内检查、释放失败不记资源清理完成、双端模式经认证包绑定、候选精确SDP/IP/UDP/类型/端口匹配未放宽。
+接收端停止前保存真实getStats可得快照，关窗仍以原生源清理与已有周期统计为界，不假造最后帧。产品状态提示不再把本次会话误写远程关闭；应急键在被控端原生观察循环也检查，覆盖等待配对阶段。待最终完整回归/交付包和用户真实两机操作，再出单份Phase3汇总，不拆Plan/ADR。
+
+## Phase3双机首轮等待结果
+最终47主回归+5产品检查/7权限、102前端/21Edge、最终全特性103 Rust各私有MF1ignored通过。p3程序SHA93f64e21caa27e44fbcb0121d19ab227be9a7b988605481c8c57a3524caf3ba2，ZIP私有位置见artifacts/p301/package.json；包仅EXE/说明/SHA3文件，无端点配置或票据，源码hash固定。
+用户确认两端已准备，正常用户只读查得本机PID26072/相同SHA（早一轮受限枚举无对象不推断失败）。已给出首轮实际30秒、用户原生确认、远程新空白记事本输入remotehubtest+位置核对/暂停/自动结束步骤，当前等USER_RESPONSE；Agent未启动、采集或注入。
+下一步读取本机程序旁私有p3统计白名单，收取第二台统计摘要；通过再短轮停止/应急/关窗/断线，失败保留定位，不擅自修改防火墙。P3汇总仅最后一份，不进Phase4；P202–06按用户暂缓，R06 OPEN/C0待决。
+
+## Phase3 v1实际失败与v2候选修复
+用户首轮实际操作失败：控制CONTROL_CHANNEL_ERROR、被控INPUT_SELECTED_PAIR_NOT_APPROVED；用户查看candidate_types为空且未找到native_candidates。接收端真实最终统计认证/ICE连接、local prflx/remote host、0帧/0输入/0ACK、资源回收；artifacts/p301/first-attempt-*及USER_RESPONSE独立保留。当前仅确认Phase3候选未发布/选中未声明类型的拒绝，mDNS过滤已离线复现，尚未用v2实测确认；R06历史根因不宣称修复。
+v2仅产品分支把UUID mDNS host UDP候选发布为本次原生已批准/原生核对拥有的IPv4、原端口不变；不解析DNS、不改变系统/UDP范围、不接受未声明prflx。多网卡候选若端口实际不在选定NIC上，仍会严格失败，不能靠改类型放行。新增原生选中端点严格匹配脱敏分类和浏览器候选发布计数、摘要白名单/隐私测试。v1包/质量摘要已归档-v1，v2完整回归进行中；新版未启动。
+剩余：回归/构建v2/用户先关闭v1后两机换包和逐次亲自批准；真实鼠标/键盘和清理尚未通过，不提前记Phase3完成；最后单份汇总报告+TASKS/README/GitHub。Agent不自动采集/注入/启云。
+
+## Phase3 v2定位及v3进行中
+v2本机程序由用户打开、正常只读核对唯一PID18096及SHAcdc22353...，旧版本进程0；用户按本轮原生批准后仍失败。独立本机最终统计：发布前2/mDNS2/发布2、认证/ICE连接、local prflx/remote host、0呈现帧/0输入/0ACK、browserClosed及资源回收true；独立final存在。保留second-attempt-local.json，USER_RESPONSE提供被控端v2原生selected pair两端均host/UDP EXACT_MATCH（local候选1、remote2），实际source.error SPS_PROFILE_INCOMPATIBLE_42c01f。该证据修正“仍因候选失败”的假设，浏览器local prflx不能直接等同原生对端实际选中类型不符，禁止为此放宽ICE。v1候选发布修复已越过，历史R06仍OPEN不混同。
+新回归复现旧video.rs mask只接受00/04约束的错误，失败日志initial/constrained-baseline-before.txt；按RFC6184 8.1表5调整为profile42/同level31的Baseline或Constrained Baseline工具子集（高四位允许、低位仅既有AMD set5例外，其他拒绝），不重写SPS/SDP，目标测试已通过。v3仅该兼容性修复及buildTag，完整回归进行中；格式门禁首轮失败已修正并保留initial/v3-format.txt。当前工具session24859运行.tools/p3-v3-run.py，普通Windows不采集/输入；新5项摘要隐私含CLI异常不回显已通过，最终runner还会重跑。
+README/TASKS/DEVELOPMENT_GUIDE更新当前Phase3 doing/P201已接受/P202–06暂缓，并新建单份PHASE3_MINIMAL_REMOTE_CONTROL_REPORT.md（仍待实测，不宣称完成）。v1/v2包与摘要已版本化归档，v3完成后才运行p3-package.py，随后用户关v2/两机换v3/先核对PID再逐次亲自批准。未开启云、不变安全边界、不自动采集或注入。完成物理操作/清理后才最终报告/GitHub；若失败继续根据具体原因定位，不盲试。
+
+## Phase3 v3首轮真实闭环通过，清理验证等待中
+v3全47+5产品/7权限、105前端/21Edge、Rust全105/默认78各1ignored、p3核心31/桌面7、12隐私/9交付/5摘要隐私通过。EXE SHA82249657a33cb1856a09795ad7bb082f372c6160f5613492df08750f4a37d968；ZIP bbc4522b5cb5804c63cc3ac46af6e84e2984d67260096945a1a3f91a0f2f0c61（private/RemoteHub-Phase3-LAN-v3.zip）。完整代码/回归已冻结，包只3文件无配置。当前单份报告已写进展，但尚未更新首轮成功与最终提交。
+用户v3准备后两次Get-Process未发现，不当作启动失败；用户明确窗口可见，CIM只读找到唯一PID19320/上述SHA，已记录manual-instance-v3.json（不要再启动程序）。工具读报告需普通Windows上下文，collector已改CIM读ExecutablePath、只收p3-lan-v3。
+首轮独立接收final：1280x720、853解码/853呈现、29发送/29ACK、pending0/异常0、ICE/PC connected、peerMatchestrue、browserClosed/资源回收true；native周期末836帧不追填853。用户确认“出现画面，本机输入英文，另一台文本同步出现”，真实实际键盘闭环已通过；点位及首轮被控资源待后续确认，不编造独立host文件。third-attempt-local.json保留，不用后轮覆盖。
+当前已向用户请求4个短轮次（call_e6a1bd1c4a0c4da39b335f885f567dfb）：①点位核对+按住Shift再Esc暂停/松Shift再启用输入小写a，本机停止；②第二台CtrlAltF12紧急停止；③播放中关第二台窗口；④重开第二台新配对后只拔第二台网线等两端回收再接回。每轮都用户亲自原生确认，不自动采集/输入。等待用户结果再用.tools/p3-collect-local.py只读收取CIM PID19320程序旁所有v3报告；若异常停后续并定位，不当全PASS。
+剩余：清理实测、必要被控端脱敏计数文字、单份报告/README/TASKS更新实际限定范围，隐私最终审计/GitHub提交。P304 DPI多设备未实测，P202-06暂缓，R06 OPEN/C0待决，不进Phase4。未提交代码，HEAD/origin仍382aac0；当前本轮源修改均已授权，不覆盖其他人代码。
+
+## Phase3最小目标交付收口
+用户对所请求四个短轮次回复“正常”，按USER_RESPONSE确认点位、Shift/Esc暂停后小写、控制端停止/被控端应急键/关窗/拔线及回收。独立本机却只有3轮v3 final（853/900/900帧、29/81/132发送ACK一致、pending0/native+browser资源true），后2轮full900且末尾CONTROL_CHANNEL_ERROR各1，不能映射4个提前停止短轮，不能冒充全0异常。v3首次真实英文同步与最低远控目标通过；P304物理DPI矩阵和P305收尾P3-END-01/独立定向覆盖仍doing，不宣称整个Phase3退出。没有独立host全量文件，用户所提供v2候选精确匹配/42c0错误文字与本机独立证据分开。
+当前源码/EXE冻结v3未再改应用行为，报告/README/TASKS/开发指引已更新限定结论；scripts/p3-evidence.py验证包/源hash、真实3轮及失败/开放风险一致性通过，隐私证据98/工具源4无端点泄漏。当前CIM PID19320已不能读取Path时，collector使用上次已绑定同PID的私密原程序路径并再次核对EXE SHA，不重新启动。原文件时间/sha已补记最新local-summaries，不覆盖third-attempt-local首轮旧提取结果。
+最后fetch origin main仍382aac0、0/0；剩余暂存核对/提交/推送。交付后停止扩展，等待审查；保持R06 OPEN、C0待决、P202–06暂缓，不自动进Phase4。用户核心实际远控操作已达成，完整Phase3退出未声明，不以未覆盖DPI/收尾记录冒充全完成。

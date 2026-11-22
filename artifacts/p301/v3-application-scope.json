@@ -1,0 +1,8 @@
+{
+  "comparedTo": "p3-lan-v2",
+  "changedApplicationFiles": [
+    "apps/desktop/src-tauri/src/p004_lan.rs",
+    "crates/hub-webrtc/src/video.rs"
+  ],
+  "candidateValidatorAndInputAuthorizationUnchanged": true
+}

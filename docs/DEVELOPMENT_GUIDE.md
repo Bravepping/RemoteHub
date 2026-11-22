@@ -1,12 +1,18 @@
 # RemoteHub 当前开发指引
 
-更新日期：2026-11-22；P2-01实施基线d7ce2e0。这里补充当前实施/审查入口；[v1.0完整规范](RemoteHub_完整开发文档_v1.0.md)保持原文，各历轮报告按当时结论归档。当前用户决议优先于旧报告的待批准状态。
+更新日期：2026-11-22；Phase3实施基线382aac0（P2-01已接受）。这里补充当前实施/审查入口；[v1.0完整规范](RemoteHub_完整开发文档_v1.0.md)保持原文，各历轮报告按当时结论归档。当前用户决议优先于旧报告的待批准状态。
 
 ## 当前事实与权限
 
 - 用户已审查767ff44并接受R06未关闭剩余风险、批准Phase0限定退出，正式父项7/7；P004已批准例外及未录屏事实保留。最新决议见[批准记录](PHASE0_EXIT_DECISION.md)，不是产品发布或R06修复结论。
 - R06历史未复现、根因未知。新版一轮8秒真实双机正常终态已验证，不能补写旧缺失final或扩成全环境可靠性。见[最终证据矩阵](PHASE0_FINAL_EVIDENCE_MATRIX.md)、[风险登记](PHASE0_RISK_REGISTER.md)、[退出评审](PHASE0_FINAL_EXIT_REVIEW.md)。
-- 用户已批准Phase 1限定退出，见[追加决议](PHASE1_EXIT_DECISION.md)；本轮只批准P2-01本机身份。生产初始化只在普通版启动进行，不开放登录/配对/信令/远控。无云/真实采集/实际输入/双机/第三方后端，提交后等待审查，不进P2-02。
+- 用户已批准Phase 1限定退出，接受382aac0/P2-01。现明确暂缓P2-02–06，授权直接串联Phase3最小LAN远控；真实采集/基本输入由用户两端逐次原生批准，Agent不自动开始。无云/第三方/系统配置变更，正式登录/信任库未实现。
+
+## 当前Phase3入口
+
+[单份汇总](PHASE3_MINIMAL_REMOTE_CONTROL_REPORT.md)、TASKS与artifacts/p301是本轮入口。用户明确不按子任务生成Plan/ADR/Contract/Evidence，持续推进本轮已授权闭环；不据旧阶段顺序或逐项审查流程阻断。`p3-lan`显式构建保留产品五页，`RemoteWorkspace.vue`复用LAN实验底层，`remote-input.v1`与原模拟通道隔离，严格scope/候选/端点/权限/限流不放松。默认普通版及旧实验不会开启实际输入。
+
+`scripts/p3.ps1`完整本地门禁/构建，`p3-package.py`只打包，`p3-summary.py`白名单处理本地私密统计，`p3-summary-test.py`验证隐私边界，`p3-evidence.py`核对冻结代码/包哈希及有限结论；未接云或读取桌面作为自动fixture。P201普通版及此产品feature初始化身份，其余旧实验仍不初始化；身份不是正式配对认证。v3真实视频/英文输入已成功，失败保留、末尾通道错误及独立短轮覆盖限制见汇总，不继承Phase0实测PASS，不宣称完整Phase3退出。R06 OPEN/C0待决，不自动进入Phase4。
 
 ## 实施基线与后续门槛
 
@@ -15,7 +21,7 @@
 3. [兼容评估](COMPATIBILITY_INTEGRATION_ASSESSMENT.md)明确Foundation/V+ PC/EasyTier目标与现有WebRTC的差距；必须先固定具体目标、来源/许可、角色/单UI/进程合同，再决定原型。最新[C0合同草案](C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)仅待审决议，公开来源核对不等于C1完成；当前没有兼容实现或第三方运行依赖。
 4. [ADR0014](ADR/0014-phase0-final-review-and-risk-gates.md)更新验收门槛；[ADR0015](ADR/0015-client-backend-and-compatibility-plan.md)记录后端提案。旧ADR0012/13保留当时事实，不据旧授权启动服务。
 
-## 当前P2-01入口
+## 已接受的P2-01入口
 
 [身份契约](P201_IDENTITY_CONTRACT.md)/[ADR0022](ADR/0022-local-ed25519-dpapi-identity.md)/[开发说明](P201_IDENTITY_GUIDE.md)/[测试报告](P201_TEST_REPORT.md)。`hub-identity`是私钥所有者，桌面缓存公开状态；不在Pinia/浏览器存私钥，不添加通用签名IPC。`pnpm verify:p201`、`python scripts/p201-native.py`和`python scripts/p201-evidence.py`使用新artifacts/p201，不刷新历史目录。实际DPAPI需要正常Windows用户加密profile；工具受限失败按不可用记录，不降级。
 

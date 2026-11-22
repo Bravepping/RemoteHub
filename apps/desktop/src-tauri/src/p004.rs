@@ -113,6 +113,9 @@ pub async fn p004_start_loopback_probe(
     state: tauri::State<'_, Arc<P004State>>,
     config: Config,
 ) -> Result<Started, String> {
+    if cfg!(feature = "p3-lan") {
+        return Err("PRODUCT_EXPERIMENT_ENTRY_DISABLED".into());
+    }
     origin(&window)?;
     config.validate()?;
     let gate = window.state::<Arc<crate::ProbeState>>();

@@ -42,9 +42,11 @@ defineEmits<{ refresh: [] }>();
         <span class="muted-chip">{{
           loading
             ? '等待本次读取'
-            : runtime?.remote_access_enabled === false
-              ? '远程访问关闭'
-              : '远程服务尚未接入'
+            : runtime?.p3_enabled
+              ? '仅允许本次明确批准的连接'
+              : runtime?.remote_access_enabled === false
+                ? '远程访问关闭'
+                : '远程服务尚未接入'
         }}</span>
       </div>
     </div>
