@@ -1,0 +1,17 @@
+{
+  "recordedAt": "2026-11-22T12:28:44.956254+08:00",
+  "sourceCommit": "6fee6ef832ac97ed6588696bb9b6468d658ebc06",
+  "archiveSha256": "3c3858c815c8326d539787ab33e81a1cc7cf4097030cc9096cd5343eb08c3dd6",
+  "programSha256": "61b6e4815e7339ca0823c6c304593368f2d2a28ba8bd1b666a0eea4169df54c5",
+  "membersVerified": 8,
+  "crcVerified": true,
+  "packagedProgramSelfCheckPassed": true,
+  "packagedShaScriptPassed": true,
+  "relativeLinksChecked": 54,
+  "oldReportsUnchanged": true,
+  "cloudTest": "NOT_RUN",
+  "physicalTwoPcTest": "NOT_RUN",
+  "nativeGuiTest": "NOT_RUN",
+  "desktopCaptured": false,
+  "note": "Only self-check mode executed; no GUI window, configuration, consent or network activation."
+}

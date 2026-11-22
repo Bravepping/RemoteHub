@@ -46,6 +46,8 @@
 
 交付ZIP及每成员SHA、程序源码提交和CRC检查在[delivery.json](../artifacts/p007b/delivery.json)；包内BUILD_INFO对应实际程序，代码提交先于打包，最终报告/包清单提交后另行交付。打包器拒绝未提交产品源码、与验证hash不一致的程序、非专用自检身份、未通过安全/本地测试及已有输出目录；只复制明确白名单成员，无有效邀请/私钥/SSH信息。README、TASKS与[操作说明](P007B_R06_RUNBOOK.md)/[待授权20分钟方案](P007B_R06_ONLINE_PLAN.md)已同步。
 
+已生成待激活包`RemoteHub_P007B_R06_诊断_v1_20261122.zip`，程序源码提交`6fee6ef832ac97ed6588696bb9b6468d658ebc06`。ZIP SHA256为`3c3858c815c8326d539787ab33e81a1cc7cf4097030cc9096cd5343eb08c3dd6`；实际ZIP内8个成员的SHA与本地解压目录一致、CRC通过，包内SHA脚本和EXE无窗口自检通过，见[包核对记录](../artifacts/p007b/package-verification.json)。可用`python scripts/p007b-package-check.py`重核，不启动GUI/网络；源码及最终交付提交分开，不能将后续文档/清单提交误写为另一版程序。
+
 复现：准备既有Rust/MSVC/Node/pnpm后运行`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p007b-checks.ps1`（不启动云或采集）；显式本机合成测试`node scripts/p007b-local.mjs --local PRIVATE_INTERFACE_IPV4`；工具单元`python -m unittest discover -s scripts -p test_p007b_delivery.py -v`；离线证据核对`python scripts/p007b-evidence.py`。本轮关闭dev/test debug符号与增量以避免缓存膨胀，未删测试省空间。
 
 当前：**P0-07-B prepared；新云端/物理双机/原生窗口终态NOT_RUN，R06 OPEN，Phase0退出HOLD。** 后续最多20分钟验证仍需用户单独授权；包不自动激活，不要求现在配合，不重复完整串流或旧已跳过停止补测。准备交付后停止扩展等待审查。
