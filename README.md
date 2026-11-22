@@ -1,14 +1,14 @@
-# RemoteHub · Phase 0 技术验证
+# RemoteHub · Phase 1 工程基础
 
 这是已构建和实测的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。真实双机局域网视频、同一PeerConnection上的DataChannel模拟控制、跨网强制TURN均已通过；P2P优先/受阻自动回退已通过真实云WSS/TURN合成视频测试，并有真实双机直连与手机热点中继成功轮。
 
-`246dcea`已新增严格候选脱敏诊断和接收端独立最终统计；R06 v2随后在真实云WSS/TURN和两台物理PC完成一轮8秒合成诊断：严格匹配通过、独立pre-close/final真实落盘、240帧全接收/解码/呈现、两个Allocation在停服前Refresh(0)释放。**历史两次拒绝本次未复现、根因未确定，R06等待最终审查**，新短会话不追补旧接收端final，也未覆盖新版异常/OS关窗双机终态。用户已明确批准P004以归档真实统计+现场确认替代录屏，历史未录屏事实保留。**父任务完成5/7，正式Phase0退出继续等待R06决议**，见[本轮诊断报告](docs/P007B_R06_ONLINE_DIAGNOSTIC_REPORT.md)、[P0-07-A总评（当时结论）](docs/PHASE0_P007A_REVIEW.md)及[P0-07-B追加决议](docs/PHASE0_P007B_DECISION.md)。尚无实际键鼠注入或持久设备身份服务，不是可发布远控成品。
+用户审查`767ff44`后已**接受R06尚未关闭的剩余风险并批准Phase0限定退出**，正式父项7/7；本轮仅执行P1-01。P004已批准统计+现场观看替代录屏，历史未录屏事实保留。R06历史两次拒绝未复现/根因未确定，技术问题仍开放；新版8秒正常终态不补写旧文件或覆盖所有异常。见[正式决议](docs/PHASE0_EXIT_DECISION.md)、[R06诊断报告](docs/P007B_R06_ONLINE_DIAGNOSTIC_REPORT.md)及[当前风险台账](docs/PHASE0_RISK_REGISTER.md)。尚无实际键鼠注入或持久设备身份服务，不是可发布远控成品。
 
-当前已完成**最终离线评审与规划材料**：[证据矩阵](docs/PHASE0_FINAL_EVIDENCE_MATRIX.md)、[风险登记及R06修复条件](docs/PHASE0_RISK_REGISTER.md)、[技术退出评审](docs/PHASE0_FINAL_EXIT_REVIEW.md)。P004父项已与批准例外同步为done；最低媒体可行性有实测，但**R06风险接受、Phase0正式退出及Phase1实施均待用户决定**。P006/P007父项保持doing，正式完成数5/7。
+**P1-01已完成，提交后等待审查**：复用工程/锁定栈，新增8种构建配置的真实Cargo解析核对和隔离负例；统一`pnpm verify:p1`复用既有安全检查并补默认工程check/test/原生构建，47项命令通过。IPC/状态合同记录现有接口、R06拒绝和真实/未知统计语义，未实现P1-04新命令/Pinia。见[报告](docs/P101_TEST_REPORT.md)、[合同](docs/P101_DESKTOP_CONTRACT.md)、[检查证据](artifacts/p101/verification.json)。UI仍为既有实验壳，P1-02导航等未开工。
 
-后续继续Tauri v2/Rust/Vue3/TypeScript，见[P1桌面实施方案（未开工）](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前开发指引](docs/DEVELOPMENT_GUIDE.md)。[Sunshine Foundation / Moonlight V+ PC / EasyTier集成评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)区分具体目标、协议/媒体、网络承载及进程管理；本机候选只核对版本资源/哈希，未执行安装或互通。现有WebRTC不等于已兼容三件套，兼容原型/多进程/驱动及分发范围须另行决定。
+技术栈继续Tauri v2/Rust/Vue3/TypeScript，见[P1桌面实施方案（本轮仅P1-01）](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前开发指引](docs/DEVELOPMENT_GUIDE.md)。[Sunshine Foundation / Moonlight V+ PC / EasyTier集成评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)仍为提案，本地候选仅核对版本资源/哈希，未执行安装或互通。现有WebRTC不等于已兼容三件套，运行集成/多进程/驱动及分发范围未获本轮授权。
 
-下文按交付时间归档；各节测试数量和限制仅适用于该轮。上一次R06授权实测于2026-11-22 13:40:16提前停服清理，服务不自启、凭据及带配置副本清理闭环。**本轮只做离线审查，没有云端实时复核或新媒体/双机测试**。旧[启动前清单](docs/P007B_R06_EXECUTION_CHECKLIST.md)和[核对报告](docs/P007B_R06_PREFLIGHT_REPORT.md)保留当时待授权状态，实际执行见后续诊断报告；旧包不能自行恢复服务，不自动进入Phase1。
+下文按交付时间归档，各节数量/待批状态只适用于当时；[证据矩阵](docs/PHASE0_FINAL_EVIDENCE_MATRIX.md)与[最终评审](docs/PHASE0_FINAL_EXIT_REVIEW.md)不改旧结论，最新批准由正式决议追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新媒体/双机或真实采集/输入，旧包不能自行恢复服务。P1-01交付后不自动进入P1-02或其他任务。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 

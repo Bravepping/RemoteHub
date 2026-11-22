@@ -9,11 +9,12 @@
     "build": "pnpm --filter @remotehub/desktop build",
     "typecheck": "pnpm --filter @remotehub/desktop typecheck",
     "test": "pnpm --filter @remotehub/desktop test",
-    "lint": "prettier --check apps/desktop/src apps/desktop/*.ts scripts/*.mjs",
-    "format": "prettier --write apps/desktop/src apps/desktop/*.ts scripts/*.mjs",
+    "lint": "prettier --check apps/desktop/src apps/desktop/*.ts scripts/*.mjs scripts/quality/*",
+    "format": "prettier --write apps/desktop/src apps/desktop/*.ts scripts/*.mjs scripts/quality/*",
     "test:e2e": "pnpm --filter @remotehub/desktop test:e2e",
     "doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1",
-    "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1"
+    "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1",
+    "verify:p1": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p101.ps1"
   },
   "devDependencies": { "prettier": "3.10.1" }
 }

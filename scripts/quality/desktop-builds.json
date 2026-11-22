@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "package": "remotehub-desktop",
+  "target": "x86_64-pc-windows-msvc",
+  "profiles": [
+    {
+      "id": "default",
+      "features": [],
+      "desktopFeatures": [],
+      "webrtcFeatures": [],
+      "webrtcDependency": false,
+      "syntheticStream": false
+    },
+    {
+      "id": "loopback",
+      "features": ["p004-probe"],
+      "desktopFeatures": ["p004-probe"],
+      "webrtcFeatures": [],
+      "webrtcDependency": true,
+      "syntheticStream": false
+    },
+    {
+      "id": "lan",
+      "features": ["p004-lan"],
+      "desktopFeatures": ["p004-probe", "p004-lan"],
+      "webrtcFeatures": [],
+      "webrtcDependency": true,
+      "syntheticStream": false
+    },
+    {
+      "id": "control",
+      "features": ["p005-control"],
+      "desktopFeatures": ["p004-probe", "p004-lan", "p005-control"],
+      "webrtcFeatures": [],
+      "webrtcDependency": true,
+      "syntheticStream": false
+    },
+    {
+      "id": "turn-probe",
+      "features": ["p006-turn-probe"],
+      "desktopFeatures": ["p006-turn-probe"],
+      "webrtcFeatures": ["p006-turn-probe"],
+      "webrtcDependency": true,
+      "syntheticStream": false
+    },
+    {
+      "id": "relay",
+      "features": ["p006-relay"],
+      "desktopFeatures": [
+        "p004-probe",
+        "p004-lan",
+        "p005-control",
+        "p006-relay"
+      ],
+      "webrtcFeatures": ["p006-turn-probe", "p006-relay"],
+      "webrtcDependency": true,
+      "syntheticStream": false
+    },
+    {
+      "id": "direct",
+      "features": ["p006-direct"],
+      "desktopFeatures": [
+        "p004-probe",
+        "p004-lan",
+        "p005-control",
+        "p006-relay",
+        "p006-direct"
+      ],
+      "webrtcFeatures": [
+        "p006-turn-probe",
+        "p006-direct-probe",
+        "p006-relay",
+        "p006-direct"
+      ],
+      "webrtcDependency": true,
+      "syntheticStream": false
+    },
+    {
+      "id": "r06-diagnostic",
+      "features": ["p007b-diag"],
+      "desktopFeatures": [
+        "p004-probe",
+        "p004-lan",
+        "p005-control",
+        "p006-relay",
+        "p006-direct",
+        "p007b-diag"
+      ],
+      "webrtcFeatures": [
+        "p006-turn-probe",
+        "p006-direct-probe",
+        "p006-relay",
+        "p006-direct",
+        "p006-session-probe"
+      ],
+      "webrtcDependency": true,
+      "syntheticStream": true
+    }
+  ]
+}

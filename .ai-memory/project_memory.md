@@ -1,12 +1,12 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P0-07-C）
+# 当前决议与恢复入口（2026-11-22，P1-01）
 
-本轮用户只授权离线最终评审/规划及正常GitHub提交。E04录屏替代证据已明确接受，P004当前done，历史未录屏仍保留。R06 v2在7fde54e已有一轮真实双机8秒synthetic、matched/独立final/Refresh0释放及清理，但历史拒绝未复现/根因未知。R06风险接受、Phase0退出、P1实施仍待用户正式决定；5/7父项，P006/P007doing，不自动进入P1。
+用户已审查767ff44并明确接受R06尚未关闭剩余风险、批准Phase0限定退出，正式父项7/7；当前只授权P1-01工程基础，完成后提交等审查。R06技术OPEN_NOT_REPRODUCED/历史根因未知，不把风险接受当修复。P004例外和旧失败/统计限制保留，旧报告不改。
 
-当前入口：docs/DEVELOPMENT_GUIDE.md、PHASE0_FINAL_EXIT_REVIEW.md、PHASE0_RISK_REGISTER.md、PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md和COMPATIBILITY_INTEGRATION_ASSESSMENT.md，ADR0014/15。本地Foundation/V+ PC/EasyTier仅取安装包版本/哈希，来源/源码/API/许可未核验，未执行或引入运行依赖。不得把WebRTC或EasyTier当成原生协议兼容已完成。
+当前入口：docs/PHASE0_EXIT_DECISION.md、P101_TEST_REPORT.md、P101_DESKTOP_CONTRACT.md、DEVELOPMENT_GUIDE.md及ADR0016。pnpm verify:p1固定新证据artifacts/p101：47质量命令、8真实Cargo配置、9隔离测试，82全feature/56默认Rust各1ignored、34前端/3Edge/12Python；截图隔离改动后Edge补测，旧图还原并核对。产品Rust/Vue/权限/锁不改，不新增P1-04命令/Pinia。Foundation/V+ PC/EasyTier仍是未实现、来源/接口/许可未核验的兼容目标。
 
-历史云授权已结束，最后已知停服13:40:16来自7fde54e证据，本轮未实时查询。后续任何云、双机、采集/输入、兼容进程/驱动原型都要相应新授权。以下是历轮历史记忆，旧“doing/尚未测试/允许启动”等只适用于当时，不覆盖此段和最新TASKS。
+历史云授权已结束，最后已知停服13:40:16来自7fde54e证据，本轮未实时查询。当前不启阿里云、不采集真实桌面、不输入注入，P1-02至06/兼容运行原型未开工。以下是历轮历史记忆，旧待批准或运行授权只适用于当时，不覆盖本段和最新TASKS/用户指令。
 
 2026-11-21 首次工程。Windows / Tauri v2 / Vue 3 / Rust，遵循原交付设计；Phase 0 真实媒体优先。不可用时报告失败，不显示假设备/RTT/FPS。不实现未授权后台监控、权限提升、凭据采集。
 

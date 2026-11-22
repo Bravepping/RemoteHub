@@ -1,3 +1,10 @@
+# P1-01 工程基础交接（2026-11-22，检查通过，待GitHub交付）
+
+- 已完成带证据：用户审查767ff44后接受R06未关闭风险、批准Phase0限定退出，仅授权P1-01。退出决议/ADR0016/计划与IPC合同先行；47项质量命令全过（41原安全+6基础），8真实Cargo配置/9隔离测试，Rust全feature82/默认56各1ignored、34前端/3Edge/12Python。默认原生编译及TURN feature检查过；Edge截图隔离后3项复测过，旧原图字节一致。
+- 相关文件：scripts/quality/{desktop-builds.json,build-matrix.mjs,build-matrix.test.mjs}、scripts/p101{.ps1,-checks.mjs}、package.json verify:p1；docs/PHASE0_EXIT_DECISION/P101_PLAN/P101_DESKTOP_CONTRACT、ADR0016，TASKS/风险登记/开发指引已同步批准。Rust/Vue媒体/权限/锁文件不改，不新增P1-04命令或Pinia。
+- 未完成：最终格式/脱敏范围复核与GitHub正常提交/远端核对。报告与verification已生成，README/TASKS和当前指引已同步；本轮完成后等待审查，不继续P1-02。原生GUI没有新启动，UI代码不改，不说新产品导航已完成；不提供新诊断ZIP或Release。
+- 边界：不启阿里云、不采集真实桌面、不注入、不双机；P1-02至06/三件套运行集成未授权。R06接受=ACCEPTED_FOR_LIMITED_EXIT，技术OPEN_NOT_REPRODUCED/历史根因未知。下文为当时待批准的历史交接，不能覆盖本段或当前决议。
+
 # P0-07-C 最终离线评审交接（2026-11-22，材料完成，交付SHA见Git记录）
 
 - 已完成带证据：main7fde54e开工干净、origin一致；旧P007A索引只读check通过13组/72源文件；四个本地候选安装包仅取版本资源和SHA，不执行/安装。TASKS P004已与批准决议同步done；README过时待测语句已改为分轮历史。新审核工具10项检查通过，冻结来源106份，文档/范围/隐私初检通过，无运行测试。

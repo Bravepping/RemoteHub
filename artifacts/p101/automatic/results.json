@@ -1,0 +1,260 @@
+[
+  {
+    "name": "frontend-typecheck",
+    "command": "pnpm --dir apps/desktop typecheck",
+    "exitCode": 0
+  },
+  {
+    "name": "frontend-unit",
+    "command": "pnpm --dir apps/desktop test",
+    "exitCode": 0
+  },
+  {
+    "name": "frontend-build",
+    "command": "pnpm --dir apps/desktop build",
+    "exitCode": 0
+  },
+  {
+    "name": "frontend-lint",
+    "command": "pnpm lint",
+    "exitCode": 0
+  },
+  {
+    "name": "browser",
+    "command": "pnpm test:e2e",
+    "exitCode": 0
+  },
+  {
+    "name": "fmt",
+    "command": "cargo fmt --all -- --check",
+    "exitCode": 0
+  },
+  {
+    "name": "clippy",
+    "command": "cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings",
+    "exitCode": 0
+  },
+  {
+    "name": "default-clippy",
+    "command": "cargo clippy --workspace --all-targets --locked --offline -- -D warnings",
+    "exitCode": 0
+  },
+  {
+    "name": "test",
+    "command": "cargo test --workspace --all-features --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "legacy-test",
+    "command": "cargo test -p remotehub-desktop --features p005-control --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "loopback-check",
+    "command": "cargo check -p remotehub-desktop --features p004-probe --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "lan-check",
+    "command": "cargo check -p remotehub-desktop --features p004-lan --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "build",
+    "command": "cargo build -p remotehub-desktop --profile probe --features custom-protocol,p006-relay --locked --offline",
+    "exitCode": 0
+  },
+  {
+    "name": "python-lifecycle-unit",
+    "command": "E:/ides/Python/python.exe -m unittest discover -s scripts -p test_*turn*.py -v",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "turn-probe-build",
+    "command": "cargo build -p hub-webrtc --bin turn-allocate-probe --profile probe --features p006-turn-probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "turn-probe-help",
+    "command": "target/probe/turn-allocate-probe.exe --help",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "turn-default-denied",
+    "command": "target/probe/turn-allocate-probe.exe",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "turn-placeholder-denied",
+    "command": "target/probe/turn-allocate-probe.exe --approved-target deploy/coturn/probe-input.json.example",
+    "exitCode": 1,
+    "expectedExitCode": 1,
+    "passed": true
+  },
+  {
+    "name": "turn-connected-without-target-denied",
+    "command": "target/probe/turn-allocate-probe.exe --connected-lifecycle",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "path-probe-build",
+    "command": "cargo build -p hub-webrtc --bin ice-path-probe --profile probe --features p006-direct-probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "path-probe-help",
+    "command": "target/probe/ice-path-probe.exe --help",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "path-default-denied",
+    "command": "target/probe/ice-path-probe.exe",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "path-placeholder-denied",
+    "command": "target/probe/ice-path-probe.exe --approved-target deploy/coturn/probe-input.json.example --case direct",
+    "exitCode": 1,
+    "expectedExitCode": 1,
+    "passed": true
+  },
+  {
+    "name": "path-case-without-approval-denied",
+    "command": "target/probe/ice-path-probe.exe --case fallback",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "direct-production-clippy",
+    "command": "cargo clippy -p remotehub-desktop --all-targets --features p006-direct --locked --offline -- -D warnings",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "direct-desktop-build",
+    "command": "cargo build -p remotehub-desktop --profile probe --features custom-protocol,p006-direct --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "video-probe-build",
+    "command": "cargo build -p hub-webrtc --bin video-session-probe --profile probe --features p006-session-probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "authenticated-probe-build",
+    "command": "cargo build -p hub-webrtc --bin authenticated-session-probe --profile probe --features p006-session-probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "wss-build",
+    "command": "cargo build -p hub-rendezvous-probe --profile probe --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "video-help",
+    "command": "target/probe/video-session-probe.exe --help",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "video-default-denied",
+    "command": "target/probe/video-session-probe.exe",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "video-invalid-local-denied",
+    "command": "target/probe/video-session-probe.exe --synthetic --approved-local 127.0.0.1 --seconds 10",
+    "exitCode": 1,
+    "expectedExitCode": 1,
+    "passed": true
+  },
+  {
+    "name": "authenticated-help",
+    "command": "target/probe/authenticated-session-probe.exe --help",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "passed": true
+  },
+  {
+    "name": "authenticated-default-denied",
+    "command": "target/probe/authenticated-session-probe.exe",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "authenticated-missing-target-denied",
+    "command": "target/probe/authenticated-session-probe.exe --synthetic --approved-wss",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "passed": true
+  },
+  {
+    "name": "diagnostic-clippy",
+    "command": "cargo clippy -p remotehub-desktop --all-targets --features p007b-diag --locked --offline -- -D warnings",
+    "exitCode": 0,
+    "expectedExitCode": 0
+  },
+  {
+    "name": "diagnostic-unit",
+    "command": "cargo test -p remotehub-desktop --features p007b-diag --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0
+  },
+  {
+    "name": "diagnostic-build",
+    "command": "cargo build -p remotehub-desktop --profile probe --features custom-protocol,p007b-diag --locked --offline",
+    "exitCode": 0,
+    "expectedExitCode": 0
+  },
+  {
+    "name": "diagnostic-self-check",
+    "command": "target/probe/remotehub-desktop.exe --r06-self-check",
+    "exitCode": 0,
+    "expectedExitCode": 0,
+    "metadataValid": true
+  },
+  {
+    "name": "diagnostic-desktop-override-denied",
+    "command": "target/probe/remotehub-desktop.exe --source desktop",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "metadataValid": true
+  },
+  {
+    "name": "diagnostic-fault-override-denied",
+    "command": "target/probe/remotehub-desktop.exe --drop-direct",
+    "exitCode": 2,
+    "expectedExitCode": 2,
+    "metadataValid": true
+  }
+]
