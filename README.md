@@ -11,12 +11,12 @@
 | 局域网双机 720p H.264 视频 | 来源分支已真实验证：三轮 853 / 900 / 900 帧解码呈现 |
 | DataChannel + SendInput | 来源分支实测英文输入；29 / 81 / 132 条消息分别全部收到 ACK |
 | 原生授权、停止和临时配对码 | 已有产品 `p3-lan` 代码与历史人工操作确认 |
-| 会话结束错误 | **P3-END-01 已修改，待 Windows 双机回归**：先撤销输入、通知原生停止，再关闭浏览器 DataChannel；正常结束提前发已认证的收尾信号，活动期通道故障仍报错。历史后两轮曾报 `CONTROL_CHANNEL_ERROR` |
+| 会话结束错误 | **P3-END-01 已通过 Windows 双机局域网回归**（精简分支构建 `77479f2`）：先撤销输入、通知原生停止，再关闭浏览器 DataChannel；正常结束提前发已认证的收尾信号，活动期通道故障仍报错。历史后两轮曾报 `CONTROL_CHANNEL_ERROR` |
 | Axum WebSocket 信令 | `v2_signaling.rs` 编译和本机真实 WebSocket 测试通过（合成信令）；当前仅允许回环监听，未接入产品会话 |
 | STUN/ICE + TURN | 历史研究/实验曾通过，V2 正式产品路径尚未集成；**R06 仍 OPEN** |
 | Windows 安装包 | 未交付 |
 
-**注意**：上述视频/键鼠结果是原版历史测试，不是当前精简分支重新运行的记录。远控只允许在已授权的 Windows 设备上进行。
+**注意**：表中帧数和输入 ACK 数来自原版历史测试；本次精简分支双机回归未单独记录这些计数。远控只允许在已授权的 Windows 设备上进行。
 
 ## 核心目录
 
@@ -61,7 +61,8 @@ WebSocket 本地信令独立程序采用 `REMOTEHUB_V2_TOKEN`（临时随机 64 
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（109 项）、`pnpm lint`、`pnpm build` 通过。
 - Linux：`cargo test -p hub-webrtc --features p3-lan --locked` 18 项通过、1 项忽略；包含关闭时序模拟，未采集真实桌面或注入输入。
 - Linux：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked` 6 项通过（含 2 项真实回环 WebSocket 测试，使用合成 offer/answer/ICE）；`cargo fmt --all -- --check` 通过。
-- Windows x64 MSVC 目标：桌面 `p3-lan` 交叉检查和 WebRTC 目标测试代码检查通过。该结果不是 Windows 真机执行证据。下一步需在双方同意后复测自然结束、手动停止及原有视频/英文输入。
+- Windows x64 MSVC 目标：桌面 `p3-lan` 交叉检查和 WebRTC 目标测试代码检查通过。交叉检查本身不是真机证据。
+- Windows 实机（用户报告，2026-11-22）：两台电脑在同一局域网使用同一份 `77479f2` Windows x64 包，按约定回归场景测试均正常（画面、自然结束及英文键入后手动停止）。这不覆盖公网、TURN、安装器或 R06 的全量可靠性验证。
 
 ## 敏捷开发约定
 
