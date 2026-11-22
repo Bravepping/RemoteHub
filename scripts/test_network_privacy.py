@@ -91,7 +91,7 @@ class PrivacyTests(unittest.TestCase):
     def test_cli_stderr_does_not_echo_sensitive_argument_or_bad_source(self):
         value = generated_address()
         root = pathlib.Path(__file__).resolve().parent
-        for name in ['network_privacy.py', 'p007b-evidence.py']:
+        for name in ['network_privacy.py', 'p007b-evidence.py', 'p007b-publish.py']:
             p = subprocess.run([sys.executable, str(root / name), '--invalid-' + value], capture_output=True, text=True)
             self.assertNotEqual(p.returncode, 0)
             self.assertTrue(value not in p.stdout + p.stderr, 'NO_CLI_ARGUMENT_ECHO')

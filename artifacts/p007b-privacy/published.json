@@ -1,0 +1,31 @@
+{
+  "repository": "Bravepping/RemoteHub",
+  "private": false,
+  "tag": "r06-diag-v2-20261122",
+  "releaseUrl": "https://github.com/Bravepping/RemoteHub/releases/tag/r06-diag-v2-20261122",
+  "sourceRevision": "3a3f2590ace16180f4587b3c28aeba5afc6f330c",
+  "assets": [
+    {
+      "name": "RemoteHub-R06-Diagnostic-v2-20261122.zip",
+      "assetId": 777905489,
+      "url": "https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/RemoteHub-R06-Diagnostic-v2-20261122.zip",
+      "bytes": 6018222,
+      "sha256": "6cf08d04670fab5068ac1f288daf96ab55e7d912d0e25de0e2fe6a1a1a669706",
+      "actualDownloadVerified": true,
+      "publicUrlWithoutCredentialsVerified": true
+    },
+    {
+      "name": "SHA256SUMS.txt",
+      "assetId": 777906024,
+      "url": "https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/SHA256SUMS.txt",
+      "bytes": 191,
+      "sha256": "fb25d53b8c1be7d4e3fe6737fa347d5d4be1eea3e8bc291337e81cbe7088abd6",
+      "actualDownloadVerified": true,
+      "publicUrlWithoutCredentialsVerified": true
+    }
+  ],
+  "prerelease": true,
+  "newCredentialFileCreated": false,
+  "cloudServicesStarted": false,
+  "physicalTwoPcTest": "NOT_RUN"
+}

@@ -113,7 +113,7 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 [准备报告](docs/PHASE0_P007B_TEST_REPORT.md)、[操作说明](docs/P007B_R06_RUNBOOK.md)、[待授权20分钟方案](docs/P007B_R06_ONLINE_PLAN.md)、[交付SHA/成员清单](artifacts/p007b/delivery.json)。安全回归和本机合成结果与新物理双机NOT_RUN分开记录；本轮不启动阿里云、不要求现在操作两机、不采集真实桌面、不进入Phase1。包准备好后等待审查，R06保持开放。
 
-v2隐私修复：两处扫描器已移除疑似真实端点黑名单，改为通用规则并自检源码/输出；旧Git对象仍可达，没有重写历史。[独立修复报告](docs/PHASE0_P007B_PRIVACY_FIX_REPORT.md)、[v2 SHA清单](artifacts/p007b-privacy/delivery.json)、[实际下载核对记录](artifacts/p007b-privacy/published.json)。GitHub预发布`r06-diag-v2-20261122`中的诊断ZIP提供程序，自动Source code ZIP不含可运行交付；真实发布URL以核对记录为准。41项安全/兼容回归、12项隐私及9项交付测试、5轮本机合成传输已重跑；产品源码/8秒/人工同意/严格ICE未变。后续[20分钟定向申请](docs/P007B_R06_V2_TEST_REQUEST.md)未获授权、未执行。
+v2隐私修复：两处扫描器已移除疑似真实端点黑名单，改为通用规则并自检源码/输出；旧Git对象仍可达，没有重写历史。[独立修复报告](docs/PHASE0_P007B_PRIVACY_FIX_REPORT.md)、[v2 SHA清单](artifacts/p007b-privacy/delivery.json)、[实际下载核对记录](artifacts/p007b-privacy/published.json)。[GitHub诊断ZIP下载](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/RemoteHub-R06-Diagnostic-v2-20261122.zip)及[SHA文件](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/SHA256SUMS.txt)已上传并从无需凭据的公开URL下载核对；自动Source code ZIP不含可运行交付。41项安全/兼容回归、12项隐私及9项交付测试、5轮本机合成传输已重跑；产品源码/8秒/人工同意/严格ICE未变。后续[20分钟定向申请](docs/P007B_R06_V2_TEST_REQUEST.md)未获授权、未执行。
 
 ## P0-03 本机编码 probe
 

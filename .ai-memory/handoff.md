@@ -1,3 +1,10 @@
+# P007B PRIVACY v2 已交付下载检查点
+
+- 实际GitHub预发布r06-diag-v2-20261122已创建；公开下载ZIP及SHA256SUMS经资产API与无凭据公开URL实际下载重算均一致，published.json已保存。ZIP RemoteHub-R06-Diagnostic-v2-20261122.zip 6,018,222字节 SHA6cf08d04670fab5068ac1f288daf96ab55e7d912d0e25de0e2fe6a1a1a669706；EXE SHA7deac839ee2e8fcc0e3ad47433f2431a0ce242bd3a297e90da0ef717effd79c0。程序源码未变但重建hash不同，不称可重复构建。
+- sourceCommit打包1af8599，release/sourceRevision3a3f259；最终Git交付提交另见对话。9成员CRC/全SHA、包内自检/SHA脚本与隐私检查过，publication pendingLinks已空。初次打包IPv6静态成员误报已词法修复；发布UTF8/局部safe.directory问题已修复，无系统全局配置变更，无凭据文件新增。
+- 最终12隐私/9交付工具+41完整安全兼容+5本机合成过；旧测试报告/统计不改，无产品/ICE/8秒/人工同意变更。扫描器3疑似值当前跟踪0；6旧快照目前都从origin/main可达，仓库公开；不重写历史或声称外部缓存已清除。
+- 无阿里云登录/启动、无真实桌面、新两物理机/原生GUI验证；P004例外已经批准不重开，R06 OPEN/Phase0 HOLD、不进P1。最多20分钟申请只交材料，用户尚未批准；提交完GitHub后停止扩展等审查。
+
 # P007B PRIVACY v2 检查点（不启动云，等审查）
 
 - 用户要求去掉扫描器疑似真实端点、自检隐私、只读查历史、重跑安全兼容并提供真实GitHub下载。基线47f3958，范围准备b9cc891。两处旧扫描器已前向修复；network_privacy通用IPv4/6和载荷+AST检查，无端点名单/编码/hash。异常固定码不回显；12隐私/9交付测试及7源码自检通过。

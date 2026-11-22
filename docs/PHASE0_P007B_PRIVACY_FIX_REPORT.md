@@ -6,7 +6,7 @@
 
 原扫描器为排除敏感端点，反而把三个疑似真实网络值写进源码黑名单；这使检查工具自身成为暴露载体。`scripts/p007b-evidence.py`和更早的`scripts/p006c-diag-evidence.py`存在同类问题，本轮都已前向修复。新报告不重复值、不提供其可逆编码或端点hash；没有将它们迁移成另一份私有/公开黑名单。
 
-离线[暴露审计](../artifacts/p007b-privacy/exposure-audit.json)只在内存从固定旧Git对象取值，检查当前跟踪文件、所有本地可达提交及上轮待激活ZIP。记录三个疑似值的类别数量（两个私有范围、一个公网/其他范围）、受影响路径/提交和检查范围；不导出值。扫描时已取回的origin/main为47f3958，其祖先中有5个包含相关源码的快照；本地先写修复范围的b9cc891也继承旧文件，合计6个可达快照。最早受影响提交分别是DIAG实现246dcea和P007B实现6fee6ef。提交快照数量不是独立攻击/访问次数。
+离线[暴露审计](../artifacts/p007b-privacy/exposure-audit.json)只在内存从固定旧Git对象取值，检查当前跟踪文件、所有本地可达提交及上轮待激活ZIP。记录三个疑似值的类别数量（两个私有范围、一个公网/其他范围）、受影响路径/提交和检查范围；不导出值。首次核查origin/main为47f3958，其祖先中有5个包含相关源码的快照；本地先写修复范围的b9cc891也继承旧文件，合计6个可达快照。正常推送修复链后，6个旧快照均可从新的origin/main到达；最后复核的提交与数量以审计JSON为准。最早受影响提交分别是DIAG实现246dcea和P007B实现6fee6ef。提交快照数量不是独立攻击/访问次数。
 
 仓库已通过GitHub只读API确认是公开仓库。因此应视为旧提交可能已被外部取得，而不是“移除当前行即撤回”。审计未取得访问日志、fork/clone或缓存记录，不能判断实际访问者或完整外部扩散。上轮ZIP的8个成员未匹配到这三个疑似值，但它未包含扫描器源码，这不能抵消Git暴露。此次不声称做了全部秘密/网络信息的历史扫描。
 
@@ -35,6 +35,10 @@
 本轮v2为待激活重新打包，EXE由相同产品源码重新构建，程序SHA可能与v1相同；ZIP因源码/文档/隐私说明更新而不同。包仅包含白名单成员，无有效配置/邀请/私钥/扫描器现场名单。新包SHA、成员、源码提交在[delivery.json](../artifacts/p007b-privacy/delivery.json)，CRC/包内程序自检/PowerShell SHA脚本在[package-verification.json](../artifacts/p007b-privacy/package-verification.json)。
 
 上传到GitHub独立预发布资产后，实际下载资产内容并重算SHA，与本地ZIP逐字节摘要核对；只有核对完成才写[published.json](../artifacts/p007b-privacy/published.json)并提供下载链接。用户应下载`RemoteHub-R06-Diagnostic-v2-20261122.zip`，不是自动Source code ZIP；先按SHA256SUMS.txt核对ZIP，再运行包内Verify-SHA256.ps1核对EXE。没有设置未经授权的其他文件托管服务。
+
+实际交付已完成：[ZIP下载](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/RemoteHub-R06-Diagnostic-v2-20261122.zip)、[SHA256SUMS.txt](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/SHA256SUMS.txt)、[预发布页](https://github.com/Bravepping/RemoteHub/releases/tag/r06-diag-v2-20261122)。ZIP为6,018,222字节，SHA256 `6cf08d04670fab5068ac1f288daf96ab55e7d912d0e25de0e2fe6a1a1a669706`；EXE SHA256 `7deac839ee2e8fcc0e3ad47433f2431a0ce242bd3a297e90da0ef717effd79c0`。已分别经GitHub资产API和无需凭据的上述公开URL下载，实际内容SHA与本地一致；不是推测存在的链接或本机路径。产品源码未改，实际重建EXE的hash与上轮不同，未声称可重复构建。
+
+发布工具初次尝试遇到清单编码和执行账号下的Git目录信任问题，在创建发布前失败；显式UTF-8、逐命令safe.directory与捕获stderr后完成，未改变全局Git配置。新日志只记录固定类别，不附原始错误路径/网络值或凭据。
 
 已提交[最多20分钟定向测试申请](P007B_R06_V2_TEST_REQUEST.md)，具体范围沿用原方案且无真实桌面；**未获批准、未执行**。P004录屏替代例外已批准，不重开；R06仍OPEN、Phase0 HOLD，不进入Phase1。完成GitHub交付即停止扩展，等待审查。
 

@@ -1,5 +1,5 @@
 {
-  "recordedAt": "2026-11-22T12:46:44.134082+08:00",
+  "recordedAt": "2026-11-22T12:50:12.813703+08:00",
   "scope": "offline regression and one-PC local synthetic transport via existing harness; no cloud/new physical two-PC/native GUI test",
   "automaticCommands": 41,
   "rustPassed": 82,

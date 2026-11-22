@@ -1,5 +1,4 @@
 """Explicit GitHub prerelease upload; credentials stay in process memory, never in reports."""
-import argparse
 import hashlib
 import json
 import os
@@ -8,6 +7,7 @@ import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
+from network_privacy import SafeArgumentParser
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 REPO = 'Bravepping/RemoteHub'
@@ -46,15 +46,15 @@ def main(inspect_only=False):
     if inspect_only:
         print(json.dumps({'repository': REPO, 'private': repo['private'], 'pushPermission': repo.get('permissions', {}).get('push', False)}))
         return
-    delivery = json.loads((ROOT / 'artifacts/p007b-privacy/delivery.json').read_text())
+    delivery = json.loads((ROOT / 'artifacts/p007b-privacy/delivery.json').read_text(encoding='utf-8'))
     archive = ROOT.parent / delivery['archiveName']
     if archive.parent != ROOT.parent or hashlib.sha256(archive.read_bytes()).hexdigest() != delivery['archiveSha256']:
         raise ValueError('GITHUB_ARCHIVE_HASH_REQUIRED')
-    verification = json.loads((ROOT / 'artifacts/p007b-privacy/package-verification.json').read_text())
+    verification = json.loads((ROOT / 'artifacts/p007b-privacy/package-verification.json').read_text(encoding='utf-8'))
     if verification['archiveSha256'] != delivery['archiveSha256'] or not verification['crcVerified']:
         raise ValueError('GITHUB_PACKAGE_VERIFICATION_REQUIRED')
-    revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
-    remote = subprocess.check_output(['git', '-c', 'http.sslBackend=openssl', 'ls-remote', 'origin', 'refs/heads/main'], cwd=ROOT, text=True).split()[0]
+    revision = subprocess.check_output(['git', '-c', 'safe.directory=' + ROOT.as_posix(), 'rev-parse', 'HEAD'], cwd=ROOT, text=True, stderr=subprocess.PIPE).strip()
+    remote = subprocess.check_output(['git', '-c', 'safe.directory=' + ROOT.as_posix(), '-c', 'http.sslBackend=openssl', 'ls-remote', 'origin', 'refs/heads/main'], cwd=ROOT, text=True, stderr=subprocess.PIPE).split()[0]
     if remote != revision:
         raise ValueError('GITHUB_SOURCE_PUSH_REQUIRED')
     try:
@@ -121,9 +121,11 @@ def main(inspect_only=False):
 
 if __name__ == '__main__':
     try:
-        parser = argparse.ArgumentParser(description=__doc__)
+        parser = SafeArgumentParser(description=__doc__)
         parser.add_argument('--inspect', action='store_true')
         args = parser.parse_args()
         main(args.inspect)
-    except Exception:
-        raise SystemExit('GITHUB_RELEASE_OPERATION_FAILED_NO_SECRET_ECHO') from None
+    except Exception as error:
+        # Error class/status only, never an exception message, body, path, URL or credential.
+        code = ('HTTP_' + str(error.code)) if isinstance(error, urllib.error.HTTPError) else type(error).__name__
+        raise SystemExit('GITHUB_RELEASE_OPERATION_FAILED_NO_SECRET_ECHO:' + code) from None

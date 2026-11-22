@@ -1,15 +1,15 @@
 {
   "scope": "locally reachable Git history + tracked worktree + previous inactive ZIP, exact baseline suspects only",
-  "recordedAt": "2026-11-22T12:46:43.925008+08:00",
+  "recordedAt": "2026-11-22T12:50:12.594497+08:00",
   "baselineCommit": "47f395815b62c7b0fcf0ab3f28f640f849e0e74b",
-  "fetchedOriginMainAtAudit": "47f395815b62c7b0fcf0ab3f28f640f849e0e74b",
-  "affectedSnapshotsReachableFromFetchedOriginMain": 5,
+  "fetchedOriginMainAtAudit": "3a3f2590ace16180f4587b3c28aeba5afc6f330c",
+  "affectedSnapshotsReachableFromFetchedOriginMain": 6,
   "suspectedLiteralCount": 3,
   "suspectedClasses": {
     "private": 2,
     "public_or_other": 1
   },
-  "reachableCommitsChecked": 35,
+  "reachableCommitsChecked": 37,
   "affectedCommits": [
     {
       "commit": "246dcea74f120897b47c2b6f00a7980f266afb69",
@@ -54,7 +54,7 @@
         "scripts/p006c-diag-evidence.py",
         "scripts/p007b-evidence.py"
       ],
-      "reachableFromFetchedOriginMain": false
+      "reachableFromFetchedOriginMain": true
     }
   ],
   "affectedPaths": [
