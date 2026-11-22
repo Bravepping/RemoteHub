@@ -25,6 +25,9 @@ class PrivacyTests(unittest.TestCase):
     def test_documentation_and_local_fixtures_are_explicitly_allowed(self):
         check_text('example 192.0.2.7 [2001:db8::7] localhost 127.0.0.1 unspecified 0.0.0.0')
 
+    def test_static_member_syntax_is_not_a_truncated_ipv6_literal(self):
+        check_text('[IO.FileMode]::CreateNew [DateTime]::UtcNow [Text.Encoding]::UTF8')
+
     def test_generated_public_and_private_addresses_rejected_without_echo(self):
         for version, private in [(4, False), (4, True), (6, False), (6, True)]:
             value = generated_address(version, private)

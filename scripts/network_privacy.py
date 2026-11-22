@@ -17,7 +17,7 @@ class SafeArgumentParser(argparse.ArgumentParser):
 
 
 _V4 = re.compile(r'(?<![\w.])(?:[0-9]{1,3}\.){3}[0-9]{1,3}(?![\w.])')
-_V6 = re.compile(r'(?<![\w:])(?:[0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F:.]*(?:%[\w.-]+)?')
+_V6 = re.compile(r'(?<![\w:])(?:[0-9a-fA-F]{0,4}:){2,}[0-9a-fA-F:.]*(?:%[\w.-]+)?(?![\w:])')
 _DOCUMENTATION = tuple(map(ipaddress.ip_network, ('192.0.2.0/24', '198.51.100.0/24', '203.0.113.0/24', '2001:db8::/32')))
 _PAYLOAD = re.compile(r'''["'](?:sdp|sender_invitation|receiver_invitation)["']\s*:|a=candidate:|BEGIN (?:[A-Z]+ )?PRIVATE KEY''', re.I)
 

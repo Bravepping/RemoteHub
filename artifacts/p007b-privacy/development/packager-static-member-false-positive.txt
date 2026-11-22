@@ -1,0 +1,1 @@
+First v2 packaging was rejected before ZIP creation: IPv6 lexer matched a prefix of PowerShell static-member syntax. Added lexical end boundary and a positive static-member regression; generated real IPv6 negatives still reject. No endpoint allowlist or runtime network/security changes. Removed only the verified incomplete delivery files and repackaged after regression.

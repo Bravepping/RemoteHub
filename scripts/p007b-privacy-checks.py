@@ -31,7 +31,7 @@ def run():
     if exposure['currentTrackedPaths'] or any(r['exitCode'] for r in results):
         raise ValueError('PRIVACY_REGRESSION_FAILED')
     check_files(p for p in OUT.rglob('*') if p.suffix in ['.json', '.txt'])
-    result = dict(passed=True, commands=results, privacyTests=11, deliveryTests=9, scannerSourceFilesChecked=count,
+    result = dict(passed=True, commands=results, privacyTests=12, deliveryTests=9, scannerSourceFilesChecked=count,
                   currentSuspectOccurrences=0, historyRewritten=False, previousGitExposureStillReachable=True,
                   testInputs='generated in memory, not captured/configured endpoints', fixedErrorsDoNotEchoInput=True,
                   cloudStarted=False)

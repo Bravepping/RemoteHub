@@ -24,7 +24,7 @@
 
 ## 本轮重新执行的验证
 
-41项安全/兼容性命令全部达到预期：82 Rust、34前端、3 Edge、12 Python生命周期测试、默认/全特性/诊断feature clippy `-D warnings`、fmt、类型/lint/build、旧入口兼容、原生优化构建/身份自检/参数拒绝。私有MF1项仍ignored，不重新采集；旧桌面和专用桌面单测分别列，不重复累加。9项交付工具正负例再次通过，新增11项隐私回归另外记录，共32项Python测试分组而非一次测试命令。
+41项安全/兼容性命令全部达到预期：82 Rust、34前端、3 Edge、12 Python生命周期测试、默认/全特性/诊断feature clippy `-D warnings`、fmt、类型/lint/build、旧入口兼容、原生优化构建/身份自检/参数拒绝。私有MF1项仍ignored，不重新采集；旧桌面和专用桌面单测分别列，不重复累加。9项交付工具正负例再次通过，新增12项隐私回归另外记录，共33项Python测试分组而非一次测试命令。
 
 五轮本机真实localhost TLS/WSS、Session/MF合成视频、Edge/SCTP及独立两阶段落盘重新通过：完整8秒240帧、100模拟事件/接收/ACK/确认一致；发送端/接收端短停、统计API失败保留last_known、真实本地WSS断开保留错误与回收。短轮不补齐帧数；预期异常测试通过不等同正常连接无错。详见[本轮摘要](../artifacts/p007b-privacy/summary.json)与`local`。它们不是云端、两物理机或打包原生GUI/人工提示框实测。
 
@@ -37,3 +37,5 @@
 上传到GitHub独立预发布资产后，实际下载资产内容并重算SHA，与本地ZIP逐字节摘要核对；只有核对完成才写[published.json](../artifacts/p007b-privacy/published.json)并提供下载链接。用户应下载`RemoteHub-R06-Diagnostic-v2-20261122.zip`，不是自动Source code ZIP；先按SHA256SUMS.txt核对ZIP，再运行包内Verify-SHA256.ps1核对EXE。没有设置未经授权的其他文件托管服务。
 
 已提交[最多20分钟定向测试申请](P007B_R06_V2_TEST_REQUEST.md)，具体范围沿用原方案且无真实桌面；**未获批准、未执行**。P004录屏替代例外已批准，不重开；R06仍OPEN、Phase0 HOLD，不进入Phase1。完成GitHub交付即停止扩展，等待审查。
+
+首次v2打包在生成ZIP前被通用IPv6检查拒绝，原因是PowerShell静态成员语法被截成IPv6前缀；补足词法结束边界和正向用例后重新通过。真实IPv6负例保持拒绝，没有增加现场端点白名单、修改产品安全边界或把失败包发布。记录见development。

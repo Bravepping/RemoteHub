@@ -91,8 +91,27 @@ def main(inspect_only=False):
         downloaded = response.read()
         if hashlib.sha256(downloaded).digest() != hashlib.sha256(data).digest():
             raise ValueError('GITHUB_DOWNLOAD_HASH_MISMATCH')
+        if not repo['private']:
+            # Verify the actual public URL given to the user, without a token.
+            public_url = asset['browser_download_url']
+            for _ in range(4):
+                parsed = urllib.parse.urlparse(public_url)
+                if parsed.scheme != 'https' or not (parsed.hostname == 'github.com' or parsed.hostname.endswith('.githubusercontent.com')):
+                    raise ValueError('GITHUB_PUBLIC_DOWNLOAD_HOST_POLICY')
+                try:
+                    public_data = opener.open(urllib.request.Request(public_url, headers={'User-Agent': 'RemoteHub-R06-Delivery'}), timeout=60).read()
+                    break
+                except urllib.error.HTTPError as e:
+                    if e.code not in [301, 302, 303, 307, 308]:
+                        raise
+                    public_url = e.headers.get('Location', '')
+            else:
+                raise ValueError('GITHUB_PUBLIC_DOWNLOAD_REDIRECT_LIMIT')
+            if hashlib.sha256(public_data).digest() != hashlib.sha256(data).digest():
+                raise ValueError('GITHUB_PUBLIC_DOWNLOAD_HASH_MISMATCH')
         assets.append(dict(name=asset['name'], assetId=asset['id'], url=asset['browser_download_url'],
-                           bytes=len(downloaded), sha256=hashlib.sha256(downloaded).hexdigest(), actualDownloadVerified=True))
+                           bytes=len(downloaded), sha256=hashlib.sha256(downloaded).hexdigest(), actualDownloadVerified=True,
+                           publicUrlWithoutCredentialsVerified=not repo['private']))
     result = dict(repository=REPO, private=repo['private'], tag=TAG, releaseUrl=release['html_url'],
                   sourceRevision=revision, assets=assets, prerelease=True, newCredentialFileCreated=False,
                   cloudServicesStarted=False, physicalTwoPcTest='NOT_RUN')

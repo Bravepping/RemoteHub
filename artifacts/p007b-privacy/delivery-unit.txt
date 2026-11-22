@@ -9,6 +9,6 @@ test_redaction_and_missing_final_stay_truthful (test_p007b_delivery.DeliveryTest
 test_sha_check_detects_tampering (test_p007b_delivery.DeliveryTests.test_sha_check_detects_tampering) ... ok
 
 ----------------------------------------------------------------------
-Ran 9 tests in 2.587s
+Ran 9 tests in 2.602s
 
 OK
