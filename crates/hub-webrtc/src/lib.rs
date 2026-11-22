@@ -39,3 +39,6 @@ pub mod signaling;
 #[cfg(feature = "p006-turn-probe")]
 pub mod turn_probe;
 pub mod video;
+
+#[cfg(feature = "v2-verified-signaling")]
+pub mod verified_wss;

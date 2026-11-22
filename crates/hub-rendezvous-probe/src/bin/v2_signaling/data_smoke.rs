@@ -17,6 +17,7 @@ use hub_webrtc::{
     },
     lan_wire::Key,
     pinned_runtime::PinnedRuntime,
+    verified_wss::{VerifiedWssConfig, VerifiedWssError, VerifiedWssEvent, VerifiedWssSignaling},
 };
 use rtc::ice::{mdns::MulticastDnsMode, network_type::NetworkType};
 use std::{
@@ -365,6 +366,10 @@ async fn exercise(
         .await
         .unwrap();
 
+    round_trip_data_channel(host, channel).await;
+}
+
+async fn round_trip_data_channel(host: &mut Peer, channel: Arc<dyn DataChannel>) {
     opened(&channel).await;
     let incoming = host.channels.recv().await.unwrap();
     opened(&incoming).await;
@@ -404,6 +409,185 @@ async fn native_webrtc_connects_over_wss_with_verified_device_signatures() {
     assert!(app.rooms.lock().unwrap().is_empty());
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn reusable_wss_signaling_connects_with_signed_inline_candidates() {
+    reusable_inline_round_trip(false).await;
+}
+
+#[tokio::test]
+async fn reusable_wss_rejects_unexpected_device_key_before_applying_sdp() {
+    reusable_inline_round_trip(true).await;
+}
+
+async fn reusable_inline_round_trip(wrong_viewer_pin: bool) {
+    timeout(Duration::from_secs(15), async {
+        let (app, token) = fixture();
+        let ca = make_ca();
+        let trust = LoopbackTlsTrust::from_ca_der(ca.der().as_ref()).unwrap();
+        let (addr, server) = start_tls(&ca, "127.0.0.1", app.clone()).await;
+        let host = Identity::generate_ephemeral().unwrap();
+        let viewer = Identity::generate_ephemeral().unwrap();
+        let host_public = host.public();
+        let viewer_public = viewer.public();
+        let pinned_viewer = if wrong_viewer_pin {
+            Identity::generate_ephemeral().unwrap().public()
+        } else {
+            viewer_public.clone()
+        };
+        let expected_host = viewer_public
+            .verify_peer(
+                &PairingCandidate::parse(&host_public.pairing_code()).unwrap(),
+                &host_public.fingerprint,
+            )
+            .unwrap();
+        let expected_viewer = host_public
+            .verify_peer(
+                &PairingCandidate::parse(&pinned_viewer.pairing_code()).unwrap(),
+                &pinned_viewer.fingerprint,
+            )
+            .unwrap();
+
+        let room = RoomId::random();
+        let pairing_key = Arc::new(Key::generate());
+        let wire_nonce = uuid::Uuid::new_v4().to_string();
+        let mut session_nonce = [0; 32];
+        session_nonce[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+        session_nonce[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+
+        let host_pending = VerifiedWssSignaling::connect(VerifiedWssConfig {
+            address: addr,
+            token: &token,
+            room: RoomId::new(room.as_str().to_owned()).unwrap(),
+            role: Role::Host,
+            pairing_key: pairing_key.clone(),
+            wire_nonce: wire_nonce.clone(),
+            session_nonce,
+            trust: &trust,
+            local_identity: &host,
+            peer: &expected_viewer,
+        })
+        .await
+        .unwrap()
+        .wait_for_host_registration()
+        .await
+        .unwrap();
+        let viewer_pending = VerifiedWssSignaling::connect(VerifiedWssConfig {
+            address: addr,
+            token: &token,
+            room,
+            role: Role::Viewer,
+            pairing_key,
+            wire_nonce,
+            session_nonce,
+            trust: &trust,
+            local_identity: &viewer,
+            peer: &expected_host,
+        })
+        .await
+        .unwrap();
+        let (host, viewer) = tokio::join!(host_pending.establish(), viewer_pending.establish());
+        let (mut host_signaling, mut viewer_signaling) = (host.unwrap(), viewer.unwrap());
+        let mut host = Peer::new().await;
+        let mut viewer = Peer::new().await;
+        let channel = viewer
+            .pc
+            .create_data_channel("relay-smoke", None)
+            .await
+            .unwrap();
+
+        let offer = viewer.pc.create_offer(None).await.unwrap();
+        viewer
+            .pc
+            .set_local_description(offer.clone())
+            .await
+            .unwrap();
+        let offer = with_inline_candidate(offer.sdp, viewer.ice.recv().await.unwrap());
+        viewer_signaling
+            .send_signal(SignalKind::Offer, offer)
+            .await
+            .unwrap();
+        let received = host_signaling.next_event(Duration::from_secs(3)).await;
+        if wrong_viewer_pin {
+            assert!(matches!(
+                received,
+                Err(VerifiedWssError::Proof(
+                    hub_identity::session::SessionProofError::Signature
+                ))
+            ));
+            assert!(matches!(
+                viewer_signaling.next_event(Duration::from_secs(3)).await,
+                Ok(VerifiedWssEvent::PeerLeft)
+            ));
+            assert!(app.rooms.lock().unwrap().is_empty());
+            viewer.pc.close().await.unwrap();
+            host.pc.close().await.unwrap();
+            server.abort();
+            assert!(server.await.unwrap_err().is_cancelled());
+            return;
+        }
+        let VerifiedWssEvent::Signal {
+            kind: SignalKind::Offer,
+            data,
+        } = received.unwrap()
+        else {
+            panic!("expected verified SDP offer")
+        };
+        host.pc
+            .set_remote_description(RTCSessionDescription::offer(data).unwrap())
+            .await
+            .unwrap();
+
+        let answer = host.pc.create_answer(None).await.unwrap();
+        host.pc.set_local_description(answer.clone()).await.unwrap();
+        let answer = with_inline_candidate(answer.sdp, host.ice.recv().await.unwrap());
+        host_signaling
+            .send_signal(SignalKind::Answer, answer)
+            .await
+            .unwrap();
+        let VerifiedWssEvent::Signal {
+            kind: SignalKind::Answer,
+            data,
+        } = viewer_signaling
+            .next_event(Duration::from_secs(3))
+            .await
+            .unwrap()
+        else {
+            panic!("expected verified SDP answer")
+        };
+        viewer
+            .pc
+            .set_remote_description(RTCSessionDescription::answer(data).unwrap())
+            .await
+            .unwrap();
+
+        round_trip_data_channel(&mut host, channel).await;
+        viewer.pc.close().await.unwrap();
+        host.pc.close().await.unwrap();
+        assert!(matches!(
+            viewer_signaling
+                .send_signal(SignalKind::Ice, "extra-candidate".to_owned())
+                .await,
+            Err(VerifiedWssError::Protocol)
+        ));
+        assert!(matches!(
+            host_signaling.next_event(Duration::from_secs(3)).await,
+            Ok(VerifiedWssEvent::PeerLeft)
+        ));
+        assert!(app.rooms.lock().unwrap().is_empty());
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+    })
+    .await
+    .expect("signed inline signaling timed out");
+}
+
+fn with_inline_candidate(mut sdp: String, candidate: RTCIceCandidateInit) -> String {
+    sdp.push_str("a=");
+    sdp.push_str(&candidate.candidate);
+    sdp.push_str("\r\n");
+    sdp
 }
 
 async fn native_peers_round_trip(

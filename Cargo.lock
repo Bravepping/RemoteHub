@@ -1974,6 +1974,7 @@ dependencies = [
  "futures-util",
  "hmac",
  "hub-encode-win",
+ "hub-identity",
  "hub-probe-wire",
  "hub-signal-v2",
  "ring",

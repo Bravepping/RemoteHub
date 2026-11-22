@@ -178,7 +178,8 @@ impl SessionChallenge {
                 .is_some_and(|ttl| (1..=MAX_TTL.as_secs()).contains(&ttl))
     }
 
-    fn check_sign_time(self, now: u64) -> Result<(), SessionProofError> {
+    /// Check public challenge format and its validity for signing at UTC seconds.
+    pub fn validate_for_signing(self, now: u64) -> Result<(), SessionProofError> {
         if !self.valid_duration() {
             return Err(SessionProofError::Challenge);
         }
@@ -206,7 +207,7 @@ impl Identity {
         if &self.key.verifying_key() != binding.key_for(local_role) {
             return Err(SessionProofError::Binding);
         }
-        challenge.check_sign_time(now)?;
+        challenge.validate_for_signing(now)?;
         let message = binding.message(local_role, challenge, signal)?;
         Ok(self.key.sign(&message).to_bytes())
     }
