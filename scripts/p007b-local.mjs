@@ -4,7 +4,10 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 if (args.length !== 2 || args[0] !== '--local')
   throw new Error('EXPLICIT_LOCAL_INTERFACE_REQUIRED');
-const out = 'artifacts/p007b/local';
+const out =
+  process.env.REMOTEHUB_R06_PRIVACY_ROUND === '1'
+    ? 'artifacts/p007b-privacy/local'
+    : 'artifacts/p007b/local';
 mkdirSync(out, { recursive: true });
 const results = [];
 for (const scenario of [

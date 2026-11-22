@@ -1,0 +1,16 @@
+test_classification_reports_counts_only (test_network_privacy.PrivacyTests.test_classification_reports_counts_only) ... ok
+test_cli_stderr_does_not_echo_sensitive_argument_or_bad_source (test_network_privacy.PrivacyTests.test_cli_stderr_does_not_echo_sensitive_argument_or_bad_source) ... ok
+test_documentation_and_local_fixtures_are_explicitly_allowed (test_network_privacy.PrivacyTests.test_documentation_and_local_fixtures_are_explicitly_allowed) ... ok
+test_file_error_and_sensitive_content_do_not_echo_path (test_network_privacy.PrivacyTests.test_file_error_and_sensitive_content_do_not_echo_path) ... ok
+test_generated_public_and_private_addresses_rejected_without_echo (test_network_privacy.PrivacyTests.test_generated_public_and_private_addresses_rejected_without_echo) ... ok
+test_ipv6_zone_and_bracketed_port_do_not_bypass (test_network_privacy.PrivacyTests.test_ipv6_zone_and_bracketed_port_do_not_bypass) ... ok
+test_parser_error_does_not_echo_source (test_network_privacy.PrivacyTests.test_parser_error_does_not_echo_source) ... ok
+test_payload_structure_rejected_without_specific_endpoints (test_network_privacy.PrivacyTests.test_payload_structure_rejected_without_specific_endpoints) ... ok
+test_rejected_python_literals_include_escapes (test_network_privacy.PrivacyTests.test_rejected_python_literals_include_escapes) ... ok
+test_scanners_tests_and_audit_source_are_self_scanned (test_network_privacy.PrivacyTests.test_scanners_tests_and_audit_source_are_self_scanned) ... ok
+test_source_scan_process_returns_only_fixed_error (test_network_privacy.PrivacyTests.test_source_scan_process_returns_only_fixed_error) ... ok
+
+----------------------------------------------------------------------
+Ran 11 tests in 0.169s
+
+OK

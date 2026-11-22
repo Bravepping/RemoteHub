@@ -1,0 +1,32 @@
+[
+  {
+    "scenario": "auto",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T04:40:30.032Z",
+    "scope": "one Windows, real local TLS/WSS/MF/RTP/Edge/SCTP, eight-second synthetic source; not packaged native GUI or cloud/two-PC"
+  },
+  {
+    "scenario": "sender-stop",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T04:40:41.283Z",
+    "scope": "one Windows, real local TLS/WSS/MF/RTP/Edge/SCTP, eight-second synthetic source; not packaged native GUI or cloud/two-PC"
+  },
+  {
+    "scenario": "receiver-stop",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T04:40:51.288Z",
+    "scope": "one Windows, real local TLS/WSS/MF/RTP/Edge/SCTP, eight-second synthetic source; not packaged native GUI or cloud/two-PC"
+  },
+  {
+    "scenario": "stats-failure",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T04:41:01.951Z",
+    "scope": "one Windows, real local TLS/WSS/MF/RTP/Edge/SCTP, eight-second synthetic source; not packaged native GUI or cloud/two-PC"
+  },
+  {
+    "scenario": "wss-disconnect",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T04:41:13.502Z",
+    "scope": "one Windows, real local TLS/WSS/MF/RTP/Edge/SCTP, eight-second synthetic source; not packaged native GUI or cloud/two-PC"
+  }
+]

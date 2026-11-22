@@ -5,13 +5,14 @@ import json
 import pathlib
 import re
 import subprocess
+from network_privacy import check_files, SafeArgumentParser
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 BASELINE = 'dbea0e357cdb4ab4899b910a93e6661fe23006f5'
 
 
-def verify():
-    folder = ROOT / 'artifacts/p007b'
+def verify(privacy_round=False):
+    folder = ROOT / ('artifacts/p007b-privacy' if privacy_round else 'artifacts/p007b')
     commands = json.loads((folder / 'automatic/results.json').read_text())
     assert len(commands) == 41 and all(c['exitCode'] == c.get('expectedExitCode', 0) and c.get('metadataValid', True) for c in commands)
     rust = sum(map(int, re.findall(r'test result: ok\. (\d+) passed', (folder / 'automatic/test.txt').read_text())))
@@ -41,11 +42,8 @@ def verify():
                           sourceFrames=s['frames_sent'], decodedAtFinal=evidence[-1]['snapshot']['framesDecoded'],
                           capture=evidence[-1]['capture'], errors=evidence[-1]['errors'], cleanup=evidence[-1]['cleanup'],
                           expectedFailure=run['scenario'] in ['stats-failure', 'wss-disconnect'], passed=True))
-    forbidden = ['47.122.108.86', '192.168.5.129', '192.168.5.112', 'BEGIN PRIVATE KEY', '"sdp":', '"sender_invitation":', '"receiver_invitation":']
-    for path in folder.rglob('*'):
-        if path.suffix in ['.json', '.txt']:
-            text = path.read_text(encoding='utf-8-sig')
-            assert not any(token in text for token in forbidden), path
+    check_files(path for path in folder.rglob('*') if path.suffix in ['.json', '.txt'])
+    check_files([ROOT / 'scripts' / name for name in ['network_privacy.py', 'p007b-evidence.py', 'p006c-diag-evidence.py', 'p007b-privacy-audit.py']], source=True)
     assert not list((ROOT / 'artifacts/private').glob('p006c-wss-*'))
     assert not list((ROOT / 'artifacts/private').glob('p007b-delivery-test-*'))
     files = subprocess.check_output(['git', 'ls-tree', '-r', '--name-only', BASELINE, 'docs', 'artifacts'], cwd=ROOT, text=True).splitlines()
@@ -72,4 +70,10 @@ def verify():
 
 
 if __name__ == '__main__':
-    verify()
+    try:
+        parser = SafeArgumentParser(description=__doc__)
+        parser.add_argument('--privacy-round', action='store_true')
+        args = parser.parse_args()
+        verify(args.privacy_round)
+    except Exception:
+        raise SystemExit('R06_EVIDENCE_VERIFICATION_FAILED_NO_INPUT_ECHO') from None

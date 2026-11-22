@@ -1,3 +1,11 @@
+# P007B PRIVACY v2 检查点（不启动云，等审查）
+
+- 用户要求去掉扫描器疑似真实端点、自检隐私、只读查历史、重跑安全兼容并提供真实GitHub下载。基线47f3958，范围准备b9cc891。两处旧扫描器已前向修复；network_privacy通用IPv4/6和载荷+AST检查，无端点名单/编码/hash。异常固定码不回显；11隐私/9交付测试及7源码自检通过。
+- 审计从旧Git对象内存取疑似值，stdin给gitgrep，输出只路径/提交/计数。3值2路径，初查34可达提交中6快照（origin/main47f有5，另b9继承旧文件）。仓库API确认公开；当前跟踪匹配0；旧对象仍可达，无历史重写或强推，未查外部访问/缓存，旧ZIP8成员无这些值。
+- 新artifacts/p007b-privacy隔离旧报告/统计；41项重跑82Rust/34前端/3Edge/12Python，私有MF1ignored；五轮本机localhost TLS/MF/Edge/SCTP 8秒合成通过。Rust/前端/依赖/8秒/人工同意/严格ICE产品无diff，无桌面/云/两物理机。
+- v2 ZIP计划ASCII名RemoteHub-R06-Diagnostic-v2-20261122.zip，9白名单成员，源码提交后打包；GitHub预发布r06-diag-v2-20261122上传ZIP与SHA文件，实际下载重算后写published.json。publish只用已有GCM内存凭据，不新写秘密或触碰阿里云。交付SHA/URL以实际记录为准。
+- 新独立隐私修复报告与最多20分钟定向申请；P004例外已批不重开，R06仍OPEN/Phase0 HOLD，不进P1。后续必须用户新授权；准备交付后停止扩展等审查。
+
 # P0-07-B 准备交付检查点（E04已批准，R06在线未授权）
 
 - 用户明确接受P004归档真实统计+本人观看替代录屏，限定既有阶段范围；新增PHASE0_P007B_DECISION.md，P004父项按例外done，正式父项5/7。旧未录屏事实/旧报告/规范/统计不改。R06未豁免，P006/P007及Phase0退出仍HOLD，不进Phase1。

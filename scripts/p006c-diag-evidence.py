@@ -1,5 +1,6 @@
 """Offline consistency/privacy check of DIAG test evidence. No sockets or desktop access."""
 import hashlib,json,pathlib,re,subprocess,datetime
+from network_privacy import check_files
 
 def verify(root):
     out=root/'artifacts/p006c-diag'
@@ -32,10 +33,8 @@ def verify(root):
             persisted=[dict(stage=e['stage'],capture=e['capture'],framesDecoded=(e['snapshot'] or {}).get('framesDecoded'),
                            sampledAtMs=e['sampledAtMs'],recordedAtMs=e['recordedAtMs'],errors=e['errors'],cleanup=e['cleanup']) for e in records],
             nativeExitCode=v['exitCode'],expectedFailure=scenario in ['stats-failure','wss-disconnect'],passed=True))
-    for p in out.rglob('*'):
-        if p.is_file() and p.suffix in ('.json','.txt'):
-            text=p.read_text(encoding='utf-8-sig')
-            assert not any(token in text for token in ['47.122.108.86','192.168.5.129','192.168.5.112','BEGIN PRIVATE KEY','"sender_invitation"','"receiver_invitation"','"sdp":']),str(p)
+    check_files(p for p in out.rglob('*') if p.suffix in ('.json', '.txt'))
+    check_files([root/'scripts/p006c-diag-evidence.py', root/'scripts/network_privacy.py'], source=True)
     private=root/'artifacts/private';assert not any(private.glob('p006c-wss-*'))
     names=subprocess.check_output(['git','ls-files','--cached','--others','--exclude-standard','-z','--','apps','crates','scripts'],cwd=root).decode().split('\0')
     digest=hashlib.sha256()
@@ -49,4 +48,6 @@ def verify(root):
     (out/'summary.json').write_text(json.dumps(summary,indent=2)+'\n',encoding='utf-8')
     print(json.dumps(dict(regressionCommands=35,rustPassed=rust,frontendPassed=frontend,localCases=len(rows),privacyAndCleanupPassed=True,cloudStarted=False)))
 
-if __name__=='__main__':verify(pathlib.Path(__file__).resolve().parent.parent)
+if __name__=='__main__':
+    try:verify(pathlib.Path(__file__).resolve().parent.parent)
+    except Exception:raise SystemExit('DIAG_EVIDENCE_VERIFICATION_FAILED_NO_INPUT_ECHO') from None
