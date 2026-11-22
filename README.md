@@ -91,6 +91,8 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 历史35项完整检查（74 Rust/22前端/3 Edge/11 Python）继续保留；本次前端最终快照修复后，当前24前端/12 Python、类型/lint/build/3 Edge及新版Tauri构建通过，未重复未变Rust全回归。[云端独立报告](docs/PHASE0_P006C_VIDEO_CLOUD_TEST_REPORT.md)及artifacts/p006c-video/cloud保留实际pair、释放和收尾证据。双机包与[操作说明](docs/P006C_MANUAL_ACCEPTANCE.md)已准备，包内没有有效邀请；后续用户另行批准服务启动和真实双机采集，再刷新临时配置。
 
+本次Windows交付为工作区根目录的RemoteHub_P006c_双机实验_v1_20261122.zip，源码提交d805ecb；ZIP/程序SHA和成员校验见artifacts/p006c-video/delivery.json。包内不含源码缓存和有效私有配置，全部源码及脱敏证据保存在GitHub。
+
 见[独立测试报告](docs/PHASE0_P006C_VIDEO_TEST_REPORT.md)、[协议契约](docs/P006C_VIDEO_CONTRACT.md)、[复现与构建](docs/P006C_VIDEO_RUNBOOK.md)、[待授权云端范围](docs/P006C_VIDEO_CLOUD_PLAN.md)。构建入口`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video.ps1 -BuildOnly`；离线回归`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video-checks.ps1`。正式窗口每轮仍须亲自确认；合成源及故障注入只在独立操作员probe启用，无实际键鼠注入。
 
 ## P0-03 本机编码 probe

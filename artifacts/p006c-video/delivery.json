@@ -1,0 +1,23 @@
+{
+  "package": "RemoteHub_P006c_双机实验_v1_20261122.zip",
+  "workspace_relative_path": "../RemoteHub_P006c_双机实验_v1_20261122.zip",
+  "bytes": 5979024,
+  "sha256": "df961893cf078682b3641ddf45841a74742bcf87ee2d7e62b2f5cee203be444d",
+  "source_commit": "d805ecbffd8277acf4130bb2fc10e0584888343e",
+  "desktop_sha256": "164e4bc7c7edcba5559083832f1790ba3aa453ab02374e62396b156afd948bf1",
+  "verifiedAt": "2026-11-22T09:33:34.758709+08:00",
+  "zipCrcPassed": true,
+  "files": [
+    "BUILD_INFO.json",
+    "RemoteHub.exe",
+    "p006c-private.json.example",
+    "云端自动测试报告.md",
+    "开始这里.txt",
+    "本地集成测试报告.md"
+  ],
+  "activeCredentialsIncluded": false,
+  "servicesStopped": true,
+  "realDesktopCaptureStarted": false,
+  "manualAcceptance": "pending fresh authorization, service startup and short-lived config",
+  "opsRecordUpdated": true
+}

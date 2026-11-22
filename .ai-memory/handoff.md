@@ -6,6 +6,7 @@
 - 同coturn PID332698最多3分配，三轮9实际Allocation（含首失败），全部Refresh0请求/成功回应+1.1097–1.3967秒首次socket消失，实际600秒租约及+15秒均无残留。observer显式split-shared-credentials按真实UDP tuple私有关联，公开别名，不把WSS共享username混为一个。9:21:08提前finish保护拒绝未变更；9:28:18重连核对9项/同PID/0socket后停止，shutdown完整。26业务集合/容器启动时间、原config/unit/binary及FW策略不变；新旧WSS/coturn停，旧disabled、新无持久unit、timer取消、端口0，临时key/邀请/labels/rawpcap云端和本机已删，SSH关闭。
 - docs/PHASE0_P006C_VIDEO_CLOUD_TEST_REPORT.md、P006C_MANUAL_ACCEPTANCE.md，artifacts/p006c-video/cloud含真实pair/rawstats/9classifications/脱敏事件/shutdown；历史本地/首步报告保留。新scripts/p006c-cloud-evidence.py从真实事件复算，package-p006c-video.py仅全停后生成待激活包，无有效配置/secret，CRC+SHA。最终SHA/包见delivery.json与会话，避免自引用。
 - 当前只剩用户后续另行批准并操作物理双机/WebView2/DXGI，P006c保持doing/Phase0 4of7；不要求现在重复操作或旧接收端停止补测。后续启服务/签新配置必须新授权，本次窗口结束，不进SendInput或Phase1。
+- 云自动代码/证据/独立报告已提交d805ecb；无凭据双机包RemoteHub_P006c_双机实验_v1_20261122.zip在工作区父目录，CRC6成员和当前程序SHA核对，具体delivery.json。运维清单及历史已通过正式审批写入本轮已核实结果/停用状态，无凭据。接下来仅上传提交和交付信息，不再启动云服务或采集。
 
 # P006c 视频/control/WSS集成检查点（历史）
 
