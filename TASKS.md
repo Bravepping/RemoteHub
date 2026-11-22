@@ -15,10 +15,10 @@
 - [x] `P0-06a` **infrastructure-verified** — 原implementation-ready的G1–5/G7/G8基础上，用户另行授权G6：Ubuntu24.04/coturn4.6.1，两次Windows原生真实relay候选（81/92ms gather），11项实际UDP协议检查通过，缺/错/过期票401、错realm437专用原因、五类危险peer403、释放与非root服务收尾通过。详见`docs/PHASE0_G6_TEST_REPORT.md`和`artifacts/p006a/g6`。原准备完整回归54 Rust/13前端/3Edge/3Python，新增4协议工具离线测试；未进入P006b/c、实际输入或Phase1。
 - [x] `P0-06b` **done（用户接受现场确认，保留历史日志限制）** — 两轮30秒各900帧全发送/接收/解码/呈现、720p、丢包0/冻结0；5轮真实relay/relay UDP、每轮发送/Rust接收/ACK/确认100、连续1..101、异常0。发送端停止194帧、接收端关窗196帧、热点断网244帧提前回收；接收端主动停止用户已现场验证并明确跳过补测；900帧独立提前停止证据限制继续保留，不追填PASS日志。60 Rust/16前端/3Edge及完整构建/lint/clippy通过，云端服务已停止、不自启、socket清零；原逐会话TURN疑点由独立6例生命周期验证补齐（历史未归属socket不追溯定性）。见docs/PHASE0_P006B_TEST_REPORT.md、docs/TURN_ALLOCATION_LIFECYCLE_TEST_REPORT.md。
 - [x] `TURN-LIFECYCLE` **done** — 6例真实云端/Windows自动测试：5例Refresh0即时释放，1例600秒租约超时回收；同PID、最多2分配、原租约+15秒无残留，停服务前socket已0。19组自动检查、61 Rust/11 Python通过。独立报告与Git交付先行，不重复双机串流。
-- [ ] `P0-06c` **doing（首步核心与自动云路径验证通过）** — 默认关闭DirectPreferred/ICE All、独立授权/确切候选socket边界；同一物理Windows机两个真实原生PC，云端4例：正常host/host、进程内直连阻断自动relay/relay、TURN阻断仍直连、两路均断明确失败。前三例100/100/100；云端4分配各Refresh0+socket消失，停服务前0，最终专用服务停用/不自启。24检查/66 Rust通过。未接视频Session/WebView2、无新物理双机或NAT验收；回退34.873秒待优化，不提前标done。见docs/PHASE0_P006C_TEST_REPORT.md。
+- [ ] `P0-06c` **doing（视频、模拟控制与认证WSS已集成，本地实播通过）** — 在既有自动云路径核心上接入Rust Session→现有前端→认证WSS，同一视频PC的control.v1。单物理Windows合成视频7轮：完整300帧720p30、100/100/100/100、host/host，停止及异常页面关闭实际回收；35检查/74 Rust/22前端通过。新版Tauri已构建，云端视频回退及物理双机/嵌入WebView2/DXGI仍待授权实测，不提前标done。此前无视频4例真实云路径/Allocation证据独立保留；见docs/PHASE0_P006C_VIDEO_TEST_REPORT.md、docs/PHASE0_P006C_TEST_REPORT.md。
 - [ ] `P0-07` **doing** — 已交首轮 Spike 报告、实测数据和 ADR 0001；整个媒体链路与备选方案结论需 P0-03..06 后补齐。
 
-当前交付：P0父任务正式验收仍4/7（P001/02/03/05）；P004基线录屏差异保留，Phase0未通过退出条件。P006b按用户决定收尾，TURN生命周期独立6例已先行提交GitHub（88f1edc）；P006c首步核心及云端自动路径验证通过，视频接入未完成。所有云端实验服务已停止、不自启；不进入Phase1。
+当前交付：P0父任务正式验收仍4/7（P001/02/03/05）；P004基线录屏差异保留，Phase0未通过退出条件。P006b按用户决定收尾，TURN生命周期独立6例先行提交GitHub（88f1edc）；P006c视频/控制/认证WSS已集成并完成本机合成实播，新的云端视频及物理双机待测。本轮未启动或变更云端服务，旧停用状态保留；不进入Phase1。
 
 ## Phase 1 · 工程与 UI
 

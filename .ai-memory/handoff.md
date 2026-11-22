@@ -1,4 +1,13 @@
-# P006c 首步交付检查点
+# P006c 视频/control/WSS集成检查点
+
+- 用户要求按Rust Session→WebView2→认证WSS顺序接入，优先本地，再单独申请云范围。main e020051干净，先ADR0010/契约提交a9fb146；本轮尚未启动或变更云服务，旧授权不继承。
+- 默认关闭p006-direct，复用旧视频PC/MF/RTP/control.v1。DirectGrant绑定控制UUID，完整SDP后安装精确端点，原生及前端真实pair两侧匹配；媒体/控制等验证再开放。新HMAC path交换明确对方私有IP范围；旧RelayOnly wire缺省兼容，模式不匹配拒绝。WSS应答任务不阻塞4秒心跳。停止立即撤销生产/处理，通知并2秒close grace、5秒join后关PC/边界；旧范围预算保留。
+- 新p006-session-probe只操作员合成NV12/MF，不采集桌面，不可通过正式JSON开启。2026-11-22 08:28本机Session四轮、08:34真实本地TLS/WSS/前端三轮均通过；完整轮300帧全链/720p30、100条发送/原生接收/ACK/确认、host/host、序号1..101、异常0及清理。异常销毁Edge页真实PEER_CONNECTION_FAILED/exit1、411源帧/关闭前153接收帧，记录为预期断线回收，非正常零错或Tauri关窗实测。停止快照差异保留。
+- 35项最终检查全部达预期，74 Rust/22前端/3Edge/11Python，旧桌面3另测，私有MF样本1ignored；实验Tauri已编译。development保留5失败：PC/channel关闭顺序、RPC串行stop及正常停止统计竞争。后者只在明确停止码且原生无错/已回收才消除误报，安全错误继续失败，最后WSS三轮全过。
+- docs/PHASE0_P006C_VIDEO_TEST_REPORT.md、P006C_VIDEO_CONTRACT/RUNBOOK/CLOUD_PLAN、artifacts/p006c-video分层证据及源码/二进制SHA。测试浏览器因VPN使用进程内合成设备权限暴露物理接口，随即停止合成流，无相机/麦克风/桌面；local WSS完整TLS，无TURN，未用占位ICE在测试工厂移除。生产前端默认PC工厂不变，Tauri只能desktop且每次原生亲自批准。
+- 新版云视频回退、物理双机、嵌入WebView2、DXGI未验收，P006c仍doing/Phase0正式4of7。先提交并上传当前代码/报告，再请求新具体云授权（计划新受限目录+离线WSS构建，低权临时8443、复用原coturn不改配置FW SG业务，90分钟4alloc上限，自动合成正常/回退后物理LAN+热点，最终全停不自启、资源清零先判）。授权前不能部署或启动。用户明确跳过旧接收端停止补测，保留原日志限制，不要重复要求。
+
+# P006c 首步交付检查点（历史）
 
 - 生命周期独立代码/报告已推main 88f1edc，用户随后明确授权P006c自动云测试（最多40分钟/2分配/只既有coturn/WSS关闭/无配置FW SG业务改动）。ADR0009先提交b8b0214，新增默认关闭p006-direct-probe；尚未接现有视频Session/WebView2/业务信令，不标P006c或P006父项done。
 - 2026-11-22北京时间07:13:41至07:17:31实际启动专用coturn，单PID324151；同一物理Windows机两个真实原生PC、无媒体/输入，ICE All：正常host/host 100/100/100、直连进程内阻断自动relay/relay 100/100/100（34.873秒）、TURN进程内阻断仍host/host 100/100/100（22.051秒）、两路阻断35.014秒明确DIRECT_CONNECT_TIMEOUT、0消息/no pair。双方正常/回退均保留host/srflx/relay各1，不改relay-only。故障真实丢包仅进程内，不是物理NAT/防火墙试验。

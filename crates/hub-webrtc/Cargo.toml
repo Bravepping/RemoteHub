@@ -8,6 +8,8 @@ license.workspace = true
 [features]
 p006-turn-probe = ["dep:zeroize"]
 p006-direct-probe = ["p006-turn-probe"]
+p006-direct = ["p006-relay", "p006-direct-probe"]
+p006-session-probe = ["p006-direct", "hub-encode-win/synthetic-stream"]
 p006-relay = ["p006-turn-probe", "dep:hub-probe-wire", "dep:tokio-tungstenite", "dep:rustls", "dep:rustls-pemfile", "dep:futures-util", "dep:ring"]
 
 [[bin]]
@@ -19,6 +21,16 @@ required-features = ["p006-turn-probe"]
 name = "ice-path-probe"
 path = "src/bin/ice-path-probe.rs"
 required-features = ["p006-direct-probe"]
+
+[[bin]]
+name = "video-session-probe"
+path = "src/bin/video-session-probe.rs"
+required-features = ["p006-session-probe"]
+
+[[bin]]
+name = "authenticated-session-probe"
+path = "src/bin/authenticated-session-probe.rs"
+required-features = ["p006-session-probe"]
 
 [dependencies]
 hub-encode-win = { path = "../hub-encode-win" }

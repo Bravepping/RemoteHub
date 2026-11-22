@@ -14,7 +14,7 @@ export interface RelayApproval {
   serverIp: string;
   serverPort: number;
 }
-function publicV4(value: string): boolean {
+export function publicV4(value: string): boolean {
   const parts = value.split('.');
   if (
     parts.length !== 4 ||

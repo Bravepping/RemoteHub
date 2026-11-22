@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use zeroize::Zeroize;
+#[cfg(test)]
+mod path_tests;
 
 pub const MAX_FRAME: usize = 96 * 1024;
 pub struct PairKey([u8; 32]);
@@ -69,6 +71,99 @@ pub struct Hello {
     pub role: Role,
     pub room: String,
     pub seconds: u32,
+    #[serde(default, skip_serializing_if = "PathMode::is_relay")]
+    pub mode: PathMode,
+}
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PathMode {
+    #[default]
+    RelayOnly,
+    DirectPreferred,
+}
+impl PathMode {
+    pub fn is_relay(&self) -> bool {
+        *self == Self::RelayOnly
+    }
+}
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PathPolicy {
+    pub v: u8,
+    pub mode: PathMode,
+    pub private_peer_ipv4: Vec<std::net::Ipv4Addr>,
+}
+impl PathPolicy {
+    pub fn new(private_peer_ipv4: Vec<std::net::Ipv4Addr>) -> Result<Self, String> {
+        let p = Self {
+            v: 1,
+            mode: PathMode::DirectPreferred,
+            private_peer_ipv4,
+        };
+        p.validate()?;
+        Ok(p)
+    }
+    fn validate(&self) -> Result<(), String> {
+        if self.v != 1
+            || self.mode != PathMode::DirectPreferred
+            || self.private_peer_ipv4.len() > 2
+            || self.private_peer_ipv4.iter().any(|p| !p.is_private())
+            || self
+                .private_peer_ipv4
+                .iter()
+                .enumerate()
+                .any(|(i, p)| self.private_peer_ipv4[..i].contains(p))
+        {
+            return Err("PATH_POLICY_SCOPE".into());
+        }
+        Ok(())
+    }
+}
+pub struct PathExchange {
+    local: PathPolicy,
+    remote: Option<PathPolicy>,
+    failed: bool,
+}
+impl PathExchange {
+    pub fn new(private_peers: Vec<std::net::Ipv4Addr>) -> Result<Self, String> {
+        Ok(Self {
+            local: PathPolicy::new(private_peers)?,
+            remote: None,
+            failed: false,
+        })
+    }
+    pub fn payload(&self) -> Result<String, String> {
+        serde_json::to_string(&self.local).map_err(|_| "PATH_POLICY_ENCODING".into())
+    }
+    /// Only call after Codec::accept has authenticated the full session/role/sequence envelope.
+    pub fn accept(&mut self, payload: &str) -> Result<(), String> {
+        let result = (|| {
+            if self.failed || self.remote.is_some() || payload.len() > 512 {
+                return Err("PATH_POLICY_REPLAY_OR_SIZE".into());
+            }
+            let p: PathPolicy = serde_json::from_str(payload).map_err(|_| "PATH_POLICY_SCHEMA")?;
+            p.validate()?;
+            self.remote = Some(p);
+            Ok(())
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
+    }
+    pub fn ready(&self) -> bool {
+        self.remote.is_some() && !self.failed
+    }
+    pub fn may_publish_private_local(&self, local: std::net::Ipv4Addr) -> bool {
+        self.ready()
+            && self
+                .remote
+                .as_ref()
+                .is_some_and(|p| p.private_peer_ipv4.contains(&local))
+    }
+    pub fn private_peers(&self) -> &[std::net::Ipv4Addr] {
+        &self.local.private_peer_ipv4
+    }
 }
 impl Hello {
     pub fn validate(&self) -> Result<(), String> {
@@ -150,7 +245,8 @@ impl Sequence {
             || f.payload.len() > 64 * 1024
             || f.mac.len() != 64
             || !f.mac.bytes().all(|b| b.is_ascii_hexdigit())
-            || !["offer", "answer", "beat", "metrics", "stop"].contains(&f.kind.as_str())
+            || !["offer", "answer", "beat", "metrics", "stop", "path"].contains(&f.kind.as_str())
+            || (f.kind == "path" && f.payload.len() > 512)
         {
             return Err("RELAY_SCOPE_OR_REPLAY".into());
         }
@@ -217,7 +313,8 @@ impl Codec {
             || now >= self.expires
             || self.tx >= 256
             || payload.len() > 64 * 1024
-            || !["offer", "answer", "beat", "metrics", "stop"].contains(&kind)
+            || !["offer", "answer", "beat", "metrics", "stop", "path"].contains(&kind)
+            || (kind == "path" && payload.len() > 512)
         {
             return Err("RELAY_SEND_NOT_ALLOWED".into());
         }

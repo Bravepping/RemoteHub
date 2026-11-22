@@ -86,3 +86,35 @@ it('revokes a late native approval when stopped while the native dialog is pendi
   expect(invoke).not.toHaveBeenCalledWith('p006_ready', expect.anything());
   expect(states).toContain('stopped');
 });
+it.each(['P006_STOPPED', 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED'])(
+  'only treats %s as normal when native cleanup is clean',
+  async (code) => {
+    const failures: string[] = [];
+    const states: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'p006_start')
+        return { sessionId: 'clean-native', pairingCode: null };
+      if (command === 'p006_ready') throw new Error(code);
+      if (command === 'p006_stats')
+        return { resources_released: true, error: null, receiver_samples: [] };
+      if (command === 'p006_save') return 'saved';
+      return undefined;
+    });
+    const probe = new RelayProbe(
+      document.createElement('video'),
+      (s) => states.push(s),
+      (e) => failures.push(e),
+      () => {},
+      () => {},
+    );
+    await probe.start({
+      role: 'sender',
+      consent: true,
+      localIp: '192.168.1.2',
+      seconds: 30,
+    });
+    expect(states).toContain('stopped');
+    if (code === 'P006_STOPPED') expect(failures).toEqual([]);
+    else expect(failures).toEqual([`Error: ${code}`]);
+  },
+);

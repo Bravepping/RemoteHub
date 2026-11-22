@@ -14,6 +14,7 @@ use tokio::{
 use webrtc::data_channel::{DataChannel, DataChannelEvent};
 
 pub struct Endpoint {
+    close_grace: Duration,
     stop: StopToken,
     claimed: AtomicBool,
     permitted: AtomicBool,
@@ -33,8 +34,20 @@ impl Endpoint {
     ) -> Result<Arc<Self>, String> {
         Self::with_permission(session, stop, seconds, false)
     }
+    #[cfg(feature = "p006-direct")]
+    pub(crate) fn new_direct_guarded(
+        session: String,
+        stop: StopToken,
+        seconds: u32,
+    ) -> Result<Arc<Self>, String> {
+        let mut endpoint = Self::with_permission(session, stop, seconds, false)?;
+        Arc::get_mut(&mut endpoint)
+            .ok_or("CONTROL_ALREADY_SHARED")?
+            .close_grace = Duration::from_secs(2);
+        Ok(endpoint)
+    }
     #[cfg(feature = "p006-relay")]
-    pub(crate) fn approve_relay_path(&self) {
+    pub(crate) fn approve_verified_path(&self) {
         if !self.stop.is_stopped() {
             self.permitted.store(true, Ordering::Release);
         }
@@ -47,6 +60,7 @@ impl Endpoint {
     ) -> Result<Arc<Self>, String> {
         let (tx, rx) = mpsc::channel(1);
         Ok(Arc::new(Self {
+            close_grace: Duration::ZERO,
             stop,
             claimed: AtomicBool::new(false),
             permitted: AtomicBool::new(permitted),
@@ -71,6 +85,10 @@ impl Endpoint {
             .unwrap_or_else(|p| p.into_inner())
             .stats
             .clone()
+    }
+    #[cfg(all(test, feature = "p006-direct"))]
+    pub(crate) fn is_permitted(&self) -> bool {
+        self.permitted.load(Ordering::Acquire)
     }
     pub fn joined(&self) {
         self.update(|s| s.task_joined = true);
@@ -105,6 +123,11 @@ impl Endpoint {
             self.fail(&error);
         }
         self.update(|s| s.close_requested = true);
+        // StopToken has already revoked message processing. Give the authenticated
+        // signaling owner time to notify the viewer before tearing down SCTP.
+        if self.stats().close_events == 0 {
+            sleep(self.close_grace).await;
+        }
         let _ = timeout(Duration::from_secs(1), channel.close()).await;
         let close = timeout(Duration::from_millis(800), async {
             while let Some(event) = channel.poll().await {

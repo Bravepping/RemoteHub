@@ -1,0 +1,12 @@
+
+running 3 tests
+test p004_lan::tests::native_lan_config_rejects_absent_consent_public_peer_and_unbounded_duration ... ok
+test experiment_origin::tests::experimental_commands_only_accept_local_main_window ... ok
+test p004::tests::native_gate_rejects_missing_consent_concurrent_start_and_foreign_session ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.30s
+     Running unittests src\main.rs (target\debug\build\remotehub-desktop/15b171304ad76a92\out\remotehub_desktop-15b171304ad76a92.exe)
+
+EXIT=0

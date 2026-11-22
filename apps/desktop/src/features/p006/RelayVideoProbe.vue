@@ -3,6 +3,11 @@ import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { RelayProbe } from './relay';
 import type { LanStatus, LanReceiver } from '../p004/lan';
+const props = defineProps<{ directEnabled?: boolean }>();
+const mode = ref<'relay_only' | 'direct_preferred'>(
+  props.directEnabled ? 'direct_preferred' : 'relay_only',
+);
+const peerIp = ref('');
 const video = ref<HTMLVideoElement>();
 const role = ref<'sender' | 'receiver'>('sender');
 const interfaces = ref<string[]>([]);
@@ -20,7 +25,8 @@ let probe: RelayProbe | undefined;
 const labels: Record<string, string> = {
   idle: '尚未开始',
   waiting: '等待另一台电脑配对',
-  negotiating: '正在建立双端 TURN 连接',
+  waiting_peer: '等待另一台电脑配对',
+  negotiating: '正在检查可用连接路径',
   connected: '已连接，等待画面',
   playing: '正在实时播放',
   stopping: '正在停止与回收',
@@ -59,6 +65,7 @@ async function start() {
     },
     (c) => (hostCode.value = c),
     (p) => (saved.value = p),
+    props.directEnabled ?? false,
   );
   const config = {
     role: role.value,
@@ -66,6 +73,11 @@ async function start() {
     localIp: localIp.value,
     seconds: 30,
     pairingCode: inputCode.value,
+    mode: mode.value,
+    peerIp:
+      mode.value === 'direct_preferred' && peerIp.value.trim()
+        ? peerIp.value.trim()
+        : undefined,
   };
   inputCode.value = '';
   consent.value = false;
@@ -75,9 +87,28 @@ onBeforeUnmount(() => void probe?.stop());
 </script>
 <template>
   <section class="relay-panel">
-    <h2>P0-06b · 跨网络 TURN 双机实验</h2>
-    <p>两端强制 TURN · 720p30 · 30秒 · 100条模拟事件 · 不执行键鼠输入</p>
+    <h2>
+      {{
+        props.directEnabled
+          ? 'P0-06c · 直连优先双机实验'
+          : 'P0-06b · 跨网络 TURN 双机实验'
+      }}
+    </h2>
+    <p>
+      {{
+        mode === 'direct_preferred'
+          ? '优先直连，需要时自动中继'
+          : '两端强制 TURN'
+      }}
+      · 720p30 · 30秒 · 100条模拟事件 · 不执行键鼠输入
+    </p>
     <div class="relay-form">
+      <label v-if="props.directEnabled"
+        >连接方式<select v-model="mode" :disabled="busy">
+          <option value="direct_preferred">优先直连，自动中继</option>
+          <option value="relay_only">强制中继（对照）</option>
+        </select></label
+      >
       <label
         >本机角色
         <select v-model="role" :disabled="busy">
@@ -98,6 +129,13 @@ onBeforeUnmount(() => void probe?.stop());
           :disabled="busy"
           autocomplete="off"
           spellcheck="false"
+      /></label>
+      <label v-if="mode === 'direct_preferred'"
+        >允许直连的对端局域网IPv4<input
+          v-model="peerIp"
+          :disabled="busy"
+          placeholder="同局域网填写，跨网可留空"
+          autocomplete="off"
       /></label>
     </div>
     <label
@@ -121,9 +159,15 @@ onBeforeUnmount(() => void probe?.stop());
     </p>
     <p>
       浏览器路径：{{ receiver?.localCandidateType ?? '未选择' }} /
-      {{ receiver?.remoteCandidateType ?? '未选择' }} · 双端relay校验：{{
-        receiver?.peerMatches === true ? '通过' : '未验证'
+      {{ receiver?.remoteCandidateType ?? '未选择' }} ·
+      {{
+        receiver?.connectionPath === 'direct'
+          ? '当前直连'
+          : receiver?.connectionPath === 'relay'
+            ? '当前中继'
+            : '路径待确认'
       }}
+      · 路径校验：{{ receiver?.peerMatches === true ? '通过' : '未验证' }}
     </p>
     <p>
       发送事件 / 收到ACK：{{ receiver?.control?.sentMoves ?? 0 }} /

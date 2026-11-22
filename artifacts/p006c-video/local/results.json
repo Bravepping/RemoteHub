@@ -1,0 +1,22 @@
+[
+  {
+    "scenario": "auto",
+    "exitCode": 0,
+    "passed": true
+  },
+  {
+    "scenario": "sender-stop",
+    "exitCode": 0,
+    "passed": true
+  },
+  {
+    "scenario": "receiver-stop",
+    "exitCode": 0,
+    "passed": true
+  },
+  {
+    "scenario": "receiver-close",
+    "exitCode": 0,
+    "passed": true
+  }
+]

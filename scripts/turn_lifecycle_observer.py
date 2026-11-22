@@ -109,10 +109,11 @@ def relay_sockets(pid):
     return sorted(set(ports))
 
 
-def run(config_path, folder, seconds):
+def run(config_path, folder, seconds, max_allocations=2):
     config = json.loads(config_path.read_text())
     assert set(config) == {'labels', 'turn_pid'}
-    assert 1 <= seconds <= 3600
+    assert 1 <= seconds <= 5400
+    assert 1 <= max_allocations <= 4
     pid = config['turn_pid']
     assert int(subprocess.check_output(['systemctl', 'show', 'remotehub-turn-g6.service', '-p', 'MainPID', '--value'])) == pid
     output = folder / 'events.jsonl'
@@ -142,7 +143,7 @@ def run(config_path, folder, seconds):
                 out.write(json.dumps(dict(event='socket_snapshot', timeNs=time.time_ns(), monotonicNs=time.monotonic_ns(), servicePid=pid,
                                           relayPorts=ports, allocationPorts=allocations)) + '\n')
                 out.flush()
-                if len(ports) > 2:
+                if len(ports) > max_allocations:
                     raise RuntimeError('ALLOCATION_BUDGET_EXCEEDED')
                 if capture.exists() and capture.stat().st_size > 5 * 1024 * 1024:
                     raise RuntimeError('CAPTURE_BUDGET_EXCEEDED')
@@ -162,5 +163,6 @@ if __name__ == '__main__':
     ap.add_argument('--private-config', type=Path, required=True)
     ap.add_argument('--private-dir', type=Path, required=True)
     ap.add_argument('--seconds', type=int, default=3600)
+    ap.add_argument('--max-allocations',type=int,default=2)
     args = ap.parse_args()
-    run(args.private_config, args.private_dir, args.seconds)
+    run(args.private_config, args.private_dir, args.seconds,args.max_allocations)

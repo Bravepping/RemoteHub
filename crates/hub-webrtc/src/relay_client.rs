@@ -5,7 +5,7 @@ use crate::{
     session::{RelaySettings, Session},
 };
 use futures_util::{SinkExt, StreamExt};
-use hub_probe_wire::{now, Codec, Hello, PairKey, Ready, Role, ServerEvent, MAX_FRAME};
+use hub_probe_wire::{now, Codec, Hello, PairKey, PathMode, Ready, Role, ServerEvent, MAX_FRAME};
 use serde::{Deserialize, Serialize};
 use std::{
     io::BufReader,
@@ -26,10 +26,22 @@ use tokio_tungstenite::{
     Connector,
 };
 use zeroize::Zeroize;
+#[cfg(all(test, feature = "p006-session-probe"))]
+#[path = "relay_client_tests.rs"]
+mod tests;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PrivateConfig {
+    #[cfg(feature = "p006-session-probe")]
+    #[serde(skip)]
+    synthetic_local: bool,
+    #[cfg(feature = "p006-session-probe")]
+    #[serde(skip)]
+    synthetic_source: bool,
+    #[cfg(feature = "p006-session-probe")]
+    #[serde(skip)]
+    diagnostic_drop_direct: bool,
     pub server_ipv4: Ipv4Addr,
     pub signaling_port: u16,
     pub ca_pem: String,
@@ -45,6 +57,34 @@ impl Drop for PrivateConfig {
 }
 impl PrivateConfig {
     pub fn load(path: &std::path::Path) -> Result<Arc<Self>, String> {
+        Self::load_inner(path, false)
+    }
+    #[cfg(feature = "p006-session-probe")]
+    pub fn load_local_synthetic(path: &std::path::Path) -> Result<Arc<Self>, String> {
+        Self::load_inner(path, true)
+    }
+    #[cfg(feature = "p006-session-probe")]
+    pub fn load_operator_synthetic(
+        path: &std::path::Path,
+        drop_direct: bool,
+    ) -> Result<Arc<Self>, String> {
+        let mut config = Self::load(path)?;
+        let c = Arc::get_mut(&mut config).ok_or("LOCAL_CONFIG_ALREADY_SHARED")?;
+        c.synthetic_source = true;
+        c.diagnostic_drop_direct = drop_direct;
+        Ok(config)
+    }
+    fn is_local_synthetic(&self) -> bool {
+        #[cfg(feature = "p006-session-probe")]
+        {
+            self.synthetic_local
+        }
+        #[cfg(not(feature = "p006-session-probe"))]
+        {
+            false
+        }
+    }
+    fn load_inner(path: &std::path::Path, local_synthetic: bool) -> Result<Arc<Self>, String> {
         let info = std::fs::symlink_metadata(path).map_err(|_| "P006_PRIVATE_CONFIG_REQUIRED")?;
         if !info.is_file() || info.file_type().is_symlink() || info.len() > 16384 {
             return Err("P006_CONFIG_FILE_POLICY".into());
@@ -52,7 +92,16 @@ impl PrivateConfig {
         let data =
             zeroize::Zeroizing::new(std::fs::read_to_string(path).map_err(|_| "P006_CONFIG_READ")?);
         let c: Self = serde_json::from_str(&data).map_err(|_| "P006_CONFIG_SCHEMA")?;
-        if !crate::ice_policy::public_v4(c.server_ipv4)
+        #[cfg(feature = "p006-session-probe")]
+        let c = {
+            let mut c = c;
+            c.synthetic_local = local_synthetic;
+            c.synthetic_source = local_synthetic;
+            c
+        };
+        if (local_synthetic
+            && (!cfg!(feature = "p006-session-probe") || c.server_ipv4 != Ipv4Addr::LOCALHOST))
+            || (!local_synthetic && !crate::ice_policy::public_v4(c.server_ipv4))
             || c.signaling_port < 1024
             || c.sender_invitation.len() != 64
             || c.receiver_invitation.len() != 64
@@ -72,16 +121,36 @@ impl PrivateConfig {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserReady {
+    pub mode: PathMode,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_scope: Option<BrowserDirectScope>,
     pub control_session: String,
     pub server_ip: String,
     pub expires_at: u64,
     pub ice: IceConfig,
 }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BrowserDirectScope {
+    pub server_ip: String,
+    pub local_ip: String,
+    pub private_peer_ips: Vec<String>,
+    pub publish_private_local: bool,
+    pub expires_at: u64,
+}
 struct Context {
-    grant: Arc<RelayGrant>,
+    grant: Option<Arc<RelayGrant>>,
     ready: Ready,
+    #[cfg(feature = "p006-direct")]
+    direct: Option<Arc<crate::direct_policy::DirectGrant>>,
+    #[cfg(feature = "p006-direct")]
+    exchange: Option<hub_probe_wire::PathExchange>,
 }
 pub struct RelayClient {
+    mode: PathMode,
+    #[cfg(feature = "p006-direct")]
+    private_peers: Vec<Ipv4Addr>,
+    signaled: AtomicBool,
     role: Role,
     seconds: u32,
     local: Ipv4Addr,
@@ -106,6 +175,51 @@ impl RelayClient {
         seconds: u32,
         code: Option<&str>,
     ) -> Result<(Arc<Self>, Option<String>), String> {
+        Self::start_mode(
+            config,
+            role,
+            local,
+            seconds,
+            code,
+            PathMode::RelayOnly,
+            vec![],
+        )
+    }
+    #[cfg(feature = "p006-direct")]
+    pub fn start_direct(
+        config: Arc<PrivateConfig>,
+        role: Role,
+        local: Ipv4Addr,
+        seconds: u32,
+        code: Option<&str>,
+        private_peer: Option<Ipv4Addr>,
+    ) -> Result<(Arc<Self>, Option<String>), String> {
+        Self::start_mode(
+            config,
+            role,
+            local,
+            seconds,
+            code,
+            PathMode::DirectPreferred,
+            private_peer.into_iter().collect(),
+        )
+    }
+    fn start_mode(
+        config: Arc<PrivateConfig>,
+        role: Role,
+        local: Ipv4Addr,
+        seconds: u32,
+        code: Option<&str>,
+        mode: PathMode,
+        private_peers: Vec<Ipv4Addr>,
+    ) -> Result<(Arc<Self>, Option<String>), String> {
+        if mode == PathMode::DirectPreferred && !cfg!(feature = "p006-direct") {
+            return Err("DIRECT_MODE_NOT_ENABLED".into());
+        }
+        if config.is_local_synthetic() && mode != PathMode::DirectPreferred {
+            return Err("LOCAL_SYNTHETIC_REQUIRES_DIRECT_MODE".into());
+        }
+        hub_probe_wire::PathPolicy::new(private_peers.clone())?;
         if !(5..=30).contains(&seconds) || !local.is_private() {
             return Err("P006_CONFIG_INVALID".into());
         }
@@ -117,6 +231,10 @@ impl RelayClient {
         let display = (role == Role::Sender).then(|| key.display());
         let (tx, rx) = mpsc::channel(4);
         let this = Arc::new(Self {
+            mode,
+            #[cfg(feature = "p006-direct")]
+            private_peers,
+            signaled: AtomicBool::new(false),
             role,
             seconds,
             local,
@@ -219,13 +337,15 @@ impl RelayClient {
                     let context = self.context.lock().unwrap_or_else(|x| x.into_inner());
                     if let Some(c) = context
                         .as_ref()
-                        .filter(|_| !self.cancelled.load(Ordering::Acquire))
+                        .filter(|c| !self.cancelled.load(Ordering::Acquire) && self.path_ready(c))
                     {
                         return Ok(BrowserReady {
+                            mode: self.mode,
+                            direct_scope: self.browser_scope(c)?,
                             control_session: c.ready.session_id.clone(),
-                            server_ip: self.config.server_ipv4.to_string(),
+                            server_ip: self.media_server_ip().to_string(),
                             expires_at: c.ready.expires_at,
-                            ice: ice(&c.ready)?,
+                            ice: ice_mode(&c.ready, self.mode)?,
                         });
                     }
                 }
@@ -245,12 +365,11 @@ impl RelayClient {
         }
         {
             let c = self.context.lock().unwrap_or_else(|x| x.into_inner());
-            crate::signaling::validate_relay_description(
-                &offer,
-                &c.as_ref().ok_or("P006_NOT_READY")?.grant,
-                now(),
-                false,
-            )?;
+            self.check_sdp(c.as_ref().ok_or("P006_NOT_READY")?, &offer, false, true)?;
+        }
+        if self.signaled.swap(true, Ordering::AcqRel) {
+            self.cancel();
+            return Err("P006_ALREADY_SIGNALED".into());
         }
         let (tx, rx) = oneshot::channel();
         {
@@ -273,7 +392,7 @@ impl RelayClient {
         if self.role != Role::Receiver || self.cancelled.load(Ordering::Acquire) {
             return Err("P006_RECEIVER_STOPPED".into());
         }
-        crate::lan::validate_metrics(&data)?;
+        self.validate_metrics(&data)?;
         self.update(|s| {
             s.receiver_samples.push(data.clone());
             if s.receiver_samples.len() > 60 {
@@ -289,6 +408,187 @@ impl RelayClient {
         c.validate()?;
         self.update(|s| s.browser_control = Some(c));
         Ok(())
+    }
+    fn path_ready(&self, c: &Context) -> bool {
+        if self.mode == PathMode::RelayOnly {
+            return true;
+        }
+        #[cfg(feature = "p006-direct")]
+        {
+            c.exchange.as_ref().is_some_and(|e| e.ready())
+        }
+        #[cfg(not(feature = "p006-direct"))]
+        {
+            let _ = c;
+            false
+        }
+    }
+    fn media_server_ip(&self) -> Ipv4Addr {
+        // An unused config fixture in the no-TURN local operator harness. The
+        // browser harness removes ICE servers before constructing its real PC.
+        if self.config.is_local_synthetic() {
+            Ipv4Addr::new(8, 8, 8, 8)
+        } else {
+            self.config.server_ipv4
+        }
+    }
+    fn browser_scope(&self, c: &Context) -> Result<Option<BrowserDirectScope>, String> {
+        if self.mode == PathMode::RelayOnly {
+            return Ok(None);
+        }
+        #[cfg(feature = "p006-direct")]
+        {
+            let e = c
+                .exchange
+                .as_ref()
+                .filter(|e| e.ready())
+                .ok_or("PATH_POLICY_NOT_READY")?;
+            Ok(Some(BrowserDirectScope {
+                server_ip: self.media_server_ip().to_string(),
+                local_ip: self.local.to_string(),
+                private_peer_ips: e.private_peers().iter().map(ToString::to_string).collect(),
+                publish_private_local: e.may_publish_private_local(self.local),
+                expires_at: c.ready.expires_at,
+            }))
+        }
+        #[cfg(not(feature = "p006-direct"))]
+        {
+            let _ = c;
+            Err("DIRECT_MODE_NOT_ENABLED".into())
+        }
+    }
+    fn check_sdp(&self, c: &Context, sdp: &str, answer: bool, local: bool) -> Result<(), String> {
+        if !self.path_ready(c) {
+            return Err("PATH_POLICY_NOT_READY".into());
+        }
+        #[cfg(feature = "p006-direct")]
+        if let Some(g) = &c.direct {
+            let (_, candidates) =
+                crate::signaling::validate_direct_video_description(sdp, g, now(), answer, local)?;
+            let allowed = c
+                .exchange
+                .as_ref()
+                .is_some_and(|e| e.may_publish_private_local(self.local));
+            if local
+                && !allowed
+                && candidates.candidates().iter().any(|c| {
+                    c.kind == crate::direct_policy::Kind::Host && c.address.ip().is_private()
+                })
+            {
+                return Err("PRIVATE_LOCAL_NOT_APPROVED_BY_PEER".into());
+            }
+            return Ok(());
+        }
+        crate::signaling::validate_relay_description(
+            sdp,
+            c.grant.as_ref().ok_or("RELAY_GRANT_REQUIRED")?,
+            now(),
+            answer,
+        )?;
+        Ok(())
+    }
+    fn source_session(&self, c: &Context) -> Result<Arc<Session>, String> {
+        if !self.path_ready(c) {
+            return Err("PATH_POLICY_NOT_READY".into());
+        }
+        #[cfg(feature = "p006-direct")]
+        if let Some(g) = &c.direct {
+            #[cfg(feature = "p006-session-probe")]
+            if self.config.synthetic_source {
+                return Session::new_direct_synthetic_transport_test(
+                    self.seconds,
+                    crate::session::DirectSettings {
+                        grant: g.clone(),
+                        config: if self.config.is_local_synthetic() {
+                            None
+                        } else {
+                            Some(ice_mode(&c.ready, self.mode)?)
+                        },
+                        publish_private_local: c
+                            .exchange
+                            .as_ref()
+                            .is_some_and(|e| e.may_publish_private_local(self.local)),
+                    },
+                    c.ready.session_id.clone(),
+                    self.config.diagnostic_drop_direct,
+                );
+            }
+            return Session::new_direct(
+                self.seconds,
+                crate::session::DirectSettings {
+                    grant: g.clone(),
+                    config: Some(ice_mode(&c.ready, self.mode)?),
+                    publish_private_local: c
+                        .exchange
+                        .as_ref()
+                        .is_some_and(|e| e.may_publish_private_local(self.local)),
+                },
+                c.ready.session_id.clone(),
+            );
+        }
+        Session::new_relay(
+            self.seconds,
+            RelaySettings {
+                grant: c.grant.as_ref().ok_or("RELAY_GRANT_REQUIRED")?.clone(),
+                config: ice_mode(&c.ready, self.mode)?,
+            },
+            c.ready.session_id.clone(),
+        )
+    }
+    #[cfg(feature = "p006-direct")]
+    fn approved_direct_grant(
+        &self,
+        ready: &Ready,
+        target: RelayTarget,
+    ) -> Result<Arc<crate::direct_policy::DirectGrant>, String> {
+        #[cfg(feature = "p006-session-probe")]
+        if self.config.is_local_synthetic() {
+            return Ok(Arc::new(
+                crate::direct_policy::DirectGrant::local_session_diagnostic(
+                    self.local,
+                    ready.expires_at,
+                    &ready.session_id,
+                    now(),
+                )?,
+            ));
+        }
+        Ok(Arc::new(crate::direct_policy::DirectGrant::new(
+            RelayGrant::new(target, &ready.session_id, ready.expires_at, true)?,
+            self.private_peers.clone(),
+            &ice_mode(ready, self.mode)?,
+            now(),
+        )?))
+    }
+    fn validate_metrics(&self, data: &serde_json::Value) -> Result<(), String> {
+        if self.mode == PathMode::RelayOnly {
+            return crate::lan::validate_metrics(data);
+        }
+        let mut limited = data.clone();
+        let value = limited
+            .as_object_mut()
+            .ok_or("METRICS_INVALID")?
+            .remove("connectionPath")
+            .ok_or("DIRECT_PATH_METRIC_REQUIRED")?;
+        let path = value.as_str().ok_or("DIRECT_PATH_METRIC_INVALID")?;
+        if !["direct", "relay", "unknown"].contains(&path) {
+            return Err("DIRECT_PATH_METRIC_INVALID".into());
+        }
+        let a = data["localCandidateType"].as_str();
+        let b = data["remoteCandidateType"].as_str();
+        let actual = if a == Some("relay") || b == Some("relay") {
+            "relay"
+        } else if a.is_some_and(|c| ["host", "srflx"].contains(&c))
+            && b.is_some_and(|c| ["host", "srflx"].contains(&c))
+        {
+            "direct"
+        } else {
+            "unknown"
+        };
+        if data["framesDecoded"].as_u64().unwrap_or(0) > 0 && (path == "unknown" || path != actual)
+        {
+            return Err("DIRECT_PATH_METRIC_MISMATCH".into());
+        }
+        crate::lan::validate_metrics(&limited)
     }
     async fn worker(&self, key: Arc<PairKey>) -> Result<(), String> {
         let _ = rustls::crypto::ring::default_provider().install_default();
@@ -339,6 +639,7 @@ impl RelayClient {
         .map_err(|_| "P006_WSS_CONNECT_TIMEOUT")?
         .map_err(|_| "P006_WSS_TLS_OR_AUTH_FAILED")?;
         let hello = Hello {
+            mode: self.mode,
             version: 1,
             role: self.role,
             room: key.room(),
@@ -351,28 +652,65 @@ impl RelayClient {
         ))
         .await
         .map_err(|_| "P006_WSS_WRITE")?;
-        let ready=timeout(Duration::from_secs(122),async{loop{if self.cancelled.load(Ordering::Acquire){return Err("P006_STOPPED".to_string());}tokio::select!{m=ws.next()=>{let m=m.ok_or("P006_WSS_CLOSED")?.map_err(|_|"P006_WSS_CLOSED")?;if let Message::Text(text)=m{match serde_json::from_str::<ServerEvent>(&text).map_err(|_|"P006_SERVER_EVENT")?{ServerEvent::Waiting=>{},ServerEvent::Failed{code}=>return Err(code),ServerEvent::Ready(r)=>return Ok(r)}}},_=sleep(Duration::from_millis(30))=>{}}}}).await.map_err(|_|"P006_PAIRING_TIMEOUT")??;
+        let ready=timeout(Duration::from_secs(122),async{loop{if self.cancelled.load(Ordering::Acquire){return Err("P006_STOPPED".to_string());}tokio::select!{m=ws.next()=>{let m=m.ok_or("P006_WSS_CLOSED")?.map_err(|_|"P006_WSS_CLOSED")?;if let Message::Text(text)=m{match serde_json::from_str::<ServerEvent>(&text).map_err(|_|"P006_SERVER_EVENT")?{ServerEvent::Waiting=>self.update(|s|s.state="waiting_peer".into()),ServerEvent::Failed{code}=>return Err(code),ServerEvent::Ready(r)=>return Ok(r)}}},_=sleep(Duration::from_millis(30))=>{}}}}).await.map_err(|_|"P006_PAIRING_TIMEOUT")??;
         let target = RelayTarget {
             local: self.local,
-            turn: SocketAddrV4::new(self.config.server_ipv4, 3478),
-            relay: self.config.server_ipv4,
+            turn: SocketAddrV4::new(self.media_server_ip(), 3478),
+            relay: self.media_server_ip(),
             port_min: 49160,
             port_max: 49259,
         };
-        let grant = Arc::new(RelayGrant::new(
-            target,
-            &ready.session_id,
-            ready.expires_at,
-            true,
-        )?);
-        ice(&ready)?.validate(&grant, now())?;
+        let grant = if self.config.is_local_synthetic() {
+            None
+        } else {
+            Some(Arc::new(RelayGrant::new(
+                target,
+                &ready.session_id,
+                ready.expires_at,
+                true,
+            )?))
+        };
+        if self.mode == PathMode::RelayOnly {
+            ice_mode(&ready, self.mode)?
+                .validate(grant.as_ref().ok_or("RELAY_GRANT_REQUIRED")?, now())?;
+        }
+        #[cfg(feature = "p006-direct")]
+        let direct = if self.mode == PathMode::DirectPreferred {
+            Some(self.approved_direct_grant(&ready, target)?)
+        } else {
+            None
+        };
+        #[cfg(feature = "p006-direct")]
+        let exchange = if self.mode == PathMode::DirectPreferred {
+            Some(hub_probe_wire::PathExchange::new(
+                self.private_peers.clone(),
+            )?)
+        } else {
+            None
+        };
         let mut codec = Codec::new(key, &ready, self.role, now())?;
+        #[cfg(feature = "p006-direct")]
+        if let Some(e) = &exchange {
+            timeout(
+                Duration::from_secs(2),
+                ws.send(Message::Text(
+                    codec.encode("path", e.payload()?, now())?.into(),
+                )),
+            )
+            .await
+            .map_err(|_| "P006_WSS_WRITE_TIMEOUT")?
+            .map_err(|_| "P006_WSS_WRITE")?;
+        }
         *self.context.lock().unwrap_or_else(|x| x.into_inner()) = Some(Context {
             grant: grant.clone(),
             ready,
+            #[cfg(feature = "p006-direct")]
+            direct,
+            #[cfg(feature = "p006-direct")]
+            exchange,
         });
         self.update(|s| {
-            s.authenticated = true;
+            s.authenticated = self.mode == PathMode::RelayOnly;
             s.state = "negotiating".into();
         });
         self.notify.notify_one();
@@ -386,36 +724,58 @@ impl RelayClient {
         let mut last_rx = Instant::now();
         let started = Instant::now();
         let mut source_finished = None;
+        let mut signal_task: Option<JoinHandle<Result<String, String>>> = None;
         let result=async {loop{
             if self.cancelled.load(Ordering::Acquire){let _=timeout(Duration::from_millis(600),ws.send(Message::Text(codec.encode("stop",String::new(),now())?.into()))).await;return Ok(());}
             if last_rx.elapsed()>Duration::from_secs(4){return Err("P006_SIGNAL_LEASE_EXPIRED".into());}
-            if started.elapsed()>Duration::from_secs(60){return Err("P006_SESSION_DEADLINE".into());}
+            if started.elapsed()>Duration::from_secs(if self.mode==PathMode::DirectPreferred {110}else{60}){return Err("P006_SESSION_DEADLINE".into());}
             let source=self.source.lock().unwrap_or_else(|x|x.into_inner()).clone();
-            if let Some(source)=source{let s=source.stats();if s.resources_released{let ended=source_finished.get_or_insert_with(Instant::now);if ended.elapsed()>Duration::from_secs(2)||s.error.is_some(){let _=ws.send(Message::Text(codec.encode("stop",String::new(),now())?.into())).await;return if let Some(e)=s.error{Err(e)}else{Ok(())};}}}
+            if let Some(source)=source {
+                let s=source.stats();
+                if self.mode==PathMode::DirectPreferred&&s.state=="draining" {
+                    let _=timeout(Duration::from_secs(1),ws.send(Message::Text(codec.encode("stop",String::new(),now())?.into()))).await;
+                    return Ok(());
+                }
+                if s.resources_released {
+                    let ended=source_finished.get_or_insert_with(Instant::now);
+                    if ended.elapsed()>Duration::from_secs(2)||s.error.is_some() {
+                        let _=timeout(Duration::from_secs(1),ws.send(Message::Text(codec.encode("stop",String::new(),now())?.into()))).await;
+                        return if let Some(e)=s.error{Err(e)}else{Ok(())};
+                    }
+                }
+            }
             tokio::select!{
                 input=ws.next()=>{let input=input.ok_or("P006_WSS_CLOSED")?.map_err(|_|"P006_WSS_CLOSED")?;match input{Message::Text(text)=>{
                     if let Ok(ServerEvent::Failed{code})=serde_json::from_str::<ServerEvent>(&text){if code=="PEER_STOPPED"{return Ok(());}return Err(code);}
                     let(kind,payload)=codec.accept(&text,now())?;last_rx=Instant::now();self.update(|s|s.messages_received+=1);
                     match kind.as_str(){
                         "beat" if payload.is_empty()=>{},"stop" if payload.is_empty()=>return Ok(()),
-                        "offer" if self.role==Role::Sender=>{
-                            crate::signaling::validate_relay_description(&payload,&grant,now(),false)?;
-                            if self.source.lock().unwrap_or_else(|x|x.into_inner()).is_some(){return Err("P006_OFFER_REPLAY".into());}
-                            let source={let context=self.context.lock().unwrap_or_else(|x|x.into_inner());let r=&context.as_ref().ok_or("P006_CONTEXT_CLOSED")?.ready;Session::new_relay(self.seconds,RelaySettings{grant:grant.clone(),config:ice(r)?},r.session_id.clone())?};
-                            *self.source.lock().unwrap_or_else(|x|x.into_inner())=Some(source.clone());
-                            let answer=source.signal(payload).await?;
-                            ws.send(Message::Text(codec.encode("answer",answer,now())?.into())).await.map_err(|_|"P006_WSS_WRITE")?;last_rx=Instant::now();
+                        #[cfg(feature="p006-direct")]
+                        "path" if self.mode==PathMode::DirectPreferred=>{
+                            let mut c=self.context.lock().unwrap_or_else(|x|x.into_inner());c.as_mut().ok_or("P006_CONTEXT_CLOSED")?.exchange.as_mut().ok_or("PATH_POLICY_NOT_ENABLED")?.accept(&payload)?;
+                            self.update(|s|s.authenticated=true);self.notify.notify_one();
                         }
-                        "answer" if self.role==Role::Receiver=>{crate::signaling::validate_relay_description(&payload,&grant,now(),true)?;self.answer.lock().unwrap_or_else(|x|x.into_inner()).take().ok_or("P006_UNEXPECTED_ANSWER")?.send(Ok(payload)).map_err(|_|"P006_RECEIVER_VIEW_CLOSED")?;self.update(|s|s.state="connected".into());}
-                        "metrics" if self.role==Role::Sender=>{let data=serde_json::from_str(&payload).map_err(|_|"METRICS_INVALID")?;crate::lan::validate_metrics(&data)?;self.update(|s|{s.receiver_samples.push(data);if s.receiver_samples.len()>60{s.receiver_samples.remove(0);}});}
+                        "offer" if self.role==Role::Sender=>{
+                            if self.source.lock().unwrap_or_else(|x|x.into_inner()).is_some(){return Err("P006_OFFER_REPLAY".into());}
+                            let source={let context=self.context.lock().unwrap_or_else(|x|x.into_inner());let c=context.as_ref().ok_or("P006_CONTEXT_CLOSED")?;self.check_sdp(c,&payload,false,false)?;self.source_session(c)?};
+                            *self.source.lock().unwrap_or_else(|x|x.into_inner())=Some(source.clone());
+                            signal_task=Some(tokio::spawn(async move{source.signal(payload).await}));
+                        }
+                        "answer" if self.role==Role::Receiver=>{let c=self.context.lock().unwrap_or_else(|x|x.into_inner());self.check_sdp(c.as_ref().ok_or("P006_CONTEXT_CLOSED")?,&payload,true,false)?;self.answer.lock().unwrap_or_else(|x|x.into_inner()).take().ok_or("P006_UNEXPECTED_ANSWER")?.send(Ok(payload)).map_err(|_|"P006_RECEIVER_VIEW_CLOSED")?;self.update(|s|s.state="connected".into());}
+                        "metrics" if self.role==Role::Sender=>{let data=serde_json::from_str(&payload).map_err(|_|"METRICS_INVALID")?;self.validate_metrics(&data)?;self.update(|s|{s.receiver_samples.push(data);if s.receiver_samples.len()>60{s.receiver_samples.remove(0);}});}
                         _=>return Err("P006_SIGNAL_KIND_REJECTED".into())
                     }
                 },Message::Ping(_)|Message::Pong(_)=>{},Message::Close(_)=>return Err("P006_WSS_CLOSED".into()),_=>return Err("P006_WSS_FRAME".into())}},
                 item=rx.recv()=>{let(kind,payload)=item.ok_or("P006_STOPPED")?;timeout(Duration::from_secs(2),ws.send(Message::Text(codec.encode(&kind,payload,now())?.into()))).await.map_err(|_|"P006_WSS_WRITE_TIMEOUT")?.map_err(|_|"P006_WSS_WRITE")?;},
+                answer=async{signal_task.as_mut().expect("guarded signal task").await},if signal_task.is_some()=>{signal_task.take();let answer=answer.map_err(|_|"P006_SIGNAL_TASK_FAILED")??;timeout(Duration::from_secs(2),ws.send(Message::Text(codec.encode("answer",answer,now())?.into()))).await.map_err(|_|"P006_WSS_WRITE_TIMEOUT")?.map_err(|_|"P006_WSS_WRITE")?;},
                 _=beat.tick()=>{timeout(Duration::from_secs(2),ws.send(Message::Text(codec.encode("beat",String::new(),now())?.into()))).await.map_err(|_|"P006_WSS_WRITE_TIMEOUT")?.map_err(|_|"P006_WSS_WRITE")?;},
                 _=sleep(Duration::from_millis(30))=>{}
             }
         }}.await;
+        if let Some(task) = signal_task {
+            task.abort();
+            let _ = task.await;
+        }
         let _ = timeout(Duration::from_secs(1), ws.close(None)).await;
         result
     }
@@ -458,7 +818,7 @@ impl RelayClient {
         self.notify.notify_one();
     }
 }
-fn ice(ready: &Ready) -> Result<IceConfig, String> {
-    let value = serde_json::json!({"mode":"relay_only","session_id":ready.session_id,"expires_at":ready.expires_at,"ice_servers":ready.ice_servers});
+fn ice_mode(ready: &Ready, mode: PathMode) -> Result<IceConfig, String> {
+    let value = serde_json::json!({"mode":mode,"session_id":ready.session_id,"expires_at":ready.expires_at,"ice_servers":ready.ice_servers});
     serde_json::from_value(value).map_err(|_| "P006_ICE_CONFIG_INVALID".into())
 }

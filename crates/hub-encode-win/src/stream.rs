@@ -178,6 +178,90 @@ fn deliver(
     sink(frame)
 }
 
+/// Explicit operator-only generated source. This function never opens DXGI or reads a desktop.
+#[cfg(feature = "synthetic-stream")]
+pub fn run_synthetic(
+    approved: bool,
+    config: EncoderConfig,
+    stop: StopToken,
+    keyframe: &AtomicBool,
+    mut publish: impl FnMut(&StreamReport),
+    mut sink: impl FnMut(EncodedVideoFrame) -> Result<(), EncodeError>,
+) -> Result<StreamReport, EncodeError> {
+    config.validate(approved)?;
+    let setup = Instant::now();
+    let _exclusive = ProcessLease::acquire()?;
+    let runtime = MfRuntime::new()?;
+    let pixels = (config.width * config.height) as usize;
+    let mut nv12 = vec![128u8; pixels * 3 / 2];
+    nv12[..pixels].fill(64);
+    let (mut encoder, _) = mf::select(&runtime, &config, "auto", &nv12)?;
+    let mut report = StreamReport {
+        encoder: encoder.name.clone(),
+        hardware: encoder.hardware,
+        source_width: config.width,
+        source_height: config.height,
+        setup_ms: setup.elapsed().as_secs_f64() * 1000.0,
+        ..Default::default()
+    };
+    let started = Instant::now();
+    publish(&report);
+    let mut tick = 0u64;
+    while tick < (config.seconds * config.fps) as u64 && !stop.is_stopped() {
+        let due = Duration::from_nanos(tick * 1_000_000_000 / config.fps as u64);
+        while started.elapsed() < due && !stop.is_stopped() {
+            std::thread::sleep(
+                due.saturating_sub(started.elapsed())
+                    .min(Duration::from_millis(5)),
+            );
+        }
+        if stop.is_stopped() {
+            break;
+        }
+        let (selected, missed, _) = config.schedule(tick, started.elapsed());
+        tick = selected;
+        report.missed_ticks += missed;
+        if tick >= (config.seconds * config.fps) as u64 {
+            break;
+        }
+        for (y, row) in nv12[..pixels]
+            .chunks_exact_mut(config.width as usize)
+            .enumerate()
+        {
+            row.fill(32 + ((y / 90 + tick as usize / 10) % 8) as u8 * 24);
+            if (200..328).contains(&y) {
+                let left = (tick as usize * 12) % ((config.width - 128) as usize);
+                row[left..left + 128].fill(235);
+            }
+        }
+        if keyframe.swap(false, Ordering::AcqRel) {
+            report.keyframe_requests += 1;
+            if encoder.request_keyframe().is_err() {
+                report.keyframe_rejections += 1;
+            }
+        }
+        report.frames_input += 1;
+        for frame in encoder.encode(&nv12, config.pts(tick), config.duration(tick))? {
+            if stop.is_stopped() {
+                break;
+            }
+            deliver(frame, &mut report, &mut sink)?;
+        }
+        report.media_wall_ms = started.elapsed().as_secs_f64() * 1000.0;
+        publish(&report);
+        tick += 1;
+    }
+    if !stop.is_stopped() {
+        for frame in encoder.drain()? {
+            deliver(frame, &mut report, &mut sink)?;
+        }
+    }
+    report.stopped = stop.is_stopped();
+    report.media_wall_ms = started.elapsed().as_secs_f64() * 1000.0;
+    publish(&report);
+    Ok(report)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

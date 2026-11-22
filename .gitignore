@@ -17,4 +17,5 @@
 /deploy/coturn/private/
 /deploy/rendezvous-probe/private/
 **/p006b-private.json
+**/p006c-private.json
 __pycache__/

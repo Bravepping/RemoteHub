@@ -1,0 +1,12 @@
+
+ RUN  v5.1.1 C:/Users/Administrator/Documents/ChatGPT/远程项目/RemoteHub/apps/desktop
+
+
+ Test Files  7 passed (7)
+      Tests  22 passed (22)
+   Start at  08:32:34
+   Duration  868ms (environment 91%, import 5%, transform 2%, tests 2%, worker 1%)
+
+$ vitest run
+
+EXIT=0

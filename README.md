@@ -1,6 +1,6 @@
 # RemoteHub · Phase 0 技术验证
 
-这是已生成并在本机编译测试的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。同机/双机视频及同一PC上的真实DataChannel模拟控制、跨网强制TURN已实测。正式输入、持久设备身份/服务端及视频路径自动选择仍未完成，整个 Phase 0 尚未通过。
+这是已生成并在本机编译测试的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。同机/双机视频及同一PeerConnection上的真实DataChannel模拟控制、跨网强制TURN已实测。自动选路已接入视频与控制并通过本机合成实播，新版云端视频及物理双机验收待测；正式输入、持久设备身份/服务端仍未完成，整个 Phase 0 尚未通过。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 
@@ -79,9 +79,17 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 生命周期交付88f1edc之后，新增默认关闭的`p006-direct-probe`，通过独立DirectGrant/套接字边界使用ICE All；旧本机、LAN、强制relay入口不变。一个物理Windows机器上的两个真实原生PeerConnection已自动完成真实云端四例：TURN可用选host/host；进程内直连受阻自动选relay/relay；TURN受阻仍host/host；两路均断明确失败。前三例均100条发送/接收/ACK一致，第四例0消息、无pair，不能当成连接成功。
 
-云端4个实际Allocation均有Refresh0成功回应及约1.14–1.40秒首次观察socket消失，停止前已经0；服务现已停止、不自启，WSS始终关闭。24项自动检查通过，66 Rust/16前端/3 Edge/11 Python。回退轮耗时34.873秒，仍需优化；未接入视频Session/WebView2或做新的物理双机/P2P NAT验收，P006c仍doing。
+首步云端4个实际Allocation均有Refresh0成功回应及约1.14–1.40秒首次观察socket消失，停止前已经0；该轮服务已停止、不自启，WSS始终关闭。首步24项自动检查通过，66 Rust/16前端/3 Edge/11 Python，回退轮耗时34.873秒。该历史报告仅验证无视频原生路径；当前视频集成结果另列，不能互相替代。
 
 见[首步报告](docs/PHASE0_P006C_TEST_REPORT.md)、[契约](docs/P006C_CONTRACT.md)、[复现步骤](docs/P006C_RUNBOOK.md)。`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-checks.ps1`只做离线回归；`node scripts/p006c-local.mjs --local PRIVATE_INTERFACE_IPV4`显式运行无云/无采集的本机真实传输。真实云测试需新范围授权及短票，不能复用已清理配置。
+
+## P0-06c 视频与模拟控制集成
+
+已依次接入Rust Session、现有WebView2前端代码和认证WSS，复用同一个视频/control.v1 PeerConnection。DirectPreferred显式使用ICE All并核对双方真实selected pair；旧本机/LAN/RelayOnly限制保留。新path策略经HMAC认证，只发布对方明确允许的私有host；停止、过期、模式错配和重放均拒绝。
+
+本机7轮真实合成视频测试通过；认证WSS完整轮300帧输入/编码/发送/接收/解码/呈现，720p30，100事件发送/原生接收/ACK/确认一致，异常0、host/host、资源回收完成。35组完整检查通过（74 Rust/22前端/3 Edge/11 Python）；Tauri新版已构建。本轮未采集桌面或启动云服务，单机Edge合成图案测试不能充当新版嵌入WebView2、物理双机或云视频回退验收，P006c保持doing。
+
+见[独立测试报告](docs/PHASE0_P006C_VIDEO_TEST_REPORT.md)、[协议契约](docs/P006C_VIDEO_CONTRACT.md)、[复现与构建](docs/P006C_VIDEO_RUNBOOK.md)、[待授权云端范围](docs/P006C_VIDEO_CLOUD_PLAN.md)。构建入口`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video.ps1 -BuildOnly`；离线回归`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video-checks.ps1`。正式窗口每轮仍须亲自确认；合成源及故障注入只在独立操作员probe启用，无实际键鼠注入。
 
 ## P0-03 本机编码 probe
 

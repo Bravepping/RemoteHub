@@ -1,6 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 
 export interface NativeStats {
+  native_path?: {
+    path: 'direct' | 'relay';
+    local_type: string;
+    remote_type: string;
+    protocol: string;
+  };
+  source_kind?: string;
   state: string;
   elapsed_ms: number;
   frames_sent: number;

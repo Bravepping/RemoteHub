@@ -35,9 +35,22 @@ use webrtc::{
         Registry, SettingEngineBuilder, StatsSelector,
     },
 };
+#[cfg(feature = "p006-direct")]
+#[path = "session_direct.rs"]
+mod direct;
+#[cfg(feature = "p006-direct")]
+pub use direct::DirectSettings;
 
 #[derive(Clone, Default, Serialize)]
 pub struct Stats {
+    pub ice_transport_policy: String,
+    #[cfg(feature = "p006-session-probe")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagnostic_transport: Option<DiagnosticTransport>,
+    #[cfg(feature = "p006-direct")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_path: Option<crate::direct_policy::PathSummary>,
+    pub source_kind: String,
     #[cfg(feature = "p006-relay")]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub native_selected_pair: Option<crate::turn_probe::PairSummary>,
@@ -69,6 +82,12 @@ pub struct Stats {
     pub rejected_udp_rx: u64,
     pub rejected_udp_tx: u64,
     pub error: Option<String>,
+}
+#[cfg(feature = "p006-session-probe")]
+#[derive(Clone, Serialize)]
+pub struct DiagnosticTransport {
+    pub drop_direct: bool,
+    pub dropped_packets: u64,
 }
 
 struct Shared {
@@ -125,6 +144,16 @@ impl PeerConnectionEventHandler for Handler {
 }
 
 pub struct Session {
+    #[cfg(feature = "p006-direct")]
+    direct: Option<DirectSettings>,
+    #[cfg(feature = "p006-direct")]
+    direct_boundary: Option<Arc<crate::direct_runtime::Boundary>>,
+    #[cfg(feature = "p006-direct")]
+    direct_local: Mutex<Option<crate::direct_policy::VerifiedCandidates>>,
+    #[cfg(feature = "p006-direct")]
+    direct_remote: Mutex<Option<crate::direct_policy::VerifiedCandidates>>,
+    #[cfg(feature = "p006-session-probe")]
+    synthetic: bool,
     #[cfg(feature = "p006-relay")]
     relay: Option<RelaySettings>,
     #[cfg(feature = "p006-relay")]
@@ -202,6 +231,16 @@ impl Session {
             .map(|id| crate::control_channel::Endpoint::new(id, stop.clone(), seconds))
             .transpose()?;
         Ok(Arc::new(Self {
+            #[cfg(feature = "p006-direct")]
+            direct: None,
+            #[cfg(feature = "p006-direct")]
+            direct_boundary: None,
+            #[cfg(feature = "p006-direct")]
+            direct_local: Mutex::new(None),
+            #[cfg(feature = "p006-direct")]
+            direct_remote: Mutex::new(None),
+            #[cfg(feature = "p006-session-probe")]
+            synthetic: false,
             #[cfg(feature = "p006-relay")]
             relay: None,
             #[cfg(feature = "p006-relay")]
@@ -213,6 +252,7 @@ impl Session {
             shared: Arc::new(Shared {
                 stats: Mutex::new(Stats {
                     state: "starting".into(),
+                    source_kind: "desktop".into(),
                     ..Default::default()
                 }),
                 stop,
@@ -239,6 +279,15 @@ impl Session {
         stats.rejected_udp_rx = self.socket_counters.rejected_rx.load(Ordering::Relaxed);
         stats.rejected_udp_tx = self.socket_counters.rejected_tx.load(Ordering::Relaxed);
         stats.control = self.control.as_ref().map(|c| c.stats());
+        #[cfg(feature = "p006-direct")]
+        if let Some(b) = &self.direct_boundary {
+            stats.rejected_udp_rx = b.counters.rejected_rx.load(Ordering::Relaxed);
+            stats.rejected_udp_tx = b.counters.rejected_tx.load(Ordering::Relaxed);
+            #[cfg(feature = "p006-session-probe")]
+            if let Some(f) = &mut stats.diagnostic_transport {
+                f.dropped_packets = b.counters.fault_dropped.load(Ordering::Relaxed);
+            }
+        }
         stats
     }
     pub fn cancel(&self) {
@@ -247,6 +296,10 @@ impl Session {
 
     pub async fn signal(self: &Arc<Self>, offer: String) -> Result<String, String> {
         // Validate before starting any sockets or media. Only the native window owner calls this.
+        #[cfg(feature = "p006-direct")]
+        let direct_negotiation = self.accept_direct_offer(&offer)?;
+        #[cfg(not(feature = "p006-direct"))]
+        let direct_negotiation: Option<Negotiation> = None;
         #[cfg(feature = "p006-relay")]
         let relay_negotiation = self
             .relay
@@ -262,7 +315,7 @@ impl Session {
             .transpose()?;
         #[cfg(not(feature = "p006-relay"))]
         let relay_negotiation: Option<Negotiation> = None;
-        let negotiation = if let Some(value) = relay_negotiation {
+        let negotiation = if let Some(value) = direct_negotiation.or(relay_negotiation) {
             value
         } else if self.control.is_some() {
             crate::signaling::validate_control_description(&offer, self.network, false)?
@@ -285,10 +338,13 @@ impl Session {
                 this.worker(offer, negotiation, tx).await;
             }));
         }
-        timeout(Duration::from_secs(12), rx)
-            .await
-            .map_err(|_| "SIGNAL_TIMEOUT")?
-            .map_err(|_| "SIGNAL_TASK_CLOSED")?
+        timeout(
+            Duration::from_secs(if self.is_direct() { 15 } else { 12 }),
+            rx,
+        )
+        .await
+        .map_err(|_| "SIGNAL_TIMEOUT")?
+        .map_err(|_| "SIGNAL_TASK_CLOSED")?
     }
     pub async fn stop(&self) -> Result<(), String> {
         let _stop = self.stop_lock.lock().await;
@@ -337,18 +393,21 @@ impl Session {
                 })
             });
             let outcome = timeout(
-                Duration::from_secs(self.seconds as u64 + 15),
+                Duration::from_secs(self.seconds as u64 + if self.is_direct() { 60 } else { 15 }),
                 self.media(&pc, offer, &negotiation, &mut answer_tx, &mut producer),
             )
             .await
             .unwrap_or_else(|_| Err("SESSION_DEADLINE".into()));
             self.shared.stop.stop();
-            let close = timeout(Duration::from_secs(2), pc.close()).await;
-            let close_ok = matches!(close, Ok(Ok(())));
-            #[cfg(feature = "p006-relay")]
-            self.relay_stopped.store(true, Ordering::Release);
+            // Let DCEP/SCTP close finish while ICE/DTLS are still alive. Closing
+            // the PC first turns a normal source stop into a browser channel error.
             let control_ok = if let Some(mut task) = control_task {
-                match timeout(Duration::from_secs(3), &mut task).await {
+                match timeout(
+                    Duration::from_secs(if self.is_direct() { 5 } else { 3 }),
+                    &mut task,
+                )
+                .await
+                {
                     Ok(Ok(())) => {
                         if let Some(c) = &self.control {
                             c.joined();
@@ -364,6 +423,14 @@ impl Session {
             } else {
                 true
             };
+            let close = timeout(Duration::from_secs(2), pc.close()).await;
+            let close_ok = matches!(close, Ok(Ok(())));
+            #[cfg(feature = "p006-relay")]
+            self.relay_stopped.store(true, Ordering::Release);
+            #[cfg(feature = "p006-direct")]
+            if let Some(b) = &self.direct_boundary {
+                b.stop();
+            }
             let mut join_ok = true;
             if let Some(thread) = producer {
                 let joined = tokio::task::spawn_blocking(move || thread.join());
@@ -426,7 +493,9 @@ impl Session {
         #[cfg(not(feature = "p006-relay"))]
         let is_relay = false;
         let settings = SettingEngineBuilder::new()
-            .with_include_loopback_candidate(!is_relay && !self.network.is_lan())
+            .with_include_loopback_candidate(
+                !is_relay && !self.is_direct() && !self.network.is_lan(),
+            )
             .with_network_types(vec![NetworkType::Udp4])
             .with_multicast_dns_mode(MulticastDnsMode::Disabled)
             .with_ice_timeouts(
@@ -449,6 +518,20 @@ impl Session {
         } else {
             (configuration, local)
         };
+        #[cfg(feature = "p006-direct")]
+        let (configuration, local) = if let Some(d) = &self.direct {
+            (
+                d.grant
+                    .configuration(d.config.as_ref(), hub_probe_wire::now())?,
+                d.grant.local(),
+            )
+        } else {
+            (configuration, local)
+        };
+        self.shared.update(|s| {
+            s.ice_transport_policy =
+                format!("{:?}", configuration.ice_transport_policy()).to_lowercase()
+        });
         let mut builder = PeerConnectionBuilder::new()
             .with_media_engine(engine)
             .with_interceptor_registry(registry)
@@ -485,6 +568,13 @@ impl Session {
                 stopped: self.relay_stopped.clone(),
             }));
         }
+        #[cfg(feature = "p006-direct")]
+        if let Some(boundary) = &self.direct_boundary {
+            builder = builder.with_runtime(Arc::new(crate::direct_runtime::DirectRuntime {
+                inner: webrtc::runtime::default_runtime().ok_or("NO_ASYNC_RUNTIME")?,
+                boundary: boundary.clone(),
+            }));
+        }
         let pc = builder.build().await.map_err(|e| e.to_string())?;
         Ok(Arc::new(pc))
     }
@@ -500,7 +590,7 @@ impl Session {
         let track = Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
             "remotehub-local".into(),
             "desktop".into(),
-            "Live DXGI".into(),
+            self.stats().source_kind,
             RtpCodecKind::Video,
             vec![RTCRtpEncodingParameters {
                 rtp_coding_parameters: RTCRtpCodingParameters {
@@ -528,16 +618,18 @@ impl Session {
         let is_relay = self.relay.is_some();
         #[cfg(not(feature = "p006-relay"))]
         let is_relay = false;
-        let gather_seconds = if is_relay { 10 } else { 4 };
-        timeout(Duration::from_secs(gather_seconds), async {
+        let gather_seconds = if is_relay || self.is_direct() { 10 } else { 4 };
+        let gather = timeout(Duration::from_secs(gather_seconds), async {
             while !self.shared.gathering_done.load(Ordering::Acquire)
                 && !self.shared.stop.is_stopped()
             {
                 sleep(Duration::from_millis(10)).await;
             }
         })
-        .await
-        .map_err(|_| "ICE_GATHER_TIMEOUT")?;
+        .await;
+        if gather.is_err() && !self.is_direct() {
+            return Err("ICE_GATHER_TIMEOUT".into());
+        }
         if self.shared.stop.is_stopped() {
             return Ok(());
         }
@@ -546,6 +638,8 @@ impl Session {
             .await
             .ok_or("NO_LOCAL_DESCRIPTION")?
             .sdp;
+        #[cfg(feature = "p006-direct")]
+        let answer = self.direct_answer(answer)?;
         let candidates: Vec<_> = answer
             .lines()
             .filter(|l| l.starts_with("a=candidate:"))
@@ -565,6 +659,7 @@ impl Session {
         #[cfg(not(feature = "p006-relay"))]
         let relay_answer = false;
         if !relay_answer
+            && !self.is_direct()
             && (candidates.is_empty()
                 || candidates.iter().any(|c| {
                     !c.contains(&format!(" {} ", self.network.local())) || !c.contains(" typ host")
@@ -587,14 +682,21 @@ impl Session {
                 })
                 .collect()
         });
+        #[cfg(feature = "p006-direct")]
+        self.publish_direct_candidate_stats();
         if let Some(tx) = answer_tx.take() {
             tx.send(Ok(answer)).map_err(|_| "UI_SIGNAL_CANCELLED")?;
         }
-        timeout(Duration::from_secs(8), async {
-            while !self.shared.connected.load(Ordering::Acquire) && !self.shared.stop.is_stopped() {
-                sleep(Duration::from_millis(20)).await;
-            }
-        })
+        timeout(
+            Duration::from_secs(if self.is_direct() { 40 } else { 8 }),
+            async {
+                while !self.shared.connected.load(Ordering::Acquire)
+                    && !self.shared.stop.is_stopped()
+                {
+                    sleep(Duration::from_millis(20)).await;
+                }
+            },
+        )
         .await
         .map_err(|_| "ICE_CONNECT_TIMEOUT")?;
         if self.shared.stop.is_stopped() {
@@ -604,14 +706,28 @@ impl Session {
         if self.relay.is_some() {
             self.verify_relay_pair(pc).await?;
         }
+        #[cfg(feature = "p006-direct")]
+        if self.is_direct() {
+            self.verify_direct_pair(pc).await?;
+        }
         let (tx, mut rx) = mpsc::channel(3);
         let shared = self.shared.clone();
         let seconds = self.seconds;
+        #[cfg(feature = "p006-session-probe")]
+        let synthetic = self.synthetic;
         *producer = Some(
             std::thread::Builder::new()
                 .name("remotehub-dxgi-mf".into())
                 .spawn(move || {
-                    let result = hub_encode_win::stream::run(
+                    #[cfg(feature = "p006-session-probe")]
+                    let run = if synthetic {
+                        hub_encode_win::stream::run_synthetic
+                    } else {
+                        hub_encode_win::stream::run
+                    };
+                    #[cfg(not(feature = "p006-session-probe"))]
+                    let run = hub_encode_win::stream::run;
+                    let result = run(
                         true,
                         EncoderConfig {
                             seconds,
@@ -619,7 +735,7 @@ impl Session {
                         },
                         shared.stop.clone(),
                         &shared.keyframe,
-                        |report| shared.update(|s| s.stream = report.clone()),
+                        |report: &StreamReport| shared.update(|s| s.stream = report.clone()),
                         |frame| enqueue(&tx, &shared, frame),
                     );
                     if let Err(error) = result {
@@ -674,13 +790,28 @@ impl Session {
         }
         drop(rx);
         if !self.shared.stop.is_stopped() {
-            sleep(Duration::from_millis(700)).await;
+            if self.is_direct() {
+                self.shared.update(|s| s.state = "draining".into());
+            }
+            sleep(Duration::from_millis(if self.is_direct() {
+                2000
+            } else {
+                700
+            }))
+            .await;
         }
         self.update_stats(pc).await;
         Ok(())
     }
 
     async fn update_stats(&self, pc: &Arc<dyn PeerConnection>) {
+        #[cfg(feature = "p006-direct")]
+        if self.is_direct() && !self.shared.stop.is_stopped() {
+            if let Err(e) = self.verify_direct_pair(pc).await {
+                self.shared.update(|s| s.error = Some(e));
+                self.shared.stop.stop();
+            }
+        }
         #[cfg(feature = "p006-relay")]
         if self.relay.is_some() {
             if let Err(error) = self.verify_relay_pair(pc).await {
@@ -741,9 +872,19 @@ impl Session {
             return Err("NATIVE_SELECTED_NON_RELAY".into());
         }
         if let Some(control) = &self.control {
-            control.approve_relay_path();
+            control.approve_verified_path();
         }
         Ok(())
+    }
+    fn is_direct(&self) -> bool {
+        #[cfg(feature = "p006-direct")]
+        {
+            self.direct.is_some()
+        }
+        #[cfg(not(feature = "p006-direct"))]
+        {
+            false
+        }
     }
 }
 

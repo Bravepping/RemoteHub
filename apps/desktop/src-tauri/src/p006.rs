@@ -1,4 +1,4 @@
-use hub_probe_wire::Role;
+use hub_probe_wire::{PathMode, Role};
 use hub_webrtc::{
     lan::LanStatus,
     relay_client::{BrowserReady, PrivateConfig, RelayClient},
@@ -40,6 +40,9 @@ impl Drop for Lease<'_> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
+    #[serde(default)]
+    mode: PathMode,
+    peer_ip: Option<Ipv4Addr>,
     role: Role,
     consent: bool,
     seconds: u32,
@@ -123,6 +126,12 @@ pub async fn p006_start(
     if !(5..=30).contains(&config.seconds) || !config.local_ip.is_private() {
         return Err("P006_CONFIG_INVALID".into());
     }
+    if (config.mode == PathMode::DirectPreferred && !cfg!(feature = "p006-direct"))
+        || config.peer_ip.is_some_and(|ip| !ip.is_private())
+        || (config.mode == PathMode::RelayOnly && config.peer_ip.is_some())
+    {
+        return Err("P006_PATH_MODE_OR_PEER_NOT_APPROVED".into());
+    }
     if state.closing.load(Ordering::Acquire) || state.starting.swap(true, Ordering::AcqRel) {
         return Err("P006_BUSY".into());
     }
@@ -140,7 +149,11 @@ pub async fn p006_start(
         .map_err(|_| "EXE_PATH")?
         .parent()
         .ok_or("EXE_PATH")?
-        .join("p006b-private.json");
+        .join(if cfg!(feature = "p006-direct") {
+            "p006c-private.json"
+        } else {
+            "p006b-private.json"
+        });
     let private = PrivateConfig::load(&path)?;
     drop(
         std::net::UdpSocket::bind((config.local_ip, 0))
@@ -151,11 +164,31 @@ pub async fn p006_start(
     }
     let hwnd = window.hwnd().map_err(|_| "NATIVE_WINDOW_REQUIRED")?.0 as usize;
     let action = if config.role == Role::Sender {
-        "采集本机主屏并经加密 TURN 发送到你亲自配对的另一台电脑"
+        if config.mode == PathMode::DirectPreferred {
+            "采集本机主屏，优先加密直连，直连不可用时自动使用指定TURN中继"
+        } else {
+            "采集本机主屏并经加密 TURN 发送到你亲自配对的另一台电脑"
+        }
     } else {
         "接收配对电脑的加密视频，并发送100条模拟鼠标事件"
     };
-    let message=format!("本次将{action}，视频最长{}秒。\n\n使用包内指定服务器和应用专用证书；只记录脱敏统计，不保存画面，不执行键盘鼠标输入。\n配对最长等待120秒，随时停止，断线终止。\n\n是否批准本次实验？",config.seconds);
+    let private_peer = if config.mode == PathMode::DirectPreferred {
+        format!(
+            "\n本次允许直连的对端局域网地址：{}。",
+            config.peer_ip.map_or_else(
+                || "未指定（仅尝试公网直连及中继）".into(),
+                |ip| ip.to_string()
+            )
+        )
+    } else {
+        String::new()
+    };
+    let strategy = if config.mode == PathMode::DirectPreferred {
+        "优先加密直连，必要时自动中继"
+    } else {
+        "强制TURN中继"
+    };
+    let message=format!("本次将{action}，视频最长{}秒。\n连接策略：{strategy}。{private_peer}\n\n使用包内指定服务器和应用专用证书；只记录脱敏统计，不保存画面，不执行键盘鼠标输入。\n配对最长等待120秒，随时停止，断线终止。\n\n是否批准本次实验？",config.seconds);
     let allowed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
@@ -169,13 +202,34 @@ pub async fn p006_start(
     if !allowed || state.closing.load(Ordering::Acquire) {
         return Err("NATIVE_CONSENT_DENIED".into());
     }
-    let (session, code) = RelayClient::start(
+    #[cfg(feature = "p006-direct")]
+    let result = if config.mode == PathMode::DirectPreferred {
+        RelayClient::start_direct(
+            private,
+            config.role,
+            config.local_ip,
+            config.seconds,
+            config.pairing_code.as_deref(),
+            config.peer_ip,
+        )
+    } else {
+        RelayClient::start(
+            private,
+            config.role,
+            config.local_ip,
+            config.seconds,
+            config.pairing_code.as_deref(),
+        )
+    };
+    #[cfg(not(feature = "p006-direct"))]
+    let result = RelayClient::start(
         private,
         config.role,
         config.local_ip,
         config.seconds,
         config.pairing_code.as_deref(),
-    )?;
+    );
+    let (session, code) = result?;
     let id = uuid::Uuid::new_v4().to_string();
     *state.active.lock().map_err(|_| "STATE_LOCK")? = Some(Active {
         id: id.clone(),
@@ -275,9 +329,13 @@ fn write(
         .map_err(|_| "REPORT_DIR")?
         .parent()
         .ok_or("REPORT_DIR")?
-        .join("artifacts/private/p006b");
+        .join(if cfg!(feature = "p006-direct") {
+            "artifacts/private/p006c"
+        } else {
+            "artifacts/private/p006b"
+        });
     std::fs::create_dir_all(&dir).map_err(|_| "REPORT_DIR")?;
-    let bytes=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":"p006b-v1","native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_ENCODING")?;
+    let bytes=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":if cfg!(feature="p006-direct") {"p006c-v1"}else{"p006b-v1"},"native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_ENCODING")?;
     if bytes.len() > 160 * 1024 {
         return Err("REPORT_SIZE".into());
     }
@@ -290,7 +348,14 @@ fn write(
     }
     .map_err(|_| "REPORT_EXISTS_OR_WRITE")?;
     f.write_all(&bytes).map_err(|_| "REPORT_WRITE")?;
-    Ok(format!("artifacts/private/p006b/{id}-{event}.json"))
+    Ok(format!(
+        "artifacts/private/{}/{id}-{event}.json",
+        if cfg!(feature = "p006-direct") {
+            "p006c"
+        } else {
+            "p006b"
+        }
+    ))
 }
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {

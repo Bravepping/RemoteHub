@@ -44,6 +44,7 @@ impl Drop for Config {
     }
 }
 struct Room {
+    mode: hub_probe_wire::PathMode,
     session: String,
     nonce: String,
     expires: u64,
@@ -189,7 +190,13 @@ impl App {
                 return Err("ROOM_LIMIT_OR_USED".into());
             }
             let session = uuid::Uuid::new_v4().to_string();
-            let expires = (now() + 180).min(self.config.invitation_expires_at);
+            let expires = (now()
+                + if h.mode == hub_probe_wire::PathMode::DirectPreferred {
+                    300
+                } else {
+                    180
+                })
+            .min(self.config.invitation_expires_at);
             if expires.saturating_sub(now()) < 60 {
                 return Err("INVITATION_EXPIRED".into());
             }
@@ -199,6 +206,7 @@ impl App {
             rooms.insert(
                 h.room.clone(),
                 Room {
+                    mode: h.mode,
                     session,
                     nonce: uuid::Uuid::new_v4().to_string(),
                     expires,
@@ -214,6 +222,9 @@ impl App {
                 .map_err(|_| "PEER_SLOW")?;
         } else {
             let r = rooms.get_mut(&h.room).ok_or("ROOM_NOT_FOUND")?;
+            if r.mode != h.mode {
+                return Err("PATH_MODE_MISMATCH".into());
+            }
             if r.channels[1].is_some()
                 || r.seconds != h.seconds
                 || r.created.elapsed() > Duration::from_secs(120)
@@ -276,6 +287,7 @@ impl App {
         let mut rooms = self.rooms.lock().unwrap_or_else(|x| x.into_inner());
         let r = rooms.get_mut(id).ok_or("ROOM_CLOSED")?;
         if !r.ready
+            || (frame.kind == "path" && r.mode != hub_probe_wire::PathMode::DirectPreferred)
             || (frame.kind == "offer" && role != Role::Receiver)
             || (frame.kind == "answer" && role != Role::Sender)
             || (frame.kind == "metrics" && role != Role::Receiver)
@@ -421,6 +433,7 @@ mod tests {
     #[test]
     fn hello_rejects_invalid_duration_and_room() {
         let mut h = Hello {
+            mode: Default::default(),
             version: 1,
             role: Role::Sender,
             room: "a".repeat(64),

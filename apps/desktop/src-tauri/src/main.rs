@@ -42,6 +42,7 @@ struct RuntimeInfo {
     p004_lan_enabled: bool,
     p005_enabled: bool,
     p006_enabled: bool,
+    p006c_enabled: bool,
 }
 
 #[tauri::command]
@@ -56,6 +57,7 @@ fn get_runtime_info() -> RuntimeInfo {
         p004_lan_enabled: cfg!(feature = "p004-lan"),
         p005_enabled: cfg!(feature = "p005-control"),
         p006_enabled: cfg!(feature = "p006-relay"),
+        p006c_enabled: cfg!(feature = "p006-direct"),
     }
 }
 

@@ -11,6 +11,7 @@ import {
 } from './webrtc';
 
 export interface LanReceiver extends ReceiverSnapshot {
+  connectionPath?: 'direct' | 'relay' | 'unknown';
   control?: BrowserControlStats;
   peerMatches: boolean | null;
   decoderImplementation: string | null;

@@ -63,11 +63,40 @@ impl DirectGrant {
             scope: uuid::Uuid::new_v4(),
         })
     }
+    #[cfg(feature = "p006-session-probe")]
+    pub fn local_session_diagnostic(
+        local: Ipv4Addr,
+        expires: u64,
+        session: &str,
+        now: u64,
+    ) -> Result<Self, String> {
+        let mut grant = Self::local_diagnostic(local, expires, true, now)?;
+        let id = uuid::Uuid::parse_str(session).map_err(|_| "DIRECT_LOCAL_SESSION_INVALID")?;
+        if id.is_nil() {
+            return Err("DIRECT_LOCAL_SESSION_INVALID".into());
+        }
+        grant.scope = id;
+        Ok(grant)
+    }
     pub fn local(&self) -> Ipv4Addr {
         self.local
     }
     pub(crate) fn scope(&self) -> uuid::Uuid {
         self.scope
+    }
+    pub fn session_id(&self) -> String {
+        self.scope.to_string()
+    }
+    pub fn local_candidate_allowed(&self, candidate: &Candidate) -> bool {
+        (candidate.kind == Kind::Host
+            && *candidate.address.ip() == self.local
+            && candidate.address.port() >= 1024)
+            || self.candidate_allowed(candidate)
+    }
+    pub(crate) fn permits_address(&self, ip: Ipv4Addr, local: bool) -> bool {
+        (local && ip == self.local)
+            || self.private_peers.contains(&ip)
+            || (self.relay.is_some() && public_v4(ip))
     }
     pub fn expires_at(&self) -> u64 {
         self.expires_at
@@ -169,6 +198,7 @@ impl Candidate {
         })
     }
 }
+#[derive(Clone)]
 pub struct VerifiedCandidates {
     pub(crate) values: Vec<Candidate>,
     pub(crate) scope: uuid::Uuid,
@@ -183,6 +213,14 @@ pub(crate) fn candidates(
     grant: &DirectGrant,
     now: u64,
 ) -> Result<VerifiedCandidates, String> {
+    scoped_candidates(sdp, grant, now, false)
+}
+pub(crate) fn scoped_candidates(
+    sdp: &str,
+    grant: &DirectGrant,
+    now: u64,
+    local: bool,
+) -> Result<VerifiedCandidates, String> {
     if !grant.current(now) || sdp.len() > 65536 || sdp.contains('\0') {
         return Err("DIRECT_SDP_EXPIRED_OR_SIZE".into());
     }
@@ -193,7 +231,11 @@ pub(crate) fn candidates(
                 return Err("DIRECT_CANDIDATE_BUDGET".into());
             }
             let c = Candidate::parse(text)?;
-            if !grant.candidate_allowed(&c) {
+            if !(if local {
+                grant.local_candidate_allowed(&c)
+            } else {
+                grant.candidate_allowed(&c)
+            }) {
                 return Err("DIRECT_CANDIDATE_SCOPE".into());
             }
             values.push(c);
@@ -206,6 +248,34 @@ pub(crate) fn candidates(
         values,
         scope: grant.scope,
     })
+}
+/// Publish only component 1 and private host IPs explicitly allowed by the other side.
+/// Remaining candidates are strictly validated, not silently accepted.
+pub fn publish_sdp(sdp: &str, grant: &DirectGrant, private_local_allowed: bool) -> String {
+    sdp.lines()
+        .filter(|l| {
+            if !l.starts_with("a=candidate:") {
+                return true;
+            }
+            let f: Vec<_> = l[12..].split_whitespace().collect();
+            if f.get(1) == Some(&"2") {
+                return false;
+            }
+            !(f.get(7) == Some(&"host")
+                && f.get(4).is_some_and(|p| *p == grant.local.to_string())
+                && grant.local.is_private()
+                && !private_local_allowed)
+        })
+        .map(|l| {
+            if l.starts_with("c=") {
+                "c=IN IP4 0.0.0.0"
+            } else {
+                l
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n")
+        + "\r\n"
 }
 /// Diagnostic single application policy, separate from production video+control validation.
 pub fn data_sdp(sdp: &str, grant: &DirectGrant, now: u64) -> Result<VerifiedCandidates, String> {

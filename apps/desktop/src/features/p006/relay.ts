@@ -3,8 +3,18 @@ import { ControlClient } from '../p004/control';
 import { receiveStats } from '../p004/webrtc';
 import type { LanStatus, LanReceiver } from '../p004/lan';
 import { relayOptions, type IceConfig } from './ice';
+import {
+  directOptions,
+  directSdp,
+  directAnswerCandidates,
+  selectedDirect,
+  type DirectScope,
+  type Candidate,
+} from './direct';
 
 interface Ready {
+  mode?: 'relay_only' | 'direct_preferred';
+  directScope?: DirectScope;
   controlSession: string;
   serverIp: string;
   expiresAt: number;
@@ -52,6 +62,9 @@ export function selectedRelay(all: RTCStatsReport, ip: string): boolean | null {
   return result;
 }
 export class RelayProbe {
+  private directScope?: DirectScope;
+  private localCandidates: Candidate[] = [];
+  private remoteCandidates: Candidate[] = [];
   private id?: string;
   private pc?: RTCPeerConnection;
   private control?: ControlClient;
@@ -72,6 +85,11 @@ export class RelayProbe {
     private fail: (error: string) => void,
     private code: (code: string) => void,
     private saved: (path: string) => void,
+    private directFeatureEnabled = false,
+    private call: typeof invoke = invoke,
+    private createPeer: (options: RTCConfiguration) => RTCPeerConnection = (
+      options,
+    ) => new RTCPeerConnection(options),
   ) {}
   async start(config: {
     role: 'sender' | 'receiver';
@@ -79,34 +97,43 @@ export class RelayProbe {
     localIp: string;
     seconds: number;
     pairingCode?: string;
+    mode?: 'relay_only' | 'direct_preferred';
+    peerIp?: string;
   }) {
     try {
-      const result = await invoke<{
+      const result = await this.call<{
         sessionId: string;
         pairingCode: string | null;
       }>('p006_start', { config });
       config.pairingCode = undefined;
       this.id = result.sessionId;
       if (this.stopped) {
-        await invoke('p006_stop', { sessionId: this.id });
+        await this.call('p006_stop', { sessionId: this.id });
         return;
       }
       this.code(result.pairingCode ?? '');
       this.update('waiting');
-      const ready = await invoke<Ready>('p006_ready', { sessionId: this.id });
+      const ready = await this.call<Ready>('p006_ready', {
+        sessionId: this.id,
+      });
       if (this.stopped) return;
       this.server = ready.serverIp;
       if (config.role === 'receiver') await this.connect(ready);
       if (!this.stopped) await this.poll();
     } catch (e) {
-      if (!this.stopped) this.fail(String(e));
+      if (!this.stopped && !(await this.completedNormally(e)))
+        this.fail(String(e));
       await this.stop();
     } finally {
       config.pairingCode = undefined;
     }
   }
   private async connect(ready: Ready) {
-    const options = relayOptions(
+    const direct = ready.mode === 'direct_preferred';
+    if (direct && (!ready.directScope || !this.directFeatureEnabled))
+      throw new Error('DIRECT_MODE_NOT_ENABLED');
+    this.directScope = direct ? ready.directScope : undefined;
+    const options = (direct ? directOptions : relayOptions)(
       ready.ice,
       {
         bothApproved: true,
@@ -116,9 +143,9 @@ export class RelayProbe {
         serverPort: 3478,
       },
       Math.floor(Date.now() / 1000),
-      true,
+      direct ? this.directFeatureEnabled : true,
     );
-    const pc = new RTCPeerConnection(options);
+    const pc = this.createPeer(options);
     this.pc = pc;
     // Credentials are now owned by the PC; do not retain the IPC result.
     ready.ice.ice_servers = [];
@@ -151,7 +178,8 @@ export class RelayProbe {
       if (pc.iceGatheringState === 'complete') return resolve();
       const timer = setTimeout(() => {
         pc.onicegatheringstatechange = null;
-        reject(new Error('BROWSER_RELAY_GATHER_TIMEOUT'));
+        if (direct) resolve();
+        else reject(new Error('BROWSER_RELAY_GATHER_TIMEOUT'));
       }, 10000);
       pc.onicegatheringstatechange = () => {
         if (pc.iceGatheringState === 'complete') {
@@ -162,17 +190,45 @@ export class RelayProbe {
       };
     });
     if (this.stopped) return;
-    const answer = await invoke<string>('p006_signal', {
+    const offer = this.directScope
+      ? directSdp(pc.localDescription!.sdp, this.directScope)
+      : null;
+    if (offer) this.localCandidates = offer.candidates;
+    const answer = await this.call<string>('p006_signal', {
       sessionId: this.id,
-      offer: relaySdp(pc.localDescription!.sdp, this.server),
+      offer: offer?.sdp ?? relaySdp(pc.localDescription!.sdp, this.server),
     });
-    if (!this.stopped)
+    if (!this.stopped) {
+      if (this.directScope)
+        this.remoteCandidates = directAnswerCandidates(
+          answer,
+          this.directScope,
+        );
       await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+    }
+  }
+  private async completedNormally(error: unknown): Promise<boolean> {
+    const code = String(error).replace(/^Error:\s*/, '');
+    if (
+      !this.id ||
+      !['P006_STOPPED', 'P006_RECEIVER_STOPPED', 'P006_SIGNAL_CLOSED'].includes(
+        code,
+      )
+    )
+      return false;
+    try {
+      const s = await this.call<LanStatus>('p006_stats', {
+        sessionId: this.id,
+      });
+      return s.resources_released && !s.error;
+    } catch {
+      return false;
+    }
   }
   private async poll() {
     if (this.stopped || !this.id) return;
     try {
-      const status = await invoke<LanStatus>('p006_stats', {
+      const status = await this.call<LanStatus>('p006_stats', {
         sessionId: this.id,
       });
       if (this.stopped) return;
@@ -184,19 +240,27 @@ export class RelayProbe {
           this.started,
           this.firstFrame,
         );
-        const peerMatches = selectedRelay(
-          await this.pc.getStats(),
-          this.server,
-        );
+        const stats = await this.pc.getStats();
+        const directPath = this.directScope
+          ? selectedDirect(stats, this.localCandidates, this.remoteCandidates)
+          : null;
+        const peerMatches = directPath
+          ? directPath.verified
+          : selectedRelay(stats, this.server);
         if (
           peerMatches === false ||
           ((data.framesDecoded ?? 0) > 0 && peerMatches !== true)
         )
-          throw new Error('BROWSER_SELECTED_RELAY_UNVERIFIED');
+          throw new Error(
+            this.directScope
+              ? 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED'
+              : 'BROWSER_SELECTED_RELAY_UNVERIFIED',
+          );
         if (this.firstFrame === null && (data.framesDecoded ?? 0) > 0)
           this.firstFrame = data.elapsedMs;
         data.firstFrameMs = this.firstFrame;
         receiver = {
+          ...(directPath ? { connectionPath: directPath.path } : {}),
           ...data,
           peerMatches,
           decoderImplementation: null,
@@ -209,7 +273,10 @@ export class RelayProbe {
           !status.resources_released &&
           performance.now() - this.lastMetric > 700
         ) {
-          await invoke('p006_metrics', { sessionId: this.id, data: receiver });
+          await this.call('p006_metrics', {
+            sessionId: this.id,
+            data: receiver,
+          });
           this.lastMetric = performance.now();
         }
       }
@@ -228,7 +295,8 @@ export class RelayProbe {
       }
       this.timer = setTimeout(() => void this.poll(), 350);
     } catch (e) {
-      if (!this.stopped) this.fail(String(e));
+      if (!this.stopped && !(await this.completedNormally(e)))
+        this.fail(String(e));
       await this.stop();
     }
   }
@@ -244,16 +312,16 @@ export class RelayProbe {
     this.update('stopping');
     try {
       await this.control?.close();
-      if (this.id) await invoke('p006_stop', { sessionId: this.id });
+      if (this.id) await this.call('p006_stop', { sessionId: this.id });
       this.pc?.getReceivers().forEach((r) => r.track.stop());
       this.pc?.close();
       this.video.srcObject = null;
       if (this.id) {
-        const status = await invoke<LanStatus>('p006_stats', {
+        const status = await this.call<LanStatus>('p006_stats', {
           sessionId: this.id,
         });
         this.saved(
-          await invoke<string>('p006_save', {
+          await this.call<string>('p006_save', {
             sessionId: this.id,
             browserClosed: !this.pc || this.pc.connectionState === 'closed',
             control: this.control?.snapshot(),

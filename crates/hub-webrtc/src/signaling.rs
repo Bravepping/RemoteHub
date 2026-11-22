@@ -29,6 +29,8 @@ pub fn validate_control_description(
 }
 enum DescriptionScope {
     Existing(crate::scope::NetworkScope),
+    #[cfg(feature = "p006-direct-probe")]
+    Direct(std::sync::Arc<crate::direct_policy::DirectGrant>, bool),
     #[cfg(feature = "p006-turn-probe")]
     Relay(crate::ice_policy::RelayTarget),
 }
@@ -36,6 +38,8 @@ impl DescriptionScope {
     fn requires_fingerprint(&self) -> bool {
         match self {
             Self::Existing(scope) => scope.is_lan(),
+            #[cfg(feature = "p006-direct-probe")]
+            Self::Direct(..) => true,
             #[cfg(feature = "p006-turn-probe")]
             Self::Relay(_) => true,
         }
@@ -43,6 +47,11 @@ impl DescriptionScope {
     fn permits_peer(&self, ip: IpAddr) -> bool {
         match self {
             Self::Existing(scope) => scope.permits_peer(ip),
+            #[cfg(feature = "p006-direct-probe")]
+            Self::Direct(grant, local) => match ip {
+                IpAddr::V4(ip) => grant.permits_address(ip, *local),
+                _ => false,
+            },
             #[cfg(feature = "p006-turn-probe")]
             Self::Relay(target) => ip == IpAddr::V4(target.relay),
         }
@@ -50,6 +59,26 @@ impl DescriptionScope {
     fn candidate(&self, ip: IpAddr, port: u16, kind: &str) -> bool {
         match self {
             Self::Existing(scope) => kind == "host" && scope.permits_peer(ip) && port > 0,
+            #[cfg(feature = "p006-direct-probe")]
+            Self::Direct(grant, local) => match (ip, kind) {
+                (IpAddr::V4(ip), "host" | "srflx" | "relay") => {
+                    let kind = match kind {
+                        "host" => crate::direct_policy::Kind::Host,
+                        "srflx" => crate::direct_policy::Kind::Srflx,
+                        _ => crate::direct_policy::Kind::Relay,
+                    };
+                    let c = crate::direct_policy::Candidate {
+                        address: std::net::SocketAddrV4::new(ip, port),
+                        kind,
+                    };
+                    if *local {
+                        grant.local_candidate_allowed(&c)
+                    } else {
+                        grant.candidate_allowed(&c)
+                    }
+                }
+                _ => false,
+            },
             #[cfg(feature = "p006-turn-probe")]
             Self::Relay(target) => {
                 kind == "relay"
@@ -72,10 +101,29 @@ impl DescriptionScope {
                     "host/loopback/udp"
                 }
             }
+            #[cfg(feature = "p006-direct-probe")]
+            Self::Direct(..) => "direct-or-relay/approved/udp",
             #[cfg(feature = "p006-turn-probe")]
             Self::Relay(_) => "relay/approved-range/udp",
         }
     }
+}
+#[cfg(feature = "p006-direct-probe")]
+pub fn validate_direct_video_description(
+    sdp: &str,
+    grant: &std::sync::Arc<crate::direct_policy::DirectGrant>,
+    now: u64,
+    answer: bool,
+    local: bool,
+) -> Result<(Negotiation, crate::direct_policy::VerifiedCandidates), String> {
+    let candidates = crate::direct_policy::scoped_candidates(sdp, grant, now, local)?;
+    let negotiation = validate_policy(
+        sdp,
+        DescriptionScope::Direct(grant.clone(), local),
+        answer,
+        true,
+    )?;
+    Ok((negotiation, candidates))
 }
 #[cfg(feature = "p006-turn-probe")]
 pub fn validate_relay_description(
