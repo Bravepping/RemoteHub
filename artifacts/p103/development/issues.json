@@ -1,0 +1,24 @@
+{
+  "firstBrowserPassed": 12,
+  "firstBrowserFailed": 2,
+  "finalBrowserPassed": 14,
+  "productSafetyChangesToPassTests": false,
+  "issues": [
+    {
+      "id": "BROWSER_CHROME_FOCUS",
+      "cause": "Native Edge dialog can yield keyboard focus to browser chrome; background remains inert",
+      "correction": "Verify allowed focus and inert background instead of requiring Shift+Tab to wrap immediately",
+      "evidence": "modal-focus-observation.json"
+    },
+    {
+      "id": "SCROLL_TARGET",
+      "cause": "Test scrolled only the top collapse button before asserting the bottom prepare action in viewport",
+      "correction": "Scroll the whole toolbar then retain viewport and no-overflow assertions"
+    },
+    {
+      "id": "HELPER_ONLY",
+      "cause": "Temporary diagnostic helper Windows ESM path and GBK console output",
+      "correction": "Use file URL and fixed console summary; UTF-8 file output retained"
+    }
+  ]
+}

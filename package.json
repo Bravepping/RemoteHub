@@ -15,7 +15,8 @@
     "doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1",
     "verify": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify.ps1",
     "verify:p1": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p101.ps1",
-    "verify:p102": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p102.ps1"
+    "verify:p102": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p102.ps1",
+    "verify:p103": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p103.ps1"
   },
   "devDependencies": { "prettier": "3.10.1" }
 }

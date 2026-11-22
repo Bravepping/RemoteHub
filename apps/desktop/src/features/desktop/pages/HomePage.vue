@@ -3,53 +3,24 @@ import type { RuntimeInfo } from '../../../bridge';
 import type { PageId } from '../navigation';
 import AppIcon from '../AppIcon.vue';
 import EmptyState from '../EmptyState.vue';
+import LocalDeviceCard from '../LocalDeviceCard.vue';
+import PanelCard from '../PanelCard.vue';
 defineProps<{ runtime?: RuntimeInfo; loading: boolean }>();
 defineEmits<{ refresh: []; navigate: [page: PageId] }>();
 </script>
 <template>
-  <section class="local-card" aria-labelledby="local-title">
-    <div class="computer-tile"><AppIcon name="devices" /></div>
-    <div class="local-description">
-      <span class="section-label">本机状态</span>
-      <h2 id="local-title">
-        <span
-          class="status-dot"
-          :class="{ connected: runtime && !loading }"
-        />{{
-          loading
-            ? '正在读取本机能力…'
-            : runtime
-              ? '本机核心已连接'
-              : '本机能力未连接'
-        }}
-      </h2>
-      <p role="status">
-        {{
-          runtime
-            ? '仅表示本机核心可响应，远程连接尚未开放。'
-            : '启动桌面客户端后，可在这里查看真实本机信息。'
-        }}
-      </p>
-      <span class="muted-chip">{{
-        runtime?.remote_access_enabled === false
-          ? '远程访问关闭'
-          : '远程服务尚未接入'
-      }}</span>
-    </div>
-    <button
-      class="outline-button"
-      :disabled="loading"
-      @click="$emit('refresh')"
-    >
-      <AppIcon name="refresh" />{{ loading ? '读取中…' : '重新检测' }}
-    </button>
-  </section>
+  <LocalDeviceCard
+    :runtime="runtime"
+    :loading="loading"
+    @refresh="$emit('refresh')"
+  />
   <div class="overview-grid">
-    <section class="product-card device-overview">
-      <div class="card-header">
-        <h2><AppIcon name="devices" />设备</h2>
-        <span class="subtle-label">尚未接入</span>
-      </div>
+    <PanelCard
+      class="device-overview"
+      title="设备"
+      icon="devices"
+      label="尚未接入"
+    >
       <EmptyState
         icon="devices"
         title="你的设备，将在这里相见"
@@ -62,11 +33,8 @@ defineEmits<{ refresh: []; navigate: [page: PageId] }>();
           @click.prevent="$emit('navigate', 'devices')"
           >查看设备<AppIcon name="arrow" /></a
       ></EmptyState>
-    </section>
-    <section class="product-card connection-overview">
-      <div class="card-header">
-        <h2><AppIcon name="link" />连接状态</h2>
-      </div>
+    </PanelCard>
+    <PanelCard class="connection-overview" title="连接状态" icon="link">
       <div class="connection-placeholder">
         <span class="connection-orbit"><AppIcon name="link" /></span>
         <h3>还未建立连接</h3>
@@ -92,7 +60,7 @@ defineEmits<{ refresh: []; navigate: [page: PageId] }>();
         @click.prevent="$emit('navigate', 'connect')"
         >前往连接页面<AppIcon name="arrow"
       /></a>
-    </section>
+    </PanelCard>
   </div>
   <div class="home-note">
     <AppIcon name="shield" />

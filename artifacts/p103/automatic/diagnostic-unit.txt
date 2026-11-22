@@ -1,0 +1,12 @@
+
+running 3 tests
+test p007b_diag::tests::dedicated_build_rejects_other_modes_and_durations ... ok
+test experiment_origin::tests::experimental_commands_only_accept_local_main_window ... ok
+test p007b_diag::tests::no_private_local_override_or_overlong_invitation ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `test` profile [unoptimized] target(s) in 0.34s
+     Running unittests src\main.rs (target\debug\build\remotehub-desktop/28967aacae095906\out\remotehub_desktop-28967aacae095906.exe)
+
+EXIT=0

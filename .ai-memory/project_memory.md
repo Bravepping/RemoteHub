@@ -1,10 +1,12 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P1-02）
-用户已接受R06尚未关闭剩余风险并批准Phase0限定退出，正式父项7/7。已审查fdfb9e3，当前只授权P1-02五页导航；实现和离线回归完成，提交后等审查，不进入P1-03至06。R06技术OPEN_NOT_REPRODUCED/历史根因未确定，风险接受不等于修复；P004证据例外和历史报告限制保留。
-当前入口：docs/P102_TEST_REPORT.md、P102_PLAN.md、ADR0017、DEVELOPMENT_GUIDE及handoff.md。pnpm verify:p102独立artifacts/p102：47检查、8真实Cargo配置/9隔离测试；全feature82/默认56 Rust各1ignored、43前端/9Edge/12Python。路径保护2负例及Edge定向复跑9通过。旧P101及Phase0证据未改。
-普通产品壳按概念图实现首页/设备/连接/会话/设置；只读get_runtime_info，失败清旧值；其他能力诚实空态，无新IPC/Pinia/依赖。旧实验模板/同意逻辑保留，Rust媒体/候选/SDP/指纹/授权/CSP/capability和锁不改。Foundation/V+ PC/EasyTier仍为来源/接口/许可待核验的兼容目标，没有运行集成。
-原生实际观察仅首页/设置文本，其余原生点击因并发人工输入保护停止；Edge五页验证独立。辅助截图返回非产品背景后立即删除，未提交；后续原生只读文本，不将浏览器图冒充原生像素证据。本轮未调用RemoteHub真实采集或远控输入，无云端或双机媒体操作。旧云授权已结束，历史服务状态不作当前实时结论。以下历史记忆不能覆盖本段或最新用户授权。
+# 当前决议与恢复入口（2026-11-22，P1-03）
+Phase0限定退出已由用户批准，父项7/7，E04证据例外已接受；R06技术OPEN_NOT_REPRODUCED/历史根因未定，风险接受不等于修复。P1-01/02已审查，最新d0fd876后只授权P1-03，提交后等审查，不进入P1-04至06。
+当前入口：docs/P103_PLAN.md、P103_TEST_REPORT.md、ADR0018、DEVELOPMENT_GUIDE及handoff.md。pnpm verify:p103独立artifacts/p103：47检查、50前端/14真实Edge、全feature82/默认56 Rust各1ignored、12Python、8真实Cargo配置/9隔离测试，默认Windows构建。小窗modal视觉修正后另做14Edge及3构建/lint定向检查；旧证据不改。
+产品继续Tauri v2/Rust/Vue3/TS/Tailwind及五页壳。PanelCard/LocalDeviceCard只展示真实get_runtime_info；ConnectionDialog是未接入准备说明，不创建/批准会话；SessionToolbar仅无会话状态的折叠/导航，画质/码率/全屏/断开禁用。无新依赖/IPC/Pinia或远控动作，不用概念图示例填设备/统计。旧实验与原生安全/媒体/CSP/capability/锁保持。
+内建dialog允许Edge键盘焦点去浏览器chrome，背景仍inert；测Focus/关闭恢复不应错误要求浏览器chrome不能获焦点。弹窗固定头尾，正文小高度内部滚动；整页截图先回顶部，窄窗modal取实际视口图，不用截图工具伪影下结论。首轮12/14失败和真实观察已保留。此轮没有原生UI/双机/云新测试或真实桌面/输入；不沿用历史服务授权。Foundation/V+ PC/EasyTier兼容运行仍未核验/未实现。
+
+以下历史记忆不覆盖本段或最新用户授权。
 
 2026-11-21 首次工程。Windows / Tauri v2 / Vue 3 / Rust，遵循原交付设计；Phase 0 真实媒体优先。不可用时报告失败，不显示假设备/RTT/FPS。不实现未授权后台监控、权限提升、凭据采集。
 

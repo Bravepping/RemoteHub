@@ -58,7 +58,12 @@ describe('desktop navigation with real capability boundaries', () => {
     await open();
     await visit('设备');
     expect(wrapper.text()).toContain('设备列表尚未接入');
-    expect(wrapper.get('button').attributes('disabled')).toBeDefined();
+    expect(
+      wrapper
+        .findAll('button')
+        .find((b) => b.text() === '添加设备')!
+        .attributes('disabled'),
+    ).toBeDefined();
     await visit('连接');
     expect(wrapper.text()).toContain('连接能力暂不可用');
     expect(wrapper.get('button').attributes('disabled')).toBeDefined();
@@ -77,6 +82,34 @@ describe('desktop navigation with real capability boundaries', () => {
     expect(wrapper.text()).not.toContain('private-error-fixture');
     expect(wrapper.text()).not.toContain('fixture-backend');
     expect(wrapper.text()).toContain('未读取');
+    expect(runCaptureProbe).not.toHaveBeenCalled();
+  });
+  it('reuses the real capability card on devices without creating a remote identity', async () => {
+    await open();
+    await visit('设备');
+    expect(wrapper.get('[aria-label="本机能力卡片"]').text()).toContain(
+      'fixture-os',
+    );
+    expect(wrapper.text()).not.toMatch(/RH-\d|在线设备/);
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('重新检测'))!
+      .trigger('click');
+    await flushPromises();
+    expect(getRuntimeInfo).toHaveBeenCalledTimes(2);
+    expect(runCaptureProbe).not.toHaveBeenCalled();
+  });
+  it('session preparation only navigates to the connection page', async () => {
+    await open();
+    await visit('会话');
+    await wrapper
+      .findAll('button')
+      .find((b) => b.text().includes('查看连接准备'))!
+      .trigger('click');
+    await flushPromises();
+    expect(wrapper.get('h1').text()).toBe('连接');
+    expect(wrapper.find('dialog').exists()).toBe(false);
+    expect(getRuntimeInfo).toHaveBeenCalledTimes(1);
     expect(runCaptureProbe).not.toHaveBeenCalled();
   });
   it('can retry a failed read and clears stale fields if a later read fails', async () => {

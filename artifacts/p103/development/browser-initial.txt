@@ -1,0 +1,91 @@
+
+Running 14 tests using 4 workers
+
+  ok  1 tests\relay-options.spec.ts:2:1 › real Edge stores relay-only transport policy without gathering or network probe (2.9s)
+  ok  2 tests\control-offer.spec.ts:2:1 › real Edge creates bundled H264 video and reliable control.v1 without screen capture (3.0s)
+  ok  4 tests\navigation.spec.ts:10:1 › browser workspace exposes five real pages with honest unavailable states (4.1s)
+  ok  5 tests\navigation.spec.ts:39:1 › deep links reload and browser history remains local navigation (295ms)
+  ok  6 tests\navigation.spec.ts:65:1 › unknown and auto-start-looking hashes fall back without starting a session (190ms)
+  ok  7 tests\navigation.spec.ts:76:1 › keyboard navigation and skip link preserve the selected page (207ms)
+  ok  8 tests\navigation.spec.ts:99:3 › layout stays reachable at 900 pixels (287ms)
+  ok  9 tests\navigation.spec.ts:99:3 › layout stays reachable at 640 pixels (271ms)
+  ok 10 tests\navigation.spec.ts:99:3 › layout stays reachable at 450 pixels (270ms)
+  x   3 tests\p103.spec.ts:3:1 › connection preparation is modal, inert and returns focus on Escape and close (7.0s)
+  ok 11 tests\p103.spec.ts:57:1 › route departure removes modal and its focus isolation (886ms)
+  ok 12 tests\p103.spec.ts:78:1 › session toolbar changes only its local visibility and navigation (619ms)
+  x  13 tests\p103.spec.ts:109:3 › new surfaces remain reachable at 900 pixels (5.4s)
+  ok 14 tests\p103.spec.ts:109:3 › new surfaces remain reachable at 450 pixels (1.5s)
+
+
+  1) tests\p103.spec.ts:3:1 › connection preparation is modal, inert and returns focus on Escape and close
+
+    Error: expect(locator).toBeFocused() failed
+
+    Locator:  getByRole('dialog', { name: '连接准备', exact: true }).getByRole('button', { name: '关闭', exact: true })
+    Expected: focused
+    Received: inactive
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeFocused" getByRole('dialog', { name: '连接准备', exact: true }).getByRole('button', { name: '关闭', exact: true }) with timeout 5000ms
+      - waiting for getByRole('dialog', { name: '连接准备', exact: true }).getByRole('button', { name: '关闭', exact: true })
+        14 × locator resolved to <button class="outline-button">关闭</button>
+           - unexpected value "inactive"
+
+
+      27 |   await expect(
+      28 |     dialog.getByRole('button', { name: '关闭', exact: true }),
+    > 29 |   ).toBeFocused();
+         |     ^
+      30 |   await page.keyboard.press('Tab');
+      31 |   await expect(
+      32 |     dialog.getByRole('button', { name: '关闭连接准备' }),
+        at C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\tests\p103.spec.ts:29:5
+
+    Error Context: ..\..\artifacts\p103\automatic\browser-results\p103-connection-preparatio-5f420-s-focus-on-Escape-and-close\error-context.md
+
+  2) tests\p103.spec.ts:109:3 › new surfaces remain reachable at 900 pixels ────────────────────────
+
+    Error: expect(locator).toBeInViewport() failed
+
+    Locator:  getByRole('button', { name: '查看连接准备' })
+    Expected: in viewport
+    Received: viewport ratio 0
+    Timeout:  5000ms
+
+    Call log:
+      - Expect "toBeInViewport" getByRole('button', { name: '查看连接准备' }) with timeout 5000ms
+      - waiting for getByRole('button', { name: '查看连接准备' })
+        14 × locator resolved to <button class="prepare-button">…</button>
+           - unexpected value "viewport ratio 0"
+
+
+      140 |     await expect(
+      141 |       page.getByRole('button', { name: '查看连接准备' }),
+    > 142 |     ).toBeInViewport();
+          |       ^
+      143 |     expect(
+      144 |       await page.evaluate(
+      145 |         () => document.documentElement.scrollWidth > window.innerWidth,
+        at C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\tests\p103.spec.ts:142:7
+
+    Error Context: ..\..\artifacts\p103\automatic\browser-results\p103-new-surfaces-remain-reachable-at-900-pixels\error-context.md
+
+  2 failed
+    tests\p103.spec.ts:3:1 › connection preparation is modal, inert and returns focus on Escape and close
+    tests\p103.spec.ts:109:3 › new surfaces remain reachable at 900 pixels ─────────────────────────
+  12 passed (17.7s)
+(node:24932) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:1920) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:9664) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:25544) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:23412) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:8892) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+EXIT=1

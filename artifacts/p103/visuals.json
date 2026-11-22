@@ -1,0 +1,19 @@
+{
+  "recordedAt": "2026-11-22T16:04:15.795528+08:00",
+  "source": "Actual Edge screenshots from the completed 14-test offline browser suite",
+  "browserCore": "Unavailable as actually observed; no mocked native success",
+  "screenshots": {
+    "home.png": "8e7a028551653f8dd379b85e0596d95e32b54c5092fc55a06e094f86996d8f46",
+    "devices.png": "f6624c6f93ab65884b986fc24ef916a7ae7b03455b30d8304d3390019df69dd7",
+    "connect.png": "f5da379cd6d644c78996e6cd8cdfe04f414010ce1e53e65ea1852060108ab935",
+    "settings.png": "3ac50c7dbc77d942d8b40dea71b27b53bad033f9774d591fe8c0035c93521dad",
+    "connection-dialog.png": "10e308f44a46a8f2d229d44b94ce1feebf114a8557c946262d41905708c372fd",
+    "session-toolbar.png": "599b6a8b83b7e35f7e83aa8d2e5eab4340a820cfcbf09a9ecaa4327ae9b15cfd",
+    "session-toolbar-collapsed.png": "1e3cac63e95b99f564cddf55f186d6a9b1a8836a2c4f066b65fda0458fb1e6b8",
+    "dialog-450.png": "917bb4e72c8d27bae7d8183674ac00bf262b5855a26b5974f52811fcce8314c2",
+    "session-900.png": "f7c33d82d2e102cd64313adce26bb0adf3840adca566f186194c46e7893e8cdf",
+    "session-450.png": "92d15f3232ad71bf9bad8d11343d267461bea984217cfc2d7889ed35c0924970"
+  },
+  "nativeScreenshots": false,
+  "desktopCaptured": false
+}

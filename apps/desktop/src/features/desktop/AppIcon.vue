@@ -21,6 +21,11 @@ const paths = {
   ],
   clock: ['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0', 'M12 7v5l3 2'],
   info: ['M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0', 'M12 11v6m0-10v1'],
+  close: ['m6 6 12 12M6 18 18 6'],
+  collapse: ['m6 15 6-6 6 6'],
+  expand: ['m6 9 6 6 6-6'],
+  fullscreen: ['M8 3H3v5m13-5h5v5M3 16v5h5m8 0h5v-5'],
+  power: ['M12 3v9', 'M6 5a9 9 0 1 0 12 0'],
 } as const;
 export type IconName = keyof typeof paths;
 defineProps<{ name: IconName }>();

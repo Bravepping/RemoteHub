@@ -2,14 +2,22 @@
 import type { PageId } from '../navigation';
 import AppIcon from '../AppIcon.vue';
 import EmptyState from '../EmptyState.vue';
-defineEmits<{ navigate: [page: PageId] }>();
+import type { RuntimeInfo } from '../../../bridge';
+import LocalDeviceCard from '../LocalDeviceCard.vue';
+import PanelCard from '../PanelCard.vue';
+defineProps<{ runtime?: RuntimeInfo; loading: boolean }>();
+defineEmits<{ refresh: []; navigate: [page: PageId] }>();
 </script>
 <template>
-  <section class="product-card">
-    <div class="card-header">
-      <h2><AppIcon name="devices" />设备列表</h2>
+  <LocalDeviceCard
+    :runtime="runtime"
+    :loading="loading"
+    @refresh="$emit('refresh')"
+  />
+  <PanelCard title="设备列表" icon="devices" label="尚未接入">
+    <template #actions>
       <button disabled aria-describedby="device-unavailable">添加设备</button>
-    </div>
+    </template>
     <EmptyState
       icon="devices"
       title="设备列表尚未接入"
@@ -24,5 +32,5 @@ defineEmits<{ navigate: [page: PageId] }>();
         @click.prevent="$emit('navigate', 'connect')"
         >了解连接状态<AppIcon name="arrow" /></a
     ></EmptyState>
-  </section>
+  </PanelCard>
 </template>

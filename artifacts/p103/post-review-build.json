@@ -1,0 +1,22 @@
+{
+  "recordedAt": "2026-11-22T08:04:41.792Z",
+  "reason": "After visual review, keep modal header/footer visible while body scrolls; affected Edge 14-test suite also rerun",
+  "steps": [
+    {
+      "name": "frontend-lint",
+      "command": "pnpm.cmd lint",
+      "exitCode": 0
+    },
+    {
+      "name": "frontend-build",
+      "command": "pnpm.cmd build",
+      "exitCode": 0
+    },
+    {
+      "name": "native-build",
+      "command": "cargo build -p remotehub-desktop --profile probe --features custom-protocol --locked --offline",
+      "exitCode": 0
+    }
+  ],
+  "passed": true
+}

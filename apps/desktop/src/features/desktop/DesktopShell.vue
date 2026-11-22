@@ -9,6 +9,7 @@ import SessionsPage from './pages/SessionsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 import { pages, pageFromHash, pageLink, type PageId } from './navigation';
 import './desktop.css';
+import './p103.css';
 
 defineProps<{ runtime?: RuntimeInfo; loading: boolean; error: string }>();
 defineEmits<{ refresh: [] }>();
@@ -95,9 +96,15 @@ onUnmounted(() => {
         @refresh="$emit('refresh')"
         @navigate="navigate"
       />
-      <DevicesPage v-else-if="active === 'devices'" @navigate="navigate" />
+      <DevicesPage
+        v-else-if="active === 'devices'"
+        :runtime="runtime"
+        :loading="loading"
+        @refresh="$emit('refresh')"
+        @navigate="navigate"
+      />
       <ConnectPage v-else-if="active === 'connect'" @navigate="navigate" />
-      <SessionsPage v-else-if="active === 'sessions'" />
+      <SessionsPage v-else-if="active === 'sessions'" @navigate="navigate" />
       <SettingsPage
         v-else
         :runtime="runtime"

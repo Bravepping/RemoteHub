@@ -2,7 +2,10 @@
 import type { PageId } from '../navigation';
 import AppIcon from '../AppIcon.vue';
 import EmptyState from '../EmptyState.vue';
+import { ref } from 'vue';
+import ConnectionDialog from '../ConnectionDialog.vue';
 defineEmits<{ navigate: [page: PageId] }>();
+const preparationOpen = ref(false);
 </script>
 <template>
   <div class="connection-page-grid">
@@ -17,6 +20,9 @@ defineEmits<{ navigate: [page: PageId] }>();
         <p id="connect-unavailable" class="empty-detail">
           需要先接入真实设备和会话服务。
         </p>
+        <button class="outline-button" @click="preparationOpen = true">
+          查看连接准备
+        </button>
         <a
           href="#/devices"
           class="text-link"
@@ -52,4 +58,5 @@ defineEmits<{ navigate: [page: PageId] }>();
       </ol>
     </section>
   </div>
+  <ConnectionDialog v-if="preparationOpen" @close="preparationOpen = false" />
 </template>

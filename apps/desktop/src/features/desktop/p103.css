@@ -1,0 +1,277 @@
+.product-shell .card-actions,
+.product-shell .local-card-tags {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.product-shell .card-actions {
+  justify-content: flex-end;
+}
+.product-shell .local-card-tags {
+  margin-top: 8px;
+}
+.product-shell .connection-dialog {
+  width: min(600px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  padding: 0;
+  color: #17283e;
+  border: 1px solid #cbdcf0;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px #10253b45;
+  overflow: hidden;
+  overscroll-behavior: contain;
+  background: #fff;
+}
+.product-shell .connection-dialog[open] {
+  display: flex;
+  flex-direction: column;
+}
+.product-shell .connection-dialog::backdrop {
+  background: #12294075;
+}
+.product-shell .dialog-header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 22px;
+  background: #f3f8ff;
+  border-bottom: 1px solid #e1eaf5;
+}
+.product-shell .dialog-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+}
+.product-shell .dialog-header h2 svg {
+  color: #2c79cb;
+  width: 21px;
+}
+.product-shell .icon-button {
+  padding: 8px;
+  background: transparent;
+  color: #5b728e;
+}
+.product-shell .icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+.product-shell .dialog-body {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 24px;
+}
+.product-shell .connection-endpoints {
+  display: flex;
+  justify-content: space-evenly;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.product-shell .connection-endpoints > div {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+}
+.product-shell .connection-endpoints > div > svg {
+  width: 42px;
+  height: 42px;
+  color: #448bd6;
+}
+.product-shell .connection-endpoints > svg {
+  color: #a1b9d2;
+}
+.product-shell .connection-endpoints strong {
+  font-size: 14px;
+}
+.product-shell .connection-endpoints span {
+  font-size: 11px;
+  color: #72869d;
+}
+.product-shell .dialog-notice {
+  padding: 13px 15px;
+  border: 1px solid #f2dfb5;
+  border-radius: 9px;
+  background: #fffaf0;
+  color: #85672c;
+  font-size: 12px;
+}
+.product-shell .connection-readiness {
+  list-style: none;
+  margin: 22px 0;
+  padding: 0;
+  display: grid;
+  gap: 20px;
+}
+.product-shell .connection-readiness li {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.product-shell .connection-readiness li > span {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  border: 1px solid #dbe5ef;
+  border-radius: 50%;
+  color: #869bb0;
+  background: #f4f7fb;
+  font-size: 12px;
+}
+.product-shell .connection-readiness li > div {
+  flex: 1;
+  min-width: 0;
+}
+.product-shell .connection-readiness h3 {
+  font-size: 13px;
+  margin: 1px 0 5px;
+}
+.product-shell .connection-readiness p {
+  font-size: 11px;
+}
+.product-shell .connection-readiness em {
+  font-style: normal;
+  color: #7f91a6;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.product-shell .dialog-footer {
+  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 16px 24px;
+  border-top: 1px solid #e9eff6;
+}
+.product-shell .session-workspace {
+  overflow: hidden;
+}
+.product-shell .session-stage {
+  position: relative;
+  min-height: 440px;
+  padding: 20px 20px 210px;
+  background: radial-gradient(ellipse at 50% 0, #e9f3ff, #f3f7fc 70%);
+  border-radius: 0 0 12px 12px;
+}
+.product-shell .session-stage .empty-state {
+  padding: 32px 10px;
+  min-height: 0;
+}
+.product-shell .session-toolbar {
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(720px, calc(100% - 32px));
+  padding: 12px 16px;
+  color: #e8f1fc;
+  background: #1b3148;
+  border: 1px solid #3d5976;
+  border-radius: 12px;
+  box-shadow: 0 8px 25px #172b4130;
+}
+.product-shell .toolbar-topline {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+}
+.product-shell .toolbar-state {
+  font-size: 12px;
+  white-space: nowrap;
+}
+.product-shell .session-toolbar button {
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.product-shell .toolbar-toggle {
+  background: transparent;
+  color: #d2e3f7;
+}
+.product-shell .session-toolbar button svg {
+  width: 15px;
+  height: 15px;
+}
+.product-shell .toolbar-details {
+  border-top: 1px solid #ffffff15;
+  padding-top: 12px;
+  margin-top: 10px;
+}
+.product-shell .toolbar-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  margin: 0 0 12px;
+  font-size: 11px;
+}
+.product-shell .toolbar-metrics > div {
+  display: flex;
+  gap: 8px;
+}
+.product-shell .toolbar-metrics dt {
+  color: #a1b7ce;
+}
+.product-shell .toolbar-metrics dd {
+  color: #e6eef7;
+}
+.product-shell .toolbar-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.product-shell .session-toolbar button:disabled {
+  background: #ffffff0a;
+  border: 1px solid #ffffff18;
+  color: #91a5ba;
+  cursor: not-allowed;
+  opacity: 1;
+}
+.product-shell .session-toolbar .disconnect-button:disabled {
+  color: #c4a4ad;
+  border-color: #b17d882b;
+  background: #b17d8812;
+}
+.product-shell .session-toolbar .prepare-button {
+  color: #e1eeff;
+  background: #315c8a;
+}
+.product-shell .toolbar-details p {
+  color: #a3b7cd;
+  font-size: 10px;
+  margin-top: 12px;
+}
+.product-shell .session-history {
+  margin-top: 20px;
+}
+.product-shell .session-history .empty-state {
+  min-height: 220px;
+  padding: 25px;
+}
+@media (max-width: 760px) {
+  .product-shell .session-stage {
+    min-height: 500px;
+    padding: 15px 12px 250px;
+  }
+  .product-shell .session-toolbar {
+    padding: 12px;
+  }
+  .product-shell .dialog-body {
+    padding: 20px 16px;
+  }
+  .product-shell .dialog-header {
+    padding: 12px 16px;
+  }
+  .product-shell .connection-readiness li {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .product-shell .connection-readiness em {
+    margin-left: 36px;
+  }
+}
