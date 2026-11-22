@@ -1,0 +1,26 @@
+
+running 10 tests
+test tests::payload_rejects_wrong_length_version_or_public_key ... ok
+test tests::public_id_is_stable_and_full_fingerprint_is_not_short_id ... ok
+test windows::tests::unprotected_existing_directory_is_rejected ... ok
+test tests::rfc8032_public_test_vector_matches_ed25519 ... ok
+test windows::tests::real_dpapi_roundtrip_entropy_and_tamper_rejection ... ok
+test windows::tests::lock_conflict_and_pending_file_fail_closed ... ok
+test windows::tests::hardlinked_identity_is_rejected ... ok
+test windows::tests::corrupted_store_is_not_overwritten_or_regenerated ... ok
+test tests::strict_local_proof_rejects_tampering_wrong_nonce_wrong_and_weak_key ... ok
+test windows::tests::store_restores_same_identity_and_contains_no_seed_or_public_key ... ok
+
+test result: ok. 10 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+    Finished `dev` profile [unoptimized] target(s) in 0.16s
+    Finished `test` profile [unoptimized] target(s) in 0.20s
+     Running unittests src\lib.rs (target\debug\build\hub-identity/57e2311aa8eafdfd\out\hub_identity-57e2311aa8eafdfd.exe)
+   Doc-tests hub_identity
+
+EXIT=0

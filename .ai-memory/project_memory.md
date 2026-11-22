@@ -1,10 +1,10 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P1-06普通UI人工验收）
-Phase0限定退出/E04例外已批准，R06 OPEN_NOT_REPRODUCED根因未定。P1-06代码/权限/离线阶段获接受；本轮仅普通UI人工验收，7生命周期/五页基本导航与设置刷新已由用户逐步确认，3绑定PID退出信号/残留0独立核对。P1-06本机UI限定done，Phase1退出READY_FOR_USER_REVIEW/NOT_APPROVED，不进入Phase2。
-应用源码/权限/媒体/锁未改，普通EXE构建仅custom-protocol，SHA见artifacts/p106-manual/build.json。新报告docs/P106_MANUAL_TEST_REPORT.md与PHASE1_FINAL_EXIT_REVIEW.md；12证据门禁/12隐私/9交付/7权限复核通过，47完整回归等沿用ddbe191已验收证据，不冒充本轮重跑。
-本轮Agent未启动/点击/结束目标，用户亲自操作；Agent只读绑定PID13036/20660/22668，均已退出。窗口句柄不可得，退出码null，不记自动视觉或退出码0；用户视觉/菜单原话独立归档。旧探针0xc0000139根因仍未知，普通UI通过不意味着探针修复；旧报告/日志不改。完整原生故障状态/活动视频关闭/Win11/DPI未补测。
-不启云/采集/实际输入/双机/第三方/驱动/路由，不修改系统安全。C0 D1–D6待用户决定、C1未完成，自研WebRTC主线保留。提交后等待正式审查，不自动批准阶段退出。
+# 当前决议与恢复入口（2026-11-22，P2-01）
+用户审查d7ce2e0后接受P1-06人工结果/限制、批准Phase1限定退出，仅开工P2-01。Phase0限定退出/E04例外保持，R06 OPEN_NOT_REPRODUCED根因未定，C0 D1–D6/C1待决，自研WebRTC主线保持。
+hub-identity Ed25519/CurrentUser DPAPI、当前用户ACL/独占锁/密文无覆盖发布及公钥摘要提交标记已实现；丢失/损坏/合法密文替换不静默换号，有真实修复前失败。普通版启动初始化、桌面只缓存公开ID/指纹或固定错误，私钥及时释放；无新IPC/capability/签名导出，P0实验构建不初始化身份，媒体/ICE/托盘源不改。Pinia代次/清旧值和未知空态保持。
+核心13/真实两进程恢复与签名、临时清理通过；100前端/20Edge，最终全回归95/默认77 Rust各1ignored，47主检查/7权限/12隐私/9交付见artifacts/p201。旧包版本未升级，11新锁包/许可/OSV增量匹配0记录，不当独立审计。
+恢复docs/P201_TEST_REPORT.md、P201_IDENTITY_GUIDE.md、P201_IDENTITY_CONTRACT.md与ADR0022。受限环境DPAPI Protect/TLS凭据失败保留，正常用户执行真实测试通过；不降级。身份GUI、跨账户/跨机与真实junction未测，无生产身份目录/云/真实采集/实际输入/双机/第三方后端操作。旧报告/证据不改。提交后等待审查，不进P2-02。
 
 以下历史不覆盖本段及最新授权。
 

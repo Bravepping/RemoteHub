@@ -22,9 +22,13 @@ tauri-build = { version = "=2.7.6", features = [] }
 tauri = { version = "=2.12.7", features = ["tray-icon"] }
 serde.workspace = true
 hub-capture-win = { path = "../../../crates/hub-capture-win" }
+hub-identity = { path = "../../../crates/hub-identity" }
 hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
 hub-probe-wire = { path = "../../../crates/hub-probe-wire", optional = true }
 tokio = { version = "=1.54.1", features = ["sync", "time"], optional = true }
 uuid = { version = "=1.29.3", features = ["v4"], optional = true }
 serde_json = { workspace = true, optional = true }
 windows = { version = "=0.62.2", features = ["Win32_UI_WindowsAndMessaging"], optional = true }
+
+[dev-dependencies]
+serde_json.workspace = true

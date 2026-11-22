@@ -2,17 +2,17 @@
 
 这是已构建和实测的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。真实双机局域网视频、同一PeerConnection上的DataChannel模拟控制、跨网强制TURN均已通过；P2P优先/受阻自动回退已通过真实云WSS/TURN合成视频测试，并有真实双机直连与手机热点中继成功轮。
 
-用户审查`767ff44`后已**接受R06尚未关闭的剩余风险并批准Phase0限定退出**，正式父项7/7；P1-01至05已交付，本轮仅实施用户批准的P1-06与退出评审准备。P004已批准统计+现场观看替代录屏，历史未录屏事实保留。R06历史两次拒绝未复现/根因未知，技术问题仍开放；新版正常终态不追补旧文件。见[退出决议](docs/PHASE0_EXIT_DECISION.md)及[风险台账](docs/PHASE0_RISK_REGISTER.md)。尚无实际输入或持久设备身份服务，不是可发布成品。
+Phase0限定退出及P004录屏证据例外已批准，R06历史可靠性问题继续OPEN。用户审查`d7ce2e0`后已接受P1-06人工结果/保留限制，并**批准Phase 1限定退出**；批准只追加记录，见[Phase 1决议](docs/PHASE1_EXIT_DECISION.md)，旧[人工报告](docs/P106_MANUAL_TEST_REPORT.md)/[最终评审](docs/PHASE1_FINAL_EXIT_REVIEW.md)不改当时结论。
 
-**P1-06普通Windows UI人工验收通过，Phase 1最终退出待审**：用户亲自验证默认X退出、主动驻留/隐藏、重复显示恢复、取消驻留/恢复与X退出、托盘真正退出；三个指定PID均收到退出信号且清零。五页基本导航、设置重新检测和真实空态人工通过。代码/权限/媒体/锁本轮不变，见[本轮报告](docs/P106_MANUAL_TEST_REPORT.md)与[独立证据](artifacts/p106-manual/verification.json)。
+**本轮P2-01：本地Ed25519/DPAPI身份已实现，等待审查。** 普通Windows启动创建/恢复当前用户身份；私钥以DPAPI密文保存，提交标记绑定完整公钥摘要，损坏/丢失/意外替换不静默换ID。首页/设置只读真实公开标识/指纹或固定错误，短ID不作认证凭据。未增加IPC权限/命令，实验构建不初始化生产身份。尚无正式服务器登录、配对/信任库或信令签名，远程访问仍关闭。
 
-界面结果明确来自用户人工确认，Agent独立核对SHA/唯一PID/启动时间/退出信号和清零。进程接口无主窗口句柄、退出码数值null，均不补写自动视觉或退出码0。原P105窗口USER_CONFIRMED_WINDOW_VISIBLE及旧探针失败原始记录保留；本轮普通UI通过不代表探针根因已修复，完整原生错误恢复、活动媒体关闭、Win11/DPI仍非本轮实测。
+本轮47项完整检查、100前端/20Edge、Rust全feature95/默认77各1ignored通过；另有真实Windows DPAPI13项（与workspace重叠）、两个独立进程恢复/签名验证、7权限和12隐私/9交付回归。仅使用并清理临时测试身份，**未启动原生身份页面或访问生产身份目录**；跨账户/跨机迁移未测，SDK界面替身不冒充原生。见[报告与限制](docs/P201_TEST_REPORT.md)、[证据](artifacts/p201/verification.json)、[开发说明](docs/P201_IDENTITY_GUIDE.md)。
 
-[Phase 1最终退出评审](docs/PHASE1_FINAL_EXIT_REVIEW.md)建议限定范围退出，状态仍READY_FOR_USER_REVIEW/NOT_APPROVED；未进入Phase 2。先前[退出准备](docs/PHASE1_EXIT_REVIEW_PREPARATION.md)保留当时HOLD事实。[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)及[D1–D6决策单](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，第三方后端未启用，C1未完成。
+[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)与[D1–D6](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，未启用第三方兼容后端。R06仍OPEN_NOT_REPRODUCED/根因未知，身份模块不修补或放宽ICE。只完成P2-01，不启动P2-02、阿里云、真实采集、实际输入、双机或第三方运行。
 
 技术栈继续Tauri v2/Rust/Vue3/TypeScript，见[P1实施方案](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前指引](docs/DEVELOPMENT_GUIDE.md)。[Foundation / V+ PC / EasyTier评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)仍为提案；WebRTC不等于已兼容三件套，运行集成/多进程/驱动及分发范围未获本轮授权。
 
-下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论，批准记录另行追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新双机/媒体或应用真实采集/远控输入。辅助截图工具的异常及丢弃在P1-02报告中披露。旧包不能自行恢复服务，提交后不自动进入Phase 2或第三方兼容原型。
+下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论，批准记录另行追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新双机/媒体或应用真实采集/远控输入。辅助截图工具的异常及丢弃在P1-02报告中披露。旧包不能自行恢复服务，提交后不自动进入P2-02或第三方兼容原型。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 

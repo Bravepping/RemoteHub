@@ -1,0 +1,12 @@
+Diff in \\?\C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-identity\examples\restart_probe.rs:51:
+     }
+     println!(
+         "{{\"stage\":\"{}\",\"passed\":true,\"identityOrKeyPrinted\":false,\"processId\":{}}}",
+-        args[1], std::process::id()
++        args[1],
++        std::process::id()
+     );
+     Ok(())
+ }
+
+EXIT=1

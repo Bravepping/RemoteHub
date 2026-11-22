@@ -1,4 +1,21 @@
+export const identityErrorCodes = [
+  'IDENTITY_UNSUPPORTED',
+  'IDENTITY_RANDOM_FAILED',
+  'IDENTITY_PROTECT_FAILED',
+  'IDENTITY_UNPROTECT_FAILED',
+  'IDENTITY_STORAGE_FAILED',
+  'IDENTITY_STORAGE_UNSAFE',
+  'IDENTITY_BUSY',
+  'IDENTITY_STORE_INVALID',
+  'IDENTITY_STORE_INCOMPLETE',
+] as const;
+export type IdentityErrorCode = (typeof identityErrorCodes)[number];
+export type DeviceIdentity = Readonly<
+  | { status: 'ready'; device_id: string; fingerprint: string }
+  | { status: 'unavailable'; error_code: IdentityErrorCode }
+>;
 export interface RuntimeInfo {
+  identity?: DeviceIdentity;
   app_version: string;
   os: string;
   arch: string;
@@ -54,6 +71,7 @@ const flags = [
   'p007b_diag_enabled',
 ] as const;
 const keys = new Set([
+  'identity',
   ...Object.keys(stringLimits),
   'remote_access_enabled',
   ...flags,
@@ -89,7 +107,58 @@ export function decodeRuntimeInfo(value: unknown): RuntimeInfo {
     !Object.hasOwn(record, 'remote_access_enabled')
   )
     return invalid();
-  return Object.freeze({ ...record }) as unknown as RuntimeInfo;
+  return Object.freeze({
+    ...record,
+    ...(Object.hasOwn(record, 'identity')
+      ? { identity: decodeIdentity(record.identity) }
+      : {}),
+  }) as unknown as RuntimeInfo;
+}
+export function decodeIdentity(value: unknown): DeviceIdentity {
+  const invalid = (): never => {
+    throw new DesktopIpcError('IPC_RESPONSE_INVALID');
+  };
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    Array.isArray(value) ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(value))
+  )
+    return invalid();
+  const record = value as Record<string, unknown>;
+  const own = Object.keys(record).sort().join(',');
+  if (record.status === 'ready' && own === 'device_id,fingerprint,status') {
+    if (
+      typeof record.fingerprint !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(record.fingerprint) ||
+      typeof record.device_id !== 'string' ||
+      !/^RH-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}$/.test(record.device_id)
+    )
+      return invalid();
+    const short = record.fingerprint.slice(0, 12).toUpperCase();
+    if (
+      record.device_id !==
+      `RH-${short.slice(0, 4)}-${short.slice(4, 8)}-${short.slice(8)}`
+    )
+      return invalid();
+    return Object.freeze({
+      status: 'ready',
+      device_id: record.device_id,
+      fingerprint: record.fingerprint,
+    });
+  }
+  if (
+    record.status === 'unavailable' &&
+    own === 'error_code,status' &&
+    typeof record.error_code === 'string' &&
+    identityErrorCodes.includes(record.error_code as IdentityErrorCode)
+  ) {
+    return Object.freeze({
+      status: 'unavailable',
+      error_code: record.error_code as IdentityErrorCode,
+    });
+  }
+  return invalid();
 }
 export interface DesktopApi {
   readRuntime(options?: { signal?: AbortSignal }): Promise<RuntimeInfo>;

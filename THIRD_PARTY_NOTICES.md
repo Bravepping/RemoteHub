@@ -14,6 +14,11 @@
 | hmac / sha2 / sha1（sha1仅server-only TURN REST兼容） | https://github.com/RustCrypto/MACs / https://github.com/RustCrypto/hashes | MIT OR Apache-2.0 |
 | base64 / zeroize（服务端票据与秘密内存清理） | https://github.com/marshallpierce/rust-base64 / https://github.com/RustCrypto/utils | MIT OR Apache-2.0 |
 | ring 0.17.14（传递密码依赖） | https://github.com/briansmith/ring | Apache-2.0 AND ISC |
+| ed25519-dalek 2.2.0 / curve25519-dalek 4.1.3（P2-01本机身份） | https://github.com/dalek-cryptography/curve25519-dalek | BSD-3-Clause |
+| curve25519-dalek-derive 0.1.1 | https://github.com/dalek-cryptography/curve25519-dalek | MIT OR Apache-2.0 |
+| ed25519 2.2.3 / signature 2.2.0 | https://github.com/RustCrypto/signatures / https://github.com/RustCrypto/traits | MIT OR Apache-2.0 |
+| base64ct / const-oid / der / pkcs8 / spki（新锁条目，部分为未启用的可选依赖） | https://github.com/RustCrypto/formats | MIT OR Apache-2.0 |
+| fiat-crypto 0.2.9（锁中可选后端） | https://github.com/mit-plv/fiat-crypto | MIT OR Apache-2.0 OR BSD-1-Clause |
 | Axum 0.8.8 / axum-server 0.8.0（隔离实验信令） | https://github.com/tokio-rs/axum / https://github.com/programatik29/axum-server | MIT |
 | tokio-tungstenite / tungstenite 0.28.0 | https://github.com/snapview/tokio-tungstenite / https://github.com/snapview/tungstenite-rs | MIT OR Apache-2.0 |
 | rustls 0.23.46 / rustls-pemfile 2.2.0 | https://github.com/rustls/rustls / https://github.com/rustls/pemfile | Apache-2.0 OR ISC OR MIT / Apache-2.0 OR ISC OR MIT |

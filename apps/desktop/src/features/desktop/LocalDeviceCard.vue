@@ -31,6 +31,11 @@ defineEmits<{ refresh: [] }>();
         }}
       </p>
       <div class="local-card-tags">
+        <span
+          v-if="!loading && runtime?.identity?.status === 'ready'"
+          class="muted-chip"
+          >本机标识 {{ runtime.identity.device_id }}</span
+        >
         <span v-if="runtime && !loading" class="muted-chip"
           >{{ runtime.os }} · {{ runtime.arch }}</span
         >

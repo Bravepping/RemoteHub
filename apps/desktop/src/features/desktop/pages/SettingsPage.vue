@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { RuntimeInfo } from '../../../bridge';
 import AppIcon from '../AppIcon.vue';
+import IdentityReadout from '../IdentityReadout.vue';
 defineProps<{ runtime?: RuntimeInfo; loading: boolean }>();
 defineEmits<{ refresh: [] }>();
 </script>
@@ -44,6 +45,7 @@ defineEmits<{ refresh: [] }>();
       </div>
     </dl>
   </section>
+  <IdentityReadout :identity="runtime?.identity" :loading="loading" />
   <section class="product-card settings-security">
     <div class="card-header">
       <h2><AppIcon name="shield" />权限与启动</h2>

@@ -1,0 +1,15 @@
+[package]
+name = "hub-identity"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "fast", "zeroize"] }
+sha2 = "=0.10.9"
+zeroize = "=1.9.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Security_Cryptography", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_Com", "Win32_UI_Shell"] }

@@ -1,19 +1,25 @@
 # RemoteHub 当前开发指引
 
-更新日期：2026-11-22；P1-06普通UI人工验收基线ddbe191。这里补充当前实施/审查入口；[v1.0完整规范](RemoteHub_完整开发文档_v1.0.md)保持原文，各历轮报告按当时结论归档。当前用户决议优先于旧报告的待批准状态。
+更新日期：2026-11-22；P2-01实施基线d7ce2e0。这里补充当前实施/审查入口；[v1.0完整规范](RemoteHub_完整开发文档_v1.0.md)保持原文，各历轮报告按当时结论归档。当前用户决议优先于旧报告的待批准状态。
 
 ## 当前事实与权限
 
 - 用户已审查767ff44并接受R06未关闭剩余风险、批准Phase0限定退出，正式父项7/7；P004已批准例外及未录屏事实保留。最新决议见[批准记录](PHASE0_EXIT_DECISION.md)，不是产品发布或R06修复结论。
 - R06历史未复现、根因未知。新版一轮8秒真实双机正常终态已验证，不能补写旧缺失final或扩成全环境可靠性。见[最终证据矩阵](PHASE0_FINAL_EVIDENCE_MATRIX.md)、[风险登记](PHASE0_RISK_REGISTER.md)、[退出评审](PHASE0_FINAL_EXIT_REVIEW.md)。
-- 本轮仅批准P1-06本机普通UI人工验收及最终退出评审材料，交付后等待审查。允许本机UI/离线回归，不运行旧激活脚本、不启阿里云、不双机/应用真实桌面采集/远控输入，不执行第三方安装器；Phase 2/兼容原型不自动开工。
+- 用户已批准Phase 1限定退出，见[追加决议](PHASE1_EXIT_DECISION.md)；本轮只批准P2-01本机身份。生产初始化只在普通版启动进行，不开放登录/配对/信令/远控。无云/真实采集/实际输入/双机/第三方后端，提交后等待审查，不进P2-02。
 
 ## 实施基线与后续门槛
 
 1. 栈保持Tauri v2 / Rust / Vue3 / TypeScript / Tailwind，复用现有workspace和媒体Session，不重新创建工程。
-2. [P1方案](PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)中P1-01至05已交付，当前只交付P1-06及退出评审准备；真实设备/连接/会话动作和兼容运行仍待后续授权。Pinia/只读IPC边界见[P1-04合同](P104_IPC_CONTRACT.md)及[ADR0019](ADR/0019-p104-pinia-typed-readonly-ipc.md)；导航与实验隔离见[ADR0017](ADR/0017-p102-local-navigation-shell.md)，弹窗/工具栏边界见[ADR0018](ADR/0018-p103-inert-connection-and-session-ui.md)。
+2. [P1方案](PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)中P1-01至05已交付，Phase 1已获限定退出，本轮仅P2-01身份模块；真实设备/连接/会话动作和兼容运行仍待后续授权。Pinia/只读IPC边界见[P1-04合同](P104_IPC_CONTRACT.md)及[ADR0019](ADR/0019-p104-pinia-typed-readonly-ipc.md)；导航与实验隔离见[ADR0017](ADR/0017-p102-local-navigation-shell.md)，弹窗/工具栏边界见[ADR0018](ADR/0018-p103-inert-connection-and-session-ui.md)。
 3. [兼容评估](COMPATIBILITY_INTEGRATION_ASSESSMENT.md)明确Foundation/V+ PC/EasyTier目标与现有WebRTC的差距；必须先固定具体目标、来源/许可、角色/单UI/进程合同，再决定原型。最新[C0合同草案](C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)仅待审决议，公开来源核对不等于C1完成；当前没有兼容实现或第三方运行依赖。
 4. [ADR0014](ADR/0014-phase0-final-review-and-risk-gates.md)更新验收门槛；[ADR0015](ADR/0015-client-backend-and-compatibility-plan.md)记录后端提案。旧ADR0012/13保留当时事实，不据旧授权启动服务。
+
+## 当前P2-01入口
+
+[身份契约](P201_IDENTITY_CONTRACT.md)/[ADR0022](ADR/0022-local-ed25519-dpapi-identity.md)/[开发说明](P201_IDENTITY_GUIDE.md)/[测试报告](P201_TEST_REPORT.md)。`hub-identity`是私钥所有者，桌面缓存公开状态；不在Pinia/浏览器存私钥，不添加通用签名IPC。`pnpm verify:p201`、`python scripts/p201-native.py`和`python scripts/p201-evidence.py`使用新artifacts/p201，不刷新历史目录。实际DPAPI需要正常Windows用户加密profile；工具受限失败按不可用记录，不降级。
+
+以下P1入口保留作冻结版本的历史说明，当前授权/阶段状态以本段和TASKS为准。
 
 ## 代码导航与边界
 

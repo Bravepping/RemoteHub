@@ -1,0 +1,20 @@
+    Checking remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+warning: unused dependency `hub-identity`
+  --> apps\desktop\src-tauri\Cargo.toml:25:1
+   |
+25 | hub-identity = { path = "../../../crates/hub-identity" }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_dependencies` is set to `warn` by default
+help: consider removing the dependency on `hub-identity`
+warning: unused dependency `hub-webrtc`
+  --> apps\desktop\src-tauri\Cargo.toml:26:1
+   |
+26 | hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: consider removing the dependency on `hub-webrtc`
+warning: `remotehub-desktop` (manifest) generated 2 warnings
+    Finished `dev` profile [unoptimized] target(s) in 0.99s
+
+EXIT=0

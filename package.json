@@ -19,7 +19,8 @@
     "verify:p103": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p103.ps1",
     "verify:p104": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p104.ps1",
     "verify:p105": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p105.ps1",
-    "verify:p106": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p106.ps1"
+    "verify:p106": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p106.ps1",
+    "verify:p201": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p201.ps1"
   },
   "devDependencies": { "prettier": "3.10.1" }
 }

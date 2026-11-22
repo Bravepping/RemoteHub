@@ -1,0 +1,17 @@
+✔ resolved real Tauri manifest removes JS tray/menu without adding any allowed command (2.2313ms)
+✔ rejects unauthorized permission core:default (0.3212ms)
+✔ rejects unauthorized permission core:tray:allow-new (0.0758ms)
+✔ rejects unauthorized permission core:menu:allow-set-checked (0.0706ms)
+✔ rejects unauthorized permission shell:allow-execute (0.0691ms)
+✔ rejects duplicate permissions instead of mistaking array length for equivalence (0.1002ms)
+✔ rejects foreign windows or remote source permissions (0.0915ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 7
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 101.0535
+
+EXIT=0

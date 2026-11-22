@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod experiment_origin;
+#[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+mod identity;
 #[cfg(not(feature = "p004-probe"))]
 mod lifecycle;
 #[cfg(not(feature = "p004-probe"))]
@@ -51,6 +53,8 @@ mod lease_tests {
 
 #[derive(Serialize)]
 struct RuntimeInfo {
+    #[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+    identity: identity::IdentityView,
     app_version: &'static str,
     os: &'static str,
     arch: &'static str,
@@ -65,8 +69,19 @@ struct RuntimeInfo {
 }
 
 #[tauri::command]
-fn get_runtime_info() -> RuntimeInfo {
-    RuntimeInfo {
+fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String> {
+    #[cfg(not(feature = "p004-probe"))]
+    {
+        experiment_origin::origin(&window).map_err(|_| "IDENTITY_SOURCE_DENIED")?;
+    }
+    #[cfg(feature = "p004-probe")]
+    let _ = window;
+    Ok(RuntimeInfo {
+        #[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+        identity: {
+            use tauri::Manager;
+            window.state::<identity::DesktopIdentity>().view()
+        },
         app_version: env!("CARGO_PKG_VERSION"),
         os: std::env::consts::OS,
         arch: std::env::consts::ARCH,
@@ -82,7 +97,7 @@ fn get_runtime_info() -> RuntimeInfo {
         p006_enabled: cfg!(feature = "p006-relay"),
         p006c_enabled: cfg!(feature = "p006-direct"),
         p007b_diag_enabled: cfg!(feature = "p007b-diag"),
-    }
+    })
 }
 
 #[cfg(not(feature = "p006-relay"))]
@@ -143,6 +158,8 @@ fn main() {
         return;
     }
     let builder = tauri::Builder::default();
+    #[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+    let builder = builder.manage(identity::DesktopIdentity::initialize());
     #[cfg(not(feature = "p006-relay"))]
     let probe = std::sync::Arc::new(ProbeState::default());
     #[cfg(not(feature = "p004-probe"))]
