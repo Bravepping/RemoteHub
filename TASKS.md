@@ -36,18 +36,18 @@
 
 - [x] `P0-07-C` **prepared（最终离线评审与P1规划完成；正式决议待用户）** — 同步P004已批准例外为done，旧报告不改；最终矩阵/风险与R06修复条件、退出报告、ADR0014/15及具体Foundation/V+ PC/EasyTier集成方案交付。只读核对本地候选版本/哈希，不执行安装器、不联网核验上游；当前没有三件套互操作证据。仅新增文档/离线审核工具和新证据索引，无产品源码/依赖/服务变更、不重写历史。P006/P007父项不提前done，R06接受/退出/P1实施分别PENDING；提交后等正式审查。
 
-## Phase 1 · 工程与 UI（P1-06交付；退出评审待批准）
+## Phase 1 · 工程与 UI（P1-06普通UI人工验收通过；最终退出待批准）
 
-用户已批准本轮P1-06托盘与退出生命周期及Phase 1退出评审准备；见docs/P106_TEST_REPORT.md、PHASE1_EXIT_REVIEW_PREPARATION.md、ADR0021及C0_D1_D6_USER_DECISION_SHEET.md。真实设备/会话服务和三件套兼容原型未实施，Phase 1退出和Phase 2未自动批准，提交后停止等待审查。
+用户已阶段性接受P1-06代码/权限/离线回归，并另行批准本机普通UI人工验收；本轮实操通过，见docs/P106_MANUAL_TEST_REPORT.md与PHASE1_FINAL_EXIT_REVIEW.md。原报告/退出准备和ADR0021保留，C0_D1_D6_USER_DECISION_SHEET.md继续待用户决定。真实设备/会话服务和三件套兼容原型未实施，Phase 1退出和Phase 2未自动批准，提交后停止等待审查。
 
 - [x] `P1-01` **done（工程基础与质量门禁；fdfb9e3已审查）** — 复用Cargo/pnpm及锁定栈；8种既有构建配置真实Cargo解析、9隔离测试、verify:p1统一入口与IPC/状态合同完成。47质量命令通过，Rust全特性82/默认56（各1私有MF ignored）、34前端/3Edge/12Python；截图目录隔离后Edge再测通过，旧原图/报告/证据不改。默认Windows原生构建通过；无产品Rust/Vue/权限/依赖锁变化，无云/桌面采集/实际输入/新双机。见docs/P101_TEST_REPORT.md及artifacts/p101。本段数量为P1-01历史结果；P1-02当前交付见下。
 - [x] `P1-02` **done（五页导航及真实空态；d0fd876已审查）** — 概念图风格产品壳/固定hash五页、键盘/深链/刷新/历史与900/640/450布局完成；get_runtime_info真实只读信息，未接入设备/连接/会话保持空态，无假统计。43前端/9Edge、47质量命令、82全feature/56默认Rust各1ignored、8Cargo配置/9隔离测试通过，默认原生构建完成。原生首页/设置文本已观察；并发人工输入后停止自动点击，其他原生点击未记PASS；无效辅助背景截图已丢弃不入Git，视觉证据为真实Edge页面。旧实验流程隔离保留，无云/应用真实采集/远控输入/新双机，CSP/权限/原生媒体/锁不改。见docs/P102_TEST_REPORT.md及artifacts/p102。
 - [x] `P1-03` **done（UI卡片、连接准备弹窗和无会话浮动工具栏；481e17e已审查）** — 统一卡片/真实本机能力，内建modal打开/关闭/Escape/回焦点/卸载清理，无会话工具栏可展开/收起和本地导航；发起连接、画质/码率/全屏/断开均未接入且禁用，不假造设备/进度/统计。50前端/14真实Edge、47质量检查通过；Rust全feature82/默认56各1ignored、8真实Cargo配置/9隔离测试、12Python及默认Windows编译通过。原生UI/双机未新测；无云/桌面采集/输入，旧实验、安全和锁不改，见docs/P103_TEST_REPORT.md及artifacts/p103。
 - [x] `P1-04` **done（Pinia与类型化只读Tauri IPC；9418db2已交付，后续P1-05获批）** — 精确Pinia3.0.4/应用独立store、统一DesktopApi和默认真实get_runtime_info、严格响应校验、固定错误、5秒/取消/代次/刷新合并与卸载清理；测试替身仅显式注入，设备/会话未接入保持空态。47检查、79前端/15真实Edge、Rust全feature82/默认56各1ignored、12Python、8真实Cargo配置/9隔离测试、Windows编译通过。实际原生首页只读文本确认真实IPC/Pinia/界面链路；无截图或键鼠动作，刷新/超时/取消原生交互未测。Pinia及11传递包新增锁定，审计0已知漏洞；Rust/权限/媒体/旧证据不改，无云/采集/输入。见docs/P104_TEST_REPORT.md及artifacts/p104。
 - [x] `P1-05` **done（中文状态/错误反馈；7f36b39已交付，后续P1-06获批）** — 原生IPC失败不提浏览器，读取/刷新/超时/取消/失败/恢复固定中文反馈、手动重试与取消入口，新读取清旧字段，Pinia代次隔离保持。47检查/88前端/18Edge、Rust全feature82/默认56各1ignored、12生命周期Python、12隐私/9交付工具、默认Windows编译通过。原生五页尝试因工具未返回可访问窗口而未完成，不列PASS；仅本轮两个测试实例已精确核对清理。无截图/真实桌面/远端输入/云/新双机，原生权限/媒体/锁不改，见docs/P105_TEST_REPORT.md与artifacts/p105。
-- [ ] `P1-06` **implemented / native-validation-blocked（托盘与退出代码/离线回归完成；原生验收未完成，暂不勾选完成）** — 默认X真正退出，仅原生菜单主动启用本次驻留才隐藏；显示/退出幂等，不保存驻留/不自启。实验构建不接托盘，保留原清理；普通有界采集与驻留/退出互斥。47主检查、7权限测试、88前端/18Edge、Rust全feature82/默认62各1ignored及12生命周期/12隐私/9交付回归通过；默认Windows构建通过。两次原生探针均在产生验证记录前返回系统错误，托盘/退出真实操作仍NOT_COMPLETED，Edge不替代。有效前端权限只减不增，媒体/锁/旧日志不改，无云/双机/真实采集/实际输入/第三方运行。见docs/P106_TEST_REPORT.md及artifacts/p106。
+- [x] `P1-06` **done（本机普通Windows UI限定人工验收通过；Phase 1退出待用户审查）** — 默认X退出、重开默认未驻留、主动驻留隐藏、显示及重复显示、取消驻留恢复、取消后X退出、驻留时真正退出共7场景由用户实操确认；三个绑定PID退出信号及残留0独立核对。五页基本导航/设置重新检测/真实空态人工通过。程序SHA及步骤见docs/P106_MANUAL_TEST_REPORT.md和artifacts/p106-manual；窗口句柄不可得/数值退出码null如实保留，不记自动视觉或退出码0。应用/权限/媒体/锁不变，继承ddbe191已验收完整回归，本轮另12证据门禁/12隐私/9交付/7权限检查通过。旧探针失败根因仍未知，活动媒体关闭/完整原生错误恢复/Win11/DPI未新测。无云/采集/实际输入/双机/第三方/系统修改，未进入Phase 2。
 
-P1-05窗口显示依据用户亲眼确认追加为`USER_CONFIRMED_WINDOW_VISIBLE`，见docs/P105_USER_WINDOW_VISIBILITY_ADDENDUM.md；原日志/旧报告保留，五页原生逐页交互仍未完整验证。Phase 1退出准备仅PREPARED_AWAITING_USER_REVIEW，不把实现交付等同原生全部验收或阶段退出。
+P1-05窗口显示依据用户亲眼确认追加为`USER_CONFIRMED_WINDOW_VISIBLE`，见docs/P105_USER_WINDOW_VISIBILITY_ADDENDUM.md；原日志/旧报告保留，当时五页原生逐页交互未完整验证的历史保留。本轮五页基本导航/只读检测已由用户人工验证，完整原生错误恢复仍未覆盖。Phase 1最终退出见docs/PHASE1_FINAL_EXIT_REVIEW.md，状态READY_FOR_USER_REVIEW/NOT_APPROVED，不把任务验收等同阶段退出。
 
 - [x] `C0-DRAFT` **prepared（合同草案，非正式目标签署或兼容实现）** — Foundation Sunshine↔Moonlight V+ PC原生互操作、单安装器/统一UI、受管理进程/窗口例外、EasyTier承载、版本来源/许可证门槛与D1–D6待决事项已写明；公开来源/许可证头只读观察归档，未绑定旧安装器。C0正式批准/C1来源冻结/第三方原型仍未完成，未安装或启动三件套。
 

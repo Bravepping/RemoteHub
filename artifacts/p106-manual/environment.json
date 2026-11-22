@@ -1,0 +1,8 @@
+{
+    "recordedAt":  "2026-11-22T18:46:12.2940241+08:00",
+    "source":  "System.Environment read-only API",
+    "osVersion":  "Microsoft Windows NT 10.0.19045.0",
+    "is64BitOperatingSystem":  true,
+    "edition":  "NOT_VERIFIED",
+    "cimQuery":  "ACCESS_DENIED_NO_SYSTEM_CHANGE"
+}

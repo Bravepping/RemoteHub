@@ -1,0 +1,80 @@
+{
+  "nativeLifecycle": "USER_MANUAL_PASS_WITH_PROCESS_EXIT_EVIDENCE",
+  "lifecycleScenarios": 7,
+  "nativeBasicPages": "USER_MANUAL_PASS",
+  "pages": [
+    "home",
+    "devices",
+    "connect",
+    "sessions",
+    "settings"
+  ],
+  "readonlyRefresh": "USER_MANUAL_PASS",
+  "instances": {
+    "A": {
+      "processId": 13036,
+      "startedUtc": "2026-11-22T10:32:05.1441588Z",
+      "exitedAt": "2026-11-22T18:32:54.8394332+08:00",
+      "exitCode": null,
+      "exitCodeVerdict": "UNAVAILABLE",
+      "exitSignalObserved": true,
+      "remainingInstances": 0
+    },
+    "B": {
+      "processId": 20660,
+      "startedUtc": "2026-11-22T10:33:52.8112230Z",
+      "exitedAt": "2026-11-22T18:37:14.1045997+08:00",
+      "exitCode": null,
+      "exitCodeVerdict": "UNAVAILABLE",
+      "exitSignalObserved": true,
+      "remainingInstances": 0
+    },
+    "C": {
+      "processId": 22668,
+      "startedUtc": "2026-11-22T10:37:53.9282492Z",
+      "exitedAt": "2026-11-22T18:39:02.2888509+08:00",
+      "exitCode": null,
+      "exitCodeVerdict": "UNAVAILABLE",
+      "exitSignalObserved": true,
+      "remainingInstances": 0
+    }
+  },
+  "windowVisibilitySource": "USER_RESPONSE_ONLY; process metadata is not visibility proof",
+  "exitCodeZeroClaimed": false,
+  "allNativeErrorStatesTested": false,
+  "phase1Exit": "AWAITING_USER_REVIEW",
+  "phase2Started": false,
+  "recordedAt": "2026-11-22T18:48:29.104663+08:00",
+  "passed": true,
+  "testedApplicationCommit": "ddbe191424c2a7379b43d81ac58f746ea32a6997",
+  "programSha256": "be56951a4c79a0749fd7688c6c9a55ba9a9ffed777cb6ce78daeae9fbb3be315",
+  "applicationSourcesPermissionsMediaAndLocksUnchanged": true,
+  "historicalEvidenceUnchanged": true,
+  "agentStartedApplication": false,
+  "desktopCapture": false,
+  "remoteInput": false,
+  "cloud": false,
+  "twoPcStreaming": false,
+  "thirdPartyBackendStarted": false,
+  "systemConfigChanged": false,
+  "oldProbeRootCause": "NOT_DETERMINED",
+  "R06": "OPEN_NOT_REPRODUCED",
+  "c0": "PENDING_USER_DECISIONS",
+  "relativeLinksChecked": 99,
+  "evidenceHashFormat": "SHA256 of UTF-8 LF text without BOM",
+  "textEvidenceSha256": {
+    "build.json": "71864701d2cfa9bdb8108e59996858aa6d923a560fa3e3df5afc5faac83175b6",
+    "case-A-process.jsonl": "e4ff174103d30700f61db47a2e2fa4c81017c32e513f3d9dd12b8e48b6eae106",
+    "case-B-process.jsonl": "e187ce0d80f90a894bf996ca1f89a3e833af04fc3b90e5d863ebc9a2917fa31b",
+    "case-C-process.jsonl": "7e4f34b145ef486fde6c4c509f5464a7fda8beba8d3b406f30b40ea0708298c6",
+    "cleanup.json": "8b79cdba6b951900754808df33607290a7e23233d5d4e1c1dd68285e480fd384",
+    "environment-initial-cim.json": "03919ad79e33e38e2a691b113a2dbf9c0e3af66bf01f001c1175cb373a54be57",
+    "environment.json": "a4c7da5395f29d5f4b76b5fcf3aec188087b7989fe0825bfeccb5003f7530447",
+    "user-observations.jsonl": "83d39fa33bc011947b9319af3510b3cbc5477bbe8a186f93ba1254e0bc4d22d2",
+    "regression/delivery.txt": "6f2052121886b8e2308503487538a2502d9afeee929063075bcc15d5ca70fecc",
+    "regression/manual-evidence.txt": "3aa4ec5210d25a93531b5a9167fce4c7cd841a9aae3b331b38bb46b265fd7358",
+    "regression/permissions.txt": "ac36016346a41716f308856b625ba48cd5b21df039e936a6b25322b9a416e1b3",
+    "regression/privacy.txt": "700f302e9d80e63c6506faf88e63387ba618329165c51c91ce68592aaee59bd8",
+    "regression/results.json": "71dad8b62ef44aecc5078f97adcff7ed1cea2da9a21e632ac231cee068201538"
+  }
+}

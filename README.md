@@ -4,11 +4,11 @@
 
 用户审查`767ff44`后已**接受R06尚未关闭的剩余风险并批准Phase0限定退出**，正式父项7/7；P1-01至05已交付，本轮仅实施用户批准的P1-06与退出评审准备。P004已批准统计+现场观看替代录屏，历史未录屏事实保留。R06历史两次拒绝未复现/根因未知，技术问题仍开放；新版正常终态不追补旧文件。见[退出决议](docs/PHASE0_EXIT_DECISION.md)及[风险台账](docs/PHASE0_RISK_REGISTER.md)。尚无实际输入或持久设备身份服务，不是可发布成品。
 
-**P1-06托盘与退出生命周期已实现，等待审查**：默认点击×真正退出；仅在Rust原生托盘菜单主动勾选“本次允许托盘驻留”后才隐藏。显示/退出幂等，驻留不持久化、不自动启动；视频实验构建不安装托盘隐藏逻辑，继续原关闭停止流程。前端菜单/托盘权限已收窄，未新增IPC或后台授权。见[P1-06报告](docs/P106_TEST_REPORT.md)、[独立证据](artifacts/p106/verification.json)。
+**P1-06普通Windows UI人工验收通过，Phase 1最终退出待审**：用户亲自验证默认X退出、主动驻留/隐藏、重复显示恢复、取消驻留/恢复与X退出、托盘真正退出；三个指定PID均收到退出信号且清零。五页基本导航、设置重新检测和真实空态人工通过。代码/权限/媒体/锁本轮不变，见[本轮报告](docs/P106_MANUAL_TEST_REPORT.md)与[独立证据](artifacts/p106-manual/verification.json)。
 
-P1-05原生窗口按用户亲眼确认追加为 **USER_CONFIRMED_WINDOW_VISIBLE**；原自动化日志保持不变，五页逐页原生交互仍未完整验证，见[追加记录](docs/P105_USER_WINDOW_VISIBILITY_ADDENDUM.md)。本轮原生生命周期探针启动返回系统错误，未取得托盘/退出原生PASS；Edge及单元结果不替代该验收。没有云、双机、应用真实采集、实际远端输入或第三方软件运行。
+界面结果明确来自用户人工确认，Agent独立核对SHA/唯一PID/启动时间/退出信号和清零。进程接口无主窗口句柄、退出码数值null，均不补写自动视觉或退出码0。原P105窗口USER_CONFIRMED_WINDOW_VISIBLE及旧探针失败原始记录保留；本轮普通UI通过不代表探针根因已修复，完整原生错误恢复、活动媒体关闭、Win11/DPI仍非本轮实测。
 
-[Phase 1退出评审准备](docs/PHASE1_EXIT_REVIEW_PREPARATION.md)区分实现、自动测试、用户确认与未验证项；**仅准备评审，未批准Phase 1退出或进入Phase 2**。[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)及[D1–D6用户决策单](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，第三方后端未启用，C1未完成。
+[Phase 1最终退出评审](docs/PHASE1_FINAL_EXIT_REVIEW.md)建议限定范围退出，状态仍READY_FOR_USER_REVIEW/NOT_APPROVED；未进入Phase 2。先前[退出准备](docs/PHASE1_EXIT_REVIEW_PREPARATION.md)保留当时HOLD事实。[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)及[D1–D6决策单](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，第三方后端未启用，C1未完成。
 
 技术栈继续Tauri v2/Rust/Vue3/TypeScript，见[P1实施方案](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前指引](docs/DEVELOPMENT_GUIDE.md)。[Foundation / V+ PC / EasyTier评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)仍为提案；WebRTC不等于已兼容三件套，运行集成/多进程/驱动及分发范围未获本轮授权。
 

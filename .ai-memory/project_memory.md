@@ -1,11 +1,10 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P1-06）
-Phase0限定退出/父项7/7与P004例外已批准，R06继续OPEN_NOT_REPRODUCED/根因未定；P1-01至05已交付。当前仅批准P1-06托盘/退出及退出准备；代码与离线完成，原生探针启动受阻，P1-06暂不勾选完成，不进入Phase2或兼容原型。
-当前入口docs/P106_TEST_REPORT.md、PHASE1_EXIT_REVIEW_PREPARATION.md、C0_D1_D6_USER_DECISION_SHEET.md、ADR0021。pnpm verify:p106独立artifacts/p106：47主检查/88前端/18Edge、全feature82/默认62 Rust各1ignored、12生命周期、8真实Cargo配置/9隔离测试；另7权限、12隐私/9交付通过。默认Windows EXE与独立原生探针编译通过。
-默认X退出，只有原生托盘主动勾选本次驻留才隐藏；无持久化/自启或前端开关/新IPC。图标可用前提、同锁采集互斥和重复退出合并；普通任务退出最多等待7秒，仍忙恢复可见，不假报资源释放。所有视频实验构建不安装托盘，原停止handler/底层媒体不变。core:default拆为既有7集合，实际允许命令114降80/新增0/JS tray与menu为0；自定义实验权限/CSP/锁不变。
-用户亲眼确认P105 Windows窗口显示，单独追加USER_CONFIRMED_WINDOW_VISIBLE，旧报告/日志不改；五页原生逐页交互仍未完整验证，不重测是否出现。本轮原生API探针两次exit0xc0000139，无native记录，根因未知，不能补写托盘PASS；自有测试进程/临时WebView目录核对0，未动用户应用。
-Pinia/严格只读IPC/5秒/代次隔离与空态保持。C0 D1–D6均待用户决定，C1/第三方运行未开始；自研WebRTC主线保留。退出准备PREPARED_AWAITING_USER_REVIEW，建议HOLD_FOR_NATIVE_TRAY_ACCEPTANCE，阶段退出与Phase2未批准。本轮无云/双机/应用真实桌面/实际远端输入/第三方/驱动/路由操作，旧云授权不复活。
+# 当前决议与恢复入口（2026-11-22，P1-06普通UI人工验收）
+Phase0限定退出/E04例外已批准，R06 OPEN_NOT_REPRODUCED根因未定。P1-06代码/权限/离线阶段获接受；本轮仅普通UI人工验收，7生命周期/五页基本导航与设置刷新已由用户逐步确认，3绑定PID退出信号/残留0独立核对。P1-06本机UI限定done，Phase1退出READY_FOR_USER_REVIEW/NOT_APPROVED，不进入Phase2。
+应用源码/权限/媒体/锁未改，普通EXE构建仅custom-protocol，SHA见artifacts/p106-manual/build.json。新报告docs/P106_MANUAL_TEST_REPORT.md与PHASE1_FINAL_EXIT_REVIEW.md；12证据门禁/12隐私/9交付/7权限复核通过，47完整回归等沿用ddbe191已验收证据，不冒充本轮重跑。
+本轮Agent未启动/点击/结束目标，用户亲自操作；Agent只读绑定PID13036/20660/22668，均已退出。窗口句柄不可得，退出码null，不记自动视觉或退出码0；用户视觉/菜单原话独立归档。旧探针0xc0000139根因仍未知，普通UI通过不意味着探针修复；旧报告/日志不改。完整原生故障状态/活动视频关闭/Win11/DPI未补测。
+不启云/采集/实际输入/双机/第三方/驱动/路由，不修改系统安全。C0 D1–D6待用户决定、C1未完成，自研WebRTC主线保留。提交后等待正式审查，不自动批准阶段退出。
 
 以下历史不覆盖本段及最新授权。
 
