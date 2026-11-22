@@ -1,3 +1,10 @@
+# P0-07-C 最终离线评审交接（2026-11-22，材料完成，交付SHA见Git记录）
+
+- 已完成带证据：main7fde54e开工干净、origin一致；旧P007A索引只读check通过13组/72源文件；四个本地候选安装包仅取版本资源和SHA，不执行/安装。TASKS P004已与批准决议同步done；README过时待测语句已改为分轮历史。新审核工具10项检查通过，冻结来源106份，文档/范围/隐私初检通过，无运行测试。
+- 相关文件：P007_FINAL_REVIEW_PLAN、ADR0014/15、PHASE0_FINAL_EVIDENCE_MATRIX、PHASE0_RISK_REGISTER、PHASE0_FINAL_EXIT_REVIEW、COMPATIBILITY_INTEGRATION_ASSESSMENT、PHASE1_DESKTOP_IMPLEMENTATION_PLAN、DEVELOPMENT_GUIDE；scripts/p007-final-review.py；artifacts/p007-final含候选元数据、冻结索引和verification。未重跑旧41/33回归，不改旧报告/统计/产品源码。
+- 未完成：没有待扩展开发；本轮完成正常Git提交及远端核对后停止，交付SHA以Git记录/最终回复为准。用户尚需正式决定R06风险接受、Phase0退出和P1实施；当前5/7，P006/P007未提前done。历史未复现/根因未知不改写为修复。
+- 阻塞/边界：本轮只离线审查/规划，不登录或启阿里云、不重测双机、不采集、不注入、不重写历史、不实施P1。旧手动授权已经结束；最后已知服务停止为7fde54e报告的13:40:16，本轮未实时复查。Foundation/V+来源/源码/许可/API仍未核验，不能用上游代替。下文为历史检查点，状态以此段及最新TASKS为准。
+
 # P007B PRIVACY v2 已交付下载检查点
 
 - 实际GitHub预发布r06-diag-v2-20261122已创建；公开下载ZIP及SHA256SUMS经资产API与无凭据公开URL实际下载重算均一致，published.json已保存。ZIP RemoteHub-R06-Diagnostic-v2-20261122.zip 6,018,222字节 SHA6cf08d04670fab5068ac1f288daf96ab55e7d912d0e25de0e2fe6a1a1a669706；EXE SHA7deac839ee2e8fcc0e3ad47433f2431a0ce242bd3a297e90da0ef717effd79c0。程序源码未变但重建hash不同，不称可重复构建。

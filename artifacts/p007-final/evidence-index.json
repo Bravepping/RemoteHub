@@ -1,0 +1,318 @@
+{
+  "version": 1,
+  "reviewDate": "2026-11-22",
+  "baselineCommit": "7fde54e6d94f2eb9ef2697e437cccfd42f4f67c9",
+  "scope": "Offline final review of archived evidence, no new runtime/cloud/two-PC tests",
+  "historicalGroups": [
+    {
+      "id": "P001",
+      "scope": "historical native Windows 10 Tauri/WebView2 observation",
+      "sources": [
+        "artifacts/native-window.txt",
+        "artifacts/environment.json"
+      ],
+      "limitations": "No new GUI or Windows 11 test."
+    },
+    {
+      "id": "P002",
+      "scope": "historical real DXGI desktop",
+      "sources": [
+        "artifacts/capture-report.json"
+      ],
+      "limitations": "Desktop-update observation FPS; not encoded or rendered FPS."
+    },
+    {
+      "id": "P003",
+      "scope": "historical real desktop / MF hardware encode / independent decode",
+      "sources": [
+        "artifacts/p003/hardware-encode-report.json",
+        "artifacts/p003/decoder-validation.json",
+        "artifacts/p003/software-encode-report.json"
+      ],
+      "limitations": "Single hardware environment; CPU/encode metrics are not glass-to-glass latency."
+    },
+    {
+      "id": "P004a",
+      "scope": "historical single-PC native WebView2 real desktop video",
+      "sources": [
+        "artifacts/p004a/native-session-summary.json",
+        "artifacts/p004a/run-08-window-close.json"
+      ],
+      "limitations": "Not physical two-PC; close-time JS counters absent, no recording."
+    },
+    {
+      "id": "P004b",
+      "scope": "historical physical two-PC native WebView2 wired LAN desktop",
+      "sources": [
+        "artifacts/p004b/full-30s.json",
+        "artifacts/p004b/cleanup-runs.json"
+      ],
+      "limitations": "Original recording missing; receiver independent close report not collected."
+    },
+    {
+      "id": "P005",
+      "scope": "historical physical two-PC desktop + real control.v1 SCTP",
+      "sources": [
+        "artifacts/p005/dual-pc-full.json",
+        "artifacts/p005/dual-pc-repeat.json",
+        "artifacts/p005/dual-pc-cleanup.json"
+      ],
+      "limitations": "Receiver last periodic 893 is not receiver final 900; simulated inputs only."
+    },
+    {
+      "id": "G6",
+      "scope": "historical real cloud UDP STUN / TURN protocol and Windows gather",
+      "sources": [
+        "artifacts/p006a/g6/native-allocate-first.json",
+        "artifacts/p006a/g6/native-allocate.json",
+        "artifacts/p006a/g6/wire-results.json",
+        "artifacts/p006a/g6/server-summary.json"
+      ],
+      "limitations": "Allocate/gather alone is not a media selected-pair or physical two-PC test."
+    },
+    {
+      "id": "P006b",
+      "scope": "historical physical two-PC broadband / cellular hotspot, forced TURN",
+      "sources": [
+        "artifacts/p006b/two-pc/statistics.json",
+        "artifacts/p006b/two-pc/user-observations.json",
+        "artifacts/p006b/two-pc/round-01-native.json",
+        "artifacts/p006b/two-pc/round-02-native.json",
+        "artifacts/p006b/two-pc/round-03-native.json",
+        "artifacts/p006b/two-pc/round-04-native.json",
+        "artifacts/p006b/two-pc/round-05-native.json"
+      ],
+      "limitations": "Receiver-stop retest explicitly waived by user; independent early-stop log not fabricated. Old unassociated socket remains historical."
+    },
+    {
+      "id": "TURN-LIFECYCLE",
+      "scope": "historical real cloud + Windows protocol/data-only PC tests",
+      "sources": [
+        "artifacts/turn-lifecycle/results.json",
+        "artifacts/turn-lifecycle/observer-events.jsonl",
+        "artifacts/turn-lifecycle/shutdown.json"
+      ],
+      "limitations": "Same-PID single-allocation judgments precede shutdown; not a new media or two-PC test."
+    },
+    {
+      "id": "P006c-network",
+      "scope": "historical one Windows / two native PCs / real cloud TURN / data-only",
+      "sources": [
+        "artifacts/p006c/cloud/direct.json",
+        "artifacts/p006c/cloud/fallback.json",
+        "artifacts/p006c/cloud/turn-unavailable.json",
+        "artifacts/p006c/cloud/all-unavailable.json"
+      ],
+      "limitations": "Process-scoped packet faults; neither video nor physical two-PC. Expected timeout is not connection success."
+    },
+    {
+      "id": "P006c-cloud-video",
+      "scope": "historical one physical Windows / real cloud WSS+TURN / generated video + Edge",
+      "sources": [
+        "artifacts/p006c-video/cloud/auto.json",
+        "artifacts/p006c-video/cloud/fallback.json",
+        "artifacts/p006c-video/cloud/allocation-results.json",
+        "artifacts/p006c-video/cloud/events.jsonl",
+        "artifacts/p006c-video/cloud/shutdown.json"
+      ],
+      "limitations": "Direct blocking is process-scoped real packet loss, not physical NAT/ISP evidence; no desktop or embedded WebView2."
+    },
+    {
+      "id": "P006c-physical",
+      "scope": "historical physical two-PC DXGI/MF/Tauri/WebView2, LAN and cellular",
+      "sources": [
+        "artifacts/p006c-manual/lan/desktop-direct.json",
+        "artifacts/p006c-manual/hotspot/desktop-relay.json",
+        "artifacts/p006c-manual/development/lan-attempt-1.json",
+        "artifacts/p006c-manual/development/lan-attempt-2.json",
+        "artifacts/p006c-manual/cloud/allocation-results.json",
+        "artifacts/p006c-manual/cloud/events.jsonl",
+        "artifacts/p006c-manual/cloud/shutdown.json",
+        "artifacts/p006c-manual/local-cleanup.json"
+      ],
+      "limitations": "Two rejections remain unattributed; no independent receiver final and no inference of lost/missing final frames."
+    },
+    {
+      "id": "P006c-DIAG",
+      "scope": "historical latest-code offline regression and one-PC local TLS generated video",
+      "sources": [
+        "artifacts/p006c-diag/summary.json",
+        "artifacts/p006c-diag/historical-audit.json",
+        "artifacts/p006c-diag/automatic/results.json",
+        "artifacts/p006c-diag/development/wait-for-ack-timeout.txt",
+        "artifacts/p006c-diag/local/auto.json",
+        "artifacts/p006c-diag/local/sender-stop.json",
+        "artifacts/p006c-diag/local/receiver-stop.json",
+        "artifacts/p006c-diag/local/stats-failure.json",
+        "artifacts/p006c-diag/local/wss-disconnect.json"
+      ],
+      "limitations": "Not a new cloud/physical two-PC/embedded WebView2 close test; local 100-ACK development timeout also retained."
+    }
+  ],
+  "historicalSourceFilesVerified": 72,
+  "latestR06": {
+    "rounds": 1,
+    "source": "synthetic_nv12",
+    "framesSentReceivedDecodedRendered": [
+      240,
+      240,
+      240,
+      240
+    ],
+    "strictLocalReason": "matched",
+    "strictRemoteReason": "matched",
+    "receiverPreClose": "live",
+    "receiverFinal": "live",
+    "releaseClassifications": [
+      "refresh_zero_immediate",
+      "refresh_zero_immediate"
+    ],
+    "allocationPeak": 2,
+    "classifiedBeforeStop": true,
+    "historicalFailure": "NOT_REPRODUCED",
+    "historicalRootCause": "NOT_DETERMINED",
+    "natural19MinuteExpiryTested": false,
+    "newLeaseTimeoutTested": false,
+    "newAbnormalPhysicalFinalTested": false
+  },
+  "acceptedHistoricalRegression": {
+    "commands": 41,
+    "rust": 82,
+    "frontend": 34,
+    "privacy": 12,
+    "delivery": 9,
+    "rerunThisReview": false
+  },
+  "reviewState": {
+    "E04": "APPROVED_EXCEPTION",
+    "R06": "OPEN_NOT_REPRODUCED",
+    "R06RiskAcceptance": "PENDING",
+    "formalPhase0Exit": "HOLD_PENDING_USER_REVIEW",
+    "phase1Authorized": false,
+    "phase1Started": false,
+    "completedParents": 5,
+    "totalParents": 7,
+    "parentTasks": {
+      "P0-01": true,
+      "P0-02": true,
+      "P0-03": true,
+      "P0-04": true,
+      "P0-05": true,
+      "P0-06": false,
+      "P0-07": false
+    },
+    "compatibilityInterop": "NOT_IMPLEMENTED_NOT_TESTED",
+    "decisionRecordIsNotUserSignature": true
+  },
+  "localCandidateInventorySha256": "2903d0d5d20084dba2f57624024b9dff9333ab9b9ecf0fc3d6cd70851ab42d3f",
+  "targetSourceRevisionsPinned": false,
+  "sourceHashFormat": "SHA256 of exact Git blobs at frozen baseline; candidate inventory uses UTF-8 LF text SHA256",
+  "sources": {
+    "Cargo.lock": "f6ff84a5c2881457c1af72be2dc3d6f11980c988ae26ba56c951f6e2163b4b4b",
+    "Cargo.toml": "626745c27652c055c4545832eacbb29fcc5f87243bd6fdb3e3a54abbab95d037",
+    "THIRD_PARTY_NOTICES.md": "6b0ee6970f43ee4eb4a0b39120099c4671d3890f3395c38f75447cc3621570e4",
+    "apps/desktop/package.json": "40925d9f0335f7d428f3a210175c1f4b1e114a4949f20e2cd3cc8c399ac3d136",
+    "apps/desktop/src-tauri/src/main.rs": "26548a8a9ec469f42b809ee5df89ffa91e2e2b34f40e70c6fa3340e939f1f224",
+    "apps/desktop/src/App.vue": "8321bc823b468c695465da41a65d11cf73ec858c36aaab90c831572a781082d3",
+    "apps/desktop/src/bridge.ts": "ecac8f762e8135df6e8734b21c5527cf3677e4b8dca48cc7f48057e557a4ce5e",
+    "apps/desktop/src/features/p004/lan.ts": "61bc70cb8208ff71d3d1c271b0fae8d52a3def1d2137b753eebad3d2e0712584",
+    "apps/desktop/src/features/p006/relay.ts": "688ec33fb1d7ec8e61ce20e4fb6b57391446cea5c352c833d301eddd3d1e3919",
+    "artifacts/capture-report.json": "96e224038043a6ad386bd0b8ddc2ea2a9018c7de5e7fe66d3e6c08d1456d2ddd",
+    "artifacts/environment.json": "a2e492067acbc8b40932ea54ac3aadb8ad79ce332ef039c15e11ed4b5f8135b9",
+    "artifacts/native-window.txt": "ee558ee2b42e7bb70ae7e0c1aaf574b7bbbdfaaf6b5bd86a76ca1ea0ea40e7f8",
+    "artifacts/p003/decoder-validation.json": "6d5cf44ef13574c3c99888b61d47ace6916499b1a2ab771fc9f6e199d7872e0a",
+    "artifacts/p003/hardware-encode-report.json": "868fddb74d8dbf3599268c21de5a09e98f543fe8fb8fb882d44ba9326c7950fe",
+    "artifacts/p003/software-encode-report.json": "1bff59db22535174ad7b0479e8acf9c79c2ffd1d481a4806df23dcac3ecef14f",
+    "artifacts/p004a/native-session-summary.json": "d7b472aace5ede2b2d481aa1bb44e1e82f450c59139ab82cf834f87bce988038",
+    "artifacts/p004a/run-08-window-close.json": "d4e3eebe3c94fad9c97030c8098c12826c43ae7b7918ec1169a529032d4a4aa0",
+    "artifacts/p004b/cleanup-runs.json": "4c8c1c927da5962fa746cfb4b74c2649a3a2a1811af92c93d1095ffeaecf997d",
+    "artifacts/p004b/full-30s.json": "69a8da00700c410b87f756e9d60a195b3b9c89c36efa89cc28da7de73e62f282",
+    "artifacts/p005/dual-pc-cleanup.json": "a5b7e6786a4b79fc60c2413fa5f5d5e6b9e5b0c7168fdab89d197a1cb1231015",
+    "artifacts/p005/dual-pc-full.json": "e90bb8f55972b982ea1fdfa9e742172d88a3401ff6bc596655e9ddb61bcac516",
+    "artifacts/p005/dual-pc-repeat.json": "d7fea9e5847b8c936445c076717d7c8f440027d5508808b3baefbb6e7cb2b795",
+    "artifacts/p006a/g6/native-allocate-first.json": "c0d5cde7b5c2607299971689b76a8dee937817a9e83d228ee3f1eb04116f6185",
+    "artifacts/p006a/g6/native-allocate.json": "9c12e7efdc76c9f7102222a8e41cd28632c92ee41199c00330b8a4b50e7e9bcc",
+    "artifacts/p006a/g6/server-summary.json": "2268cb1914515bf1ea524d35a31d69529c529d66f0753383f338810196abb9fb",
+    "artifacts/p006a/g6/wire-results.json": "22babb55bf300dae3938ef0b5d64455c759a6bedfc291b229c1d778e0d12d1b2",
+    "artifacts/p006b/two-pc/round-01-native.json": "32d78786faacc9b5c1010a0574fc7efce51804324e6323f8b999ca862cabf7c2",
+    "artifacts/p006b/two-pc/round-02-native.json": "e0ef8287024977690a1e1f2eb822b1a0bc77aacb7d92c7414ae8e81cd47f7169",
+    "artifacts/p006b/two-pc/round-03-native.json": "4354d7bf960a6546ee0cc2af67722921759bed83b6af932ea3d47e13f6778a4b",
+    "artifacts/p006b/two-pc/round-04-native.json": "2e6ec6906f4aa45a423631ce0547240122d446a8f2348ad1905c94e050a8802a",
+    "artifacts/p006b/two-pc/round-05-native.json": "53f6a9d99945418f3b9269b3a7313b92cbabe61e4132c271fb76607000b275cf",
+    "artifacts/p006b/two-pc/statistics.json": "a10b1474df64556a7afd31ab3202cc414c5ef531d9b3ef3a91d2d96e12218fcb",
+    "artifacts/p006b/two-pc/user-observations.json": "e97224b6ce9f81552b42e7e5ce0258f71bd12439e1a40d2e8641191f7ce13ae0",
+    "artifacts/p006c-diag/automatic/results.json": "02bd5cee29086c90d6149fd0e2dfae8fd7553c1ec0580bb3d8053234e6b12828",
+    "artifacts/p006c-diag/development/wait-for-ack-timeout.txt": "fe7289c861579afcdb4d728712b0bf95b1b202d5025b7096fd5fef44883ee785",
+    "artifacts/p006c-diag/historical-audit.json": "56333a72d98d580b35d1293c16d290f54c013ed526f8edd6b60f3ba7eec24224",
+    "artifacts/p006c-diag/local/auto.json": "5128e96b0884cd85d6813a32ce698dd55a551fb331b20d36f800316816f73130",
+    "artifacts/p006c-diag/local/receiver-stop.json": "1d49fe8efebe772aff0a0802cabe77536fc9d1f8d48cc3583dbe7f783b34635c",
+    "artifacts/p006c-diag/local/sender-stop.json": "fcf55e5a92239a8b5ad7d79ecaee31833a9f8d060d0e11d16c0bd31535347d25",
+    "artifacts/p006c-diag/local/stats-failure.json": "ac53a770929f20445d0ec75e2d969d5fb01fcd1a8403f012e12c8cc2830aea2f",
+    "artifacts/p006c-diag/local/wss-disconnect.json": "a9bc8bf99e4de0efb976d69cfa2f159e1c65a293c395c5d0e1cf3b7a39bbed7c",
+    "artifacts/p006c-diag/summary.json": "b9e37f18118c9b15ce67ea475eee954574311f2eaf6ab2fe9e834f5a93643c69",
+    "artifacts/p006c-manual/cloud/allocation-results.json": "8c53d87391b9f652bca8b941f87f0defc5500ed5f97548ad24f292ef899c9755",
+    "artifacts/p006c-manual/cloud/events.jsonl": "20ffe3b62c1e33ebb830016ce49974a59ee32d97ae4efc7ae2b5461346d6c421",
+    "artifacts/p006c-manual/cloud/shutdown.json": "ae1c09eec275b265ef15aa7e8b7a5c649db6280059b876b992c3d1654f5fa6e9",
+    "artifacts/p006c-manual/development/lan-attempt-1.json": "b02ecc348b11731106741a5d066eb1e6d039cb7ee31cab36f2c8b596d9dc445b",
+    "artifacts/p006c-manual/development/lan-attempt-2.json": "9dc693c78e5414a87a38afcc91b96755d601b495b8251c256aee5204660a9858",
+    "artifacts/p006c-manual/hotspot/desktop-relay.json": "b8df8e0bc627a5dcdc3373656ff73e6e83bd6fe995010a1b55a3c3be24433791",
+    "artifacts/p006c-manual/lan/desktop-direct.json": "d1e91bbd0cdd87ca55f80c9f6c063391c76744c43c712c26462393f06625e983",
+    "artifacts/p006c-manual/local-cleanup.json": "5594d5499675fc6b2e634d17895b42121cc3d93cae8876cda0a8cc0d55a70b04",
+    "artifacts/p006c-video/cloud/allocation-results.json": "1993b47933928199f9da7766a5b2ce55b20ff5a2ee4e2e7e0a12210dc07a95bc",
+    "artifacts/p006c-video/cloud/auto.json": "c12c735f576c5da85db092f80a28a3c54d9eed544276156320386259b2cae60a",
+    "artifacts/p006c-video/cloud/events.jsonl": "4981fda5b2b57d9d02a8ca2aa460e08a8723622f9ad3f7f7ff2cbc330b785a69",
+    "artifacts/p006c-video/cloud/fallback.json": "685892a3a3f130f272eb64acc474623a0589a2843353930cdd7c9720fd737577",
+    "artifacts/p006c-video/cloud/shutdown.json": "213c74186813c49ae0d05847d3ad1af6ad97851fd17979779c1b3427d59696c9",
+    "artifacts/p006c/cloud/all-unavailable.json": "ba725e438fbca1c56dac30d2375730db79ca1f784338eac63602526520fbca09",
+    "artifacts/p006c/cloud/direct.json": "6b1f66680e2dcf6e5f34685da13ef5f0a5ff5b7ff7485dd192d5ca5cee239441",
+    "artifacts/p006c/cloud/fallback.json": "90b3e10c4bf22bdeb364699974ebfab65d593eca0491efb7b6acb1d49e12406b",
+    "artifacts/p006c/cloud/turn-unavailable.json": "aa7110a5fe4f2da2f8d4b70c8ea21349204a9f6bd9dd140bf046cc598a4c9653",
+    "artifacts/p007a/evidence-index.json": "0fa29e8f0bfa3279eec97ca8a63dd8338a915502ad9117af465f622a269df9de",
+    "artifacts/p007b-privacy/privacy-checks.json": "6e34e7aa0c4636513f01b7137283c8dd57b77385767ce089af45985dd9c063c6",
+    "artifacts/p007b-privacy/published.json": "bb1219234012f86e775a8ae14f48617bef18e92770d52a3bd4e19cf6d479e5f1",
+    "artifacts/p007b-privacy/summary.json": "1e9b8a042a76e89234a2e2873e86c28f1a18368d59b9205f710c5e8a001ffecf",
+    "artifacts/r06-online/activation.json": "e1ef57c9ea1d821e43363ddc6eacfbe7c2a5de9d3c51b0db726dff56326457e2",
+    "artifacts/r06-online/after-stop.json": "f0d57bb284e1371f1a8a4522e7a088df79bf7968b96c9628aadf0c9f4365adb8",
+    "artifacts/r06-online/allocation-verdict-before-stop.json": "09f0998c9fa7b4a6505aaa17c9a11c135c30677f9ef2ec70647821a7069e924a",
+    "artifacts/r06-online/classification-record.json": "87343a327fb3e5b287d053c04ae8ef4c9dc954c895fbf33ddc904371c9492adc",
+    "artifacts/r06-online/cleanup-server-receipt.json": "a8238c7a7ed4b85078d69f1b58a63dd7e397c3ddf46669fdaa31e13104bce236",
+    "artifacts/r06-online/cleanup.json": "a8238c7a7ed4b85078d69f1b58a63dd7e397c3ddf46669fdaa31e13104bce236",
+    "artifacts/r06-online/delivery-regression.txt": "23050d7e2028f84d98ed87cece1232910ec72e7cf5e0f9979f4243b28dece4c5",
+    "artifacts/r06-online/guard-proof.json": "ac4ce842c77a55620991b21e4d6dfdd193a95b1916341997b5d8cb94e37d4c2f",
+    "artifacts/r06-online/latest-status.json": "1330d9e454e911c510ed8cca164b067aafafb615f67c1eda645d80622df43da0",
+    "artifacts/r06-online/offline-regression.json": "d0f6ae4dd58b36d58891549049a7b2445e8361c7fa5f887380ee252d5326693d",
+    "artifacts/r06-online/operations-regression.txt": "b9fca7cb095df8bb456ebe26f5e8123c9b68982e9d915096915d2e16bd625576",
+    "artifacts/r06-online/operator-confirmation.json": "bf12581490bfcc58e6519a52a92bf13a9ce08ef0f1d5edc53f445d20fa380a8a",
+    "artifacts/r06-online/pre-start.json": "05c831fc12003cb99c481568757adf764dcc21ed7610448cd09a66012245112d",
+    "artifacts/r06-online/privacy-regression.txt": "d8f1b39ab9d3d7d74dafc320cb0f68a0ec421364db894d43affdc54ac4771fbd",
+    "artifacts/r06-online/receiver-summary.json": "d17e56006c8c1e3607e4ff1af3670343cfa56bcd8a3ae455b5f595ccb239e800",
+    "artifacts/r06-online/sender-summary.json": "8a5ba61238bf8a64015162b408157f99ab3f5003e69bffc4adb692c0412a2d06",
+    "artifacts/r06-online/turn-events-final.jsonl": "a7ab3f710b9fc1fd6d0ffb5864fa821e219321b8e55ddd62b76aa96a697ab7ce",
+    "artifacts/r06-online/turn-events.jsonl": "13610d437254a3756d21d9f25a5d28443a3b453fec58cc2861b0022c3a307794",
+    "artifacts/r06-online/verdict.json": "df45412d40f6f145f5ebb51cbce528619214b50635c5ad3bf37701df8561b748",
+    "artifacts/turn-lifecycle/observer-events.jsonl": "e63280ea81b5a2e06eefcc94e3489044e6a6ce02e730c23a00fe3738f1bc3bdb",
+    "artifacts/turn-lifecycle/results.json": "8944b770468aaed5505eab8cfd1e59ebd82631145884a610f994e35a249ebbe7",
+    "artifacts/turn-lifecycle/shutdown.json": "005b5362ab4962adab67439f92f8ca76c3f45e555d90ae2106d316a944b0ed48",
+    "crates/hub-webrtc/Cargo.toml": "0277b04f83d333c30ece1291af94ea49924a4d7962b3de769b2d5fd230611919",
+    "crates/hub-webrtc/src/session.rs": "206257a214d6eef51226b0c17f6e2284bf6e28efed0ccb91c745eb119ec5992a",
+    "docs/ADR/0013-p007b-r06-diagnostic-package.md": "006d121c6a659027bfb334071ef6aef6df413528b207916be2a61d29ed1b2b3d",
+    "docs/P007B_R06_ONLINE_DIAGNOSTIC_REPORT.md": "03ba727b0e5b24520ec5309a0f0d85a501c896fec19ea49db99d8e0fd98cba5f",
+    "docs/PHASE0_G6_TEST_REPORT.md": "c9f581dc657bba52505c14723cb501d7d40ed9123e578abacbdf518ee063d7d8",
+    "docs/PHASE0_P003_TEST_REPORT.md": "742e480482a0f95fb7a088a6ff88f0f0fc6c0c04f9f334738863701dcea678d1",
+    "docs/PHASE0_P004B_TEST_REPORT.md": "db21d594d62e63679556b9f0319be096428755559fac7241b64e699e05da30a6",
+    "docs/PHASE0_P004_TEST_REPORT.md": "14ecb197490cf6523bf4fd4d806498fa25ad888de6d2ef0e1e8c9f451f531c1b",
+    "docs/PHASE0_P005_TEST_REPORT.md": "54e50537707586314dcbd3e0558c5e84bcd0bfa1d5b02a9f74a257ee573e6236",
+    "docs/PHASE0_P006B_TEST_REPORT.md": "3d8619a5cce92918acdc728f510b959205456535e582ede9e4234afdcbd34f78",
+    "docs/PHASE0_P006C_DIAG_TEST_REPORT.md": "92795a40d63e722ce50eb0c57dd6be421562da45d05559d603925d67d01d3207",
+    "docs/PHASE0_P006C_MANUAL_TEST_REPORT.md": "b2620b13989e19fcade62d63fc46fe20719f814bf5a7f20041e2af82e9715b8b",
+    "docs/PHASE0_P006C_TEST_REPORT.md": "bb9f5130e62834a47d53573ea2cb205d5967997a55b0660e6fe032284ea5eb62",
+    "docs/PHASE0_P006C_VIDEO_CLOUD_TEST_REPORT.md": "7aa5a023a38380f86a820d56e48fdc6902a7ea8a64d4ec860cad3400ec6b1c9a",
+    "docs/PHASE0_P006C_VIDEO_TEST_REPORT.md": "a5d576f8f23e0e1273fe5ab5f7ee87d8863328c77ff6b9dd2fdd235d0c4a0bf4",
+    "docs/PHASE0_P007B_DECISION.md": "1c6f216de39272345ed0831e6d495973e39a8aa829fff28721920d03f1ff0749",
+    "docs/PHASE0_P007B_PRIVACY_FIX_REPORT.md": "457716002ff860062fe8c4e993baaa843b21180a2ce2ab6253b1a82d481b94d2",
+    "docs/PHASE0_TEST_REPORT.md": "0af078e5b94e302f5e983397db9b79503c2654ea898a2b68b110e8f0a7dee2ca",
+    "docs/RemoteHub_完整开发文档_v1.0.md": "60e085106e5281b3aa2f997dca03e21f00bc0fad427e4608b8dc0a383ff99868",
+    "docs/TURN_ALLOCATION_LIFECYCLE_TEST_REPORT.md": "935febfc816fc23458865d0b1d10e33fac93e59d2b4f4869e776aedfcba5a36f",
+    "pnpm-lock.yaml": "3258934f751e8304f5568ffafe2f4ef186740905ca6dc76d2d0bb5a5405dad1b"
+  }
+}

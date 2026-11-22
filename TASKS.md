@@ -7,16 +7,16 @@
 - [x] `P0-01` **done** — Cargo/pnpm 锁文件、Tauri v2 原生编译、真实 WebView2 窗口启动与 IPC 刷新通过（Windows 10 22H2）；Windows 11 尚未复测。
 - [x] `P0-02` **done（首个主屏捕获实验）** — AMD 主屏 2560×1440、30 帧/1059ms、28.315 观察 FPS、0 超时；本地 BMP/JSON；拒绝无同意和无效帧数。旋转/光标合成/HDR/桌面切换仍未支持或未验收，详见报告。
 - [x] `P0-03` **done（本机 720p30 编码实验）** — 实际 AMDh264Encoder 硬件 MFT、10 秒/300 帧/零丢帧、Baseline L3.1、颜色/PTS/GOP/完整解码通过；软件 MFT 短时回退验证通过。物理设备丢失和长稳测试未执行，详见 `docs/PHASE0_P003_TEST_REPORT.md`。
-- [ ] `P0-04` **doing（视频功能通过，基线证据有差异）** — 本机及两台真实PC局域网720p30视频已通过，启停/关窗/拔线回收已实测；原基线要求的录屏未留存，本次明确不保存画面，以真实stats和用户观看确认交付，父项暂不标done。
+- [x] `P0-04` **done（限定范围内按已批准录屏替代证据例外验收）** — 本机及两台真实Windows10有线LAN的720p30视频、启停/关窗/拔线回收已有实测。用户已明确接受归档真实统计+现场观看替代原录屏，见docs/PHASE0_P007B_DECISION.md；本轮仅修正状态遗漏，无新测试。历史未录屏事实及覆盖限制保留，不扩大到Win11/长稳/新网络，不重开例外。
 - [x] `P0-04a` **done（同机视频实验）** — Windows 原生 Tauri/WebView2，实时 DXGI/MF → webrtc-rs 0.21.1 → H.264 SRTP/解码；五轮 15 秒各 450 帧及一轮 30 秒 900 帧，接收丢包 0；主动停止与播放中关窗清理通过。默认关闭实验 feature，详见 `docs/PHASE0_P004_TEST_REPORT.md`。
 - [x] `P0-04b` **done（有界局域网双机实验）** — 两台物理Windows10有线PC，v2的30秒900帧全部发送/接收/解码/呈现，1280×720、host/host指定对端UDP、接收丢包0；两端主动停止、接收端关窗与拔线提前回收通过。默认关闭LAN feature，详见 `docs/PHASE0_P004B_TEST_REPORT.md`。
 - [x] `P0-05` **done（模拟控制，无实际输入）** — 复用P004b同一视频PC的真实可靠有序control.v1；两台Windows10电脑100条模拟事件发送/Rust接收/ACK写入/B确认全部100，ping/pong与序号连续、异常0，视频同时1280×720正常播放；两端停止、接收端关窗/拔线清理通过。43 Rust / 11前端 / 2Edge；协议与本机真实SCTP负例覆盖，详见 `docs/PHASE0_P005_TEST_REPORT.md`。
-- [ ] `P0-06` **doing（跨网主链路通过，保留验收限制）** — G6及P006b真实双机relay视频/control已通过，包含实际双方selected pair；本次WSS/TURN已停止且不自启。用户决定跳过接收端补测、保留原日志限制；独立生命周期6例已验证，P2P优先与自动回退另进入P006c，不将父项提前标done。
+- [ ] `P0-06` **doing（最低媒体可行性有证据，R06剩余风险及正式限定验收待决）** — G6、P006b真实双机relay媒体、P006c选路/回退与成功轮、独立生命周期及R06新版正常终态均有分轮证据；历史两次候选拒绝根因仍未知。用户已跳过的接收端补测及原日志限制保留。本轮仅离线最终评审，最后已知云服务停止/不自启，不将技术可行性或风险登记当成正式接受；P006待用户R06风险与退出决议后再按限定范围收尾。
 - [x] `P0-06a` **infrastructure-verified** — 原implementation-ready的G1–5/G7/G8基础上，用户另行授权G6：Ubuntu24.04/coturn4.6.1，两次Windows原生真实relay候选（81/92ms gather），11项实际UDP协议检查通过，缺/错/过期票401、错realm437专用原因、五类危险peer403、释放与非root服务收尾通过。详见`docs/PHASE0_G6_TEST_REPORT.md`和`artifacts/p006a/g6`。原准备完整回归54 Rust/13前端/3Edge/3Python，新增4协议工具离线测试；未进入P006b/c、实际输入或Phase1。
 - [x] `P0-06b` **done（用户接受现场确认，保留历史日志限制）** — 两轮30秒各900帧全发送/接收/解码/呈现、720p、丢包0/冻结0；5轮真实relay/relay UDP、每轮发送/Rust接收/ACK/确认100、连续1..101、异常0。发送端停止194帧、接收端关窗196帧、热点断网244帧提前回收；接收端主动停止用户已现场验证并明确跳过补测；900帧独立提前停止证据限制继续保留，不追填PASS日志。60 Rust/16前端/3Edge及完整构建/lint/clippy通过，云端服务已停止、不自启、socket清零；原逐会话TURN疑点由独立6例生命周期验证补齐（历史未归属socket不追溯定性）。见docs/PHASE0_P006B_TEST_REPORT.md、docs/TURN_ALLOCATION_LIFECYCLE_TEST_REPORT.md。
 - [x] `TURN-LIFECYCLE` **done** — 6例真实云端/Windows自动测试：5例Refresh0即时释放，1例600秒租约超时回收；同PID、最多2分配、原租约+15秒无残留，停服务前socket已0。19组自动检查、61 Rust/11 Python通过。独立报告与Git交付先行，不重复双机串流。
 - [ ] `P0-06c` **doing（真实双机成功轮及收尾完成，已知问题待审查）** — 自动云视频选优/回退证据独立保留；本轮两物理Windows由用户原生亲自批准，直连host/srflx及热点relay/relay成功轮各900帧源输入/编码/发送、720p、100发送/接收/ACK/确认、异常0。接收端认证末周期893/880帧，B独立final未收取，不写全链900；更早两次DIRECT_SELECTED_PAIR_NOT_APPROVED/0帧保留，原因未归因，不标所有尝试PASS。8分配Refresh0+socket消失后先判断再停，最多2，09:53:20专用服务停止/不自启/临时凭据清理/业务FW未变；第二台配置和带配置ZIP已由用户明确确认删除，统计保留。该手动轮只做离线核对，未改产品源码或重跑当时回归；后续DIAG实现及完整回归另列下项。见docs/PHASE0_P006C_MANUAL_TEST_REPORT.md，停止扩展等待审查。
-- [ ] `P0-07` **doing（总评材料完成，正式退出待审查）** — P0-07-A已汇总真实双机/云端/本机证据、架构备选和性能限制；最低媒体可行性已有实测。建议保留现有WebRTC路线，暂不正式退出：P004录屏例外现已获用户明确接受；P006c可靠性仍需诊断闭环或明确有限风险接受。父项不因总结文档而自动done，不进入Phase1。
+- [ ] `P0-07` **doing（最终矩阵/风险/技术退出材料完成，正式决议待用户）** — P007A/B/C保留分轮事实与用户已批准E04；最终报告建议按限定范围、附R06剩余风险审查退出。保留Tauri/Rust/Vue/TS及现有WebRTC成果，具体Foundation/V+ PC/EasyTier兼容另列评估和目标门禁。R06接受、正式退出、P1实施分别待决定；报告准备不等于批准，父项不自动done。
 
 - [x] `P0-06c-DIAG` **done（诊断与最终统计实现/本地自动验证；历史具体根因仍待授权复现）** — 原生精确候选校验保持，新增分侧固定原因/计数/集合来源/私有host批准布尔，首失败保留，不输出端点或凭据；新增scope负例。接收端独立pre-close/final落盘，保留live/last_known/unavailable、原采样时间及原生回收真值；停止先撤销发送/请求原生停止，异常不漏关PC。35项完整回归/80 Rust/32前端/3Edge/12Python、5轮本机真实TLS/MF/RTP/Edge/control通过；1私有样本ignored。旧两次仅能定位到精确集合匹配失败，失败集合缺host是线索而非根因；新云端/物理双机/WebView2 OS关窗未测。无阿里云启动或桌面采集，最小在线方案提交待授权；该DIAG轮未进入P0-07，当前总评另列下项。见docs/PHASE0_P006C_DIAG_TEST_REPORT.md。
 
@@ -24,7 +24,7 @@
 
 当前交付：按用户明确批准的E04证据例外，P0父任务完成5/7（P001/02/03/04/05）；P004历史未录屏事实保留，R06未豁免。P006c历史成功轮及早期两次失败继续保留；R06 v2新一轮8秒真实双机合成诊断已取得严格matched与B独立pre-close/final，但历史故障本次未复现、具体根因未确定，不追补旧缺失文件。2026-11-22 13:40:16本轮专用服务提前停止、不自启、端口清零，配置/业务/规则基线未变；两机临时配置及带配置副本清理闭环（第二台依据用户明确确认）。R06等待最终审查，不进入Phase1。
 
-当前总评：新诊断及独立接收端终态文件已实现，并在R06 v2本轮获授权的云端/物理双机短会话得到实际证据；不追补旧双机final或宣称已修复历史现场。P0-07-A原只读结论保留，R06本轮结果另报；E04已按用户明确决议关闭。正式退出和R06剩余可靠性风险等待用户最终审查，不自动转入Phase1。
+当前总评：P0-07-C已准备最终证据矩阵、风险登记、退出评审、具体三件套兼容评估和P1实施方案；本轮仅离线复核，无云/媒体/双机新运行。最低媒体可行性已有证据，建议由用户决定是否接受R06有限剩余风险并批准限定退出；历史根因仍未知，未替用户接受风险。正式父项5/7，P006/P007仍doing；Phase1未授权、未开工。见docs/PHASE0_FINAL_EXIT_REVIEW.md及docs/DEVELOPMENT_GUIDE.md。
 
 - [x] P0-07-B **prepared（离线决议与R06诊断包准备；在线NOT_RUN）** — E04例外追加决议，专用synthetic-only Tauri构建/短轮协议、程序SHA/待激活包及白名单统计工具交付；安全与本机合成证据见docs/PHASE0_P007B_TEST_REPORT.md。无云启动、真实桌面、新物理双机或Phase1；R06未关闭，等待审查及单独最多20分钟授权。
 
@@ -34,9 +34,13 @@
 
 - [x] `R06-v2-ONLINE` **done（限定诊断执行与收尾；历史未复现，待最终审查）** — 单独授权后13:35:10开始；真实3秒timer先触发清理入口，正式timer核对后才启动专用WSS/TURN。两物理PC同局域网、用户原生确认、一轮8秒synthetic：Rust严格local host/remote srflx两侧matched、B直连srflx/srflx；240发送/接收/解码/呈现，背景模拟控制100/100/100，B独立pre-close/final均live且最终回收字段true。2分配同PID、Refresh0成功+socket消失，先分类后13:40:16停服、无自启/端口/凭据残留，基线未变；第二台副本由用户确认删除。33离线回归通过；未执行第二轮、30秒、真实桌面、实际输入、19分钟运行中自然到期或租约超时新用例。历史拒绝NOT_REPRODUCED、根因NOT_DETERMINED，旧报告不改，R06未关闭、Phase0 HOLD。见docs/P007B_R06_ONLINE_DIAGNOSTIC_REPORT.md及artifacts/r06-online。
 
-## Phase 1 · 工程与 UI
+- [x] `P0-07-C` **prepared（最终离线评审与P1规划完成；正式决议待用户）** — 同步P004已批准例外为done，旧报告不改；最终矩阵/风险与R06修复条件、退出报告、ADR0014/15及具体Foundation/V+ PC/EasyTier集成方案交付。只读核对本地候选版本/哈希，不执行安装器、不联网核验上游；当前没有三件套互操作证据。仅新增文档/离线审核工具和新证据索引，无产品源码/依赖/服务变更、不重写历史。P006/P007父项不提前done，R06接受/退出/P1实施分别PENDING；提交后等正式审查。
 
-- [ ] `P1-01` Cargo + pnpm monorepo、格式化测试脚本
+## Phase 1 · 工程与 UI（仅方案，未授权实施）
+
+实施合同见docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md；兼容目标需先按docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md的C0确定。已有工程不代表Phase1已经完成；以下六项仍未开工。
+
+- [ ] `P1-01` 复用并整理现有Cargo/pnpm工程、feature隔离与质量门禁，不重新创建工程
 - [ ] `P1-02` 首页/设备/连接/会话/设置导航
 - [ ] `P1-03` UI 卡片、连接弹窗和会话工具栏
 - [ ] `P1-04` Pinia + Tauri IPC

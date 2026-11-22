@@ -4,7 +4,11 @@
 
 `246dcea`已新增严格候选脱敏诊断和接收端独立最终统计；R06 v2随后在真实云WSS/TURN和两台物理PC完成一轮8秒合成诊断：严格匹配通过、独立pre-close/final真实落盘、240帧全接收/解码/呈现、两个Allocation在停服前Refresh(0)释放。**历史两次拒绝本次未复现、根因未确定，R06等待最终审查**，新短会话不追补旧接收端final，也未覆盖新版异常/OS关窗双机终态。用户已明确批准P004以归档真实统计+现场确认替代录屏，历史未录屏事实保留。**父任务完成5/7，正式Phase0退出继续等待R06决议**，见[本轮诊断报告](docs/P007B_R06_ONLINE_DIAGNOSTIC_REPORT.md)、[P0-07-A总评（当时结论）](docs/PHASE0_P007A_REVIEW.md)及[P0-07-B追加决议](docs/PHASE0_P007B_DECISION.md)。尚无实际键鼠注入或持久设备身份服务，不是可发布远控成品。
 
-下文按交付时间归档；各节的测试数量和限制仅适用于该轮，当前状态以上述总评为准。R06本轮经单独授权于2026-11-22 13:35:10开始，13:40:16提前停服清理；专用服务停止且不自启、端口清零、配置与规则/业务基线未变。两机临时配置及带配置副本已清理，第二台由用户明确确认。旧[启动前清单](docs/P007B_R06_EXECUTION_CHECKLIST.md)和[核对报告](docs/P007B_R06_PREFLIGHT_REPORT.md)保留当时待授权状态，本轮实际执行与限制见新报告；旧包不能自行恢复服务，不进入Phase1。
+当前已完成**最终离线评审与规划材料**：[证据矩阵](docs/PHASE0_FINAL_EVIDENCE_MATRIX.md)、[风险登记及R06修复条件](docs/PHASE0_RISK_REGISTER.md)、[技术退出评审](docs/PHASE0_FINAL_EXIT_REVIEW.md)。P004父项已与批准例外同步为done；最低媒体可行性有实测，但**R06风险接受、Phase0正式退出及Phase1实施均待用户决定**。P006/P007父项保持doing，正式完成数5/7。
+
+后续继续Tauri v2/Rust/Vue3/TypeScript，见[P1桌面实施方案（未开工）](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前开发指引](docs/DEVELOPMENT_GUIDE.md)。[Sunshine Foundation / Moonlight V+ PC / EasyTier集成评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)区分具体目标、协议/媒体、网络承载及进程管理；本机候选只核对版本资源/哈希，未执行安装或互通。现有WebRTC不等于已兼容三件套，兼容原型/多进程/驱动及分发范围须另行决定。
+
+下文按交付时间归档；各节测试数量和限制仅适用于该轮。上一次R06授权实测于2026-11-22 13:40:16提前停服清理，服务不自启、凭据及带配置副本清理闭环。**本轮只做离线审查，没有云端实时复核或新媒体/双机测试**。旧[启动前清单](docs/P007B_R06_EXECUTION_CHECKLIST.md)和[核对报告](docs/P007B_R06_PREFLIGHT_REPORT.md)保留当时待授权状态，实际执行见后续诊断报告；旧包不能自行恢复服务，不自动进入Phase1。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 
@@ -105,15 +109,15 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 保持原精确候选/UDP授权，新增分侧拒绝原因、地址类别和相等关系计数；无原地址、端口、SDP或凭据。旧失败集合缺host是已确认线索，但被拒绝pair未保留，不能判定历史根因或放宽匹配。新增接收端原生独立receiver-pre-close/receiver-final文件，关闭前真实getStats及清理状态落盘；读取失败保留带原时间的last_known或明确unavailable，写盘失败仍回收，停止不等待日志才撤销控制。
 
-完整35项回归及本机5轮真实合成传输通过（80 Rust/32前端/3 Edge/12 Python，1私有样本ignored），不采集桌面、不启动云端或重测物理双机。[DIAG报告](docs/PHASE0_P006C_DIAG_TEST_REPORT.md)、[ADR0011](docs/ADR/0011-p006c-diagnostics-final-evidence.md)、[契约](docs/P006C_DIAG_CONTRACT.md)、[最小在线方案（未授权）](docs/P006C_DIAG_MINIMUM_ONLINE_PLAN.md)。复现入口scripts/p006c-diag-checks.ps1；本机合成入口`node scripts/p006c-diag-local.mjs --local PRIVATE_INTERFACE_IPV4`，证据artifacts/p006c-diag。历史记录不追补；当前已进入P0-07-A技术总评，尚未签署正式退出或进入Phase1。
+完整35项回归及本机5轮真实合成传输通过（80 Rust/32前端/3 Edge/12 Python，1私有样本ignored），该DIAG轮不采集桌面、不启动云端或重测物理双机。[DIAG报告](docs/PHASE0_P006C_DIAG_TEST_REPORT.md)、[ADR0011](docs/ADR/0011-p006c-diagnostics-final-evidence.md)、[契约](docs/P006C_DIAG_CONTRACT.md)、[当时最小在线方案](docs/P006C_DIAG_MINIMUM_ONLINE_PLAN.md)。复现入口scripts/p006c-diag-checks.ps1；本机合成入口`node scripts/p006c-diag-local.mjs --local PRIVATE_INTERFACE_IPV4`，证据artifacts/p006c-diag。后续P007A/B及最终评审分别归档，历史记录不追补。
 
-## P0-07-B R06 定向诊断准备
+## P0-07-B R06 诊断包与分轮记录
 
 新增默认关闭`p007b-diag`专用Tauri构建，固定8秒合成运动图案、DirectPreferred和本次原生确认，不提供桌面源或丢包注入开关；不会读取旧p006c-private.json。复用现有Session/控制/认证WSS及独立最终统计；私有邀请剩余期不超过20分钟。待激活包不含有效配置，`--r06-self-check`只检查构建身份，不启动窗口或网络。
 
-[准备报告](docs/PHASE0_P007B_TEST_REPORT.md)、[操作说明](docs/P007B_R06_RUNBOOK.md)、[待授权20分钟方案](docs/P007B_R06_ONLINE_PLAN.md)、[交付SHA/成员清单](artifacts/p007b/delivery.json)。安全回归和本机合成结果与新物理双机NOT_RUN分开记录；本轮不启动阿里云、不要求现在操作两机、不采集真实桌面、不进入Phase1。包准备好后等待审查，R06保持开放。
+[准备报告](docs/PHASE0_P007B_TEST_REPORT.md)、[操作说明](docs/P007B_R06_RUNBOOK.md)、[当时待授权20分钟方案](docs/P007B_R06_ONLINE_PLAN.md)、[交付SHA/成员清单](artifacts/p007b/delivery.json)保留准备阶段结论：当时只有安全回归和本机合成，新物理双机NOT_RUN、没有云启动。之后的授权及真实短诊断独立记录如下，不回写准备报告。
 
-v2隐私修复：两处扫描器已移除疑似真实端点黑名单，改为通用规则并自检源码/输出；旧Git对象仍可达，没有重写历史。[独立修复报告](docs/PHASE0_P007B_PRIVACY_FIX_REPORT.md)、[v2 SHA清单](artifacts/p007b-privacy/delivery.json)、[实际下载核对记录](artifacts/p007b-privacy/published.json)。[GitHub诊断ZIP下载](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/RemoteHub-R06-Diagnostic-v2-20261122.zip)及[SHA文件](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/SHA256SUMS.txt)已上传并从无需凭据的公开URL下载核对；自动Source code ZIP不含可运行交付。41项安全/兼容回归、12项隐私及9项交付测试、5轮本机合成传输已重跑；产品源码/8秒/人工同意/严格ICE未变。后续[20分钟定向申请](docs/P007B_R06_V2_TEST_REQUEST.md)未获授权、未执行。
+v2隐私修复：两处扫描器已移除疑似真实端点黑名单，改为通用规则并自检源码/输出；旧Git对象仍可达，没有重写历史。[独立修复报告](docs/PHASE0_P007B_PRIVACY_FIX_REPORT.md)、[v2 SHA清单](artifacts/p007b-privacy/delivery.json)、[实际下载核对记录](artifacts/p007b-privacy/published.json)。[GitHub诊断ZIP下载](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/RemoteHub-R06-Diagnostic-v2-20261122.zip)及[SHA文件](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/SHA256SUMS.txt)已上传并从无需凭据的公开URL下载核对；自动Source code ZIP不含可运行交付。41项安全/兼容回归、12项隐私及9项交付测试、5轮本机合成是该隐私交付轮结果。后续[20分钟定向申请](docs/P007B_R06_V2_TEST_REQUEST.md)已另获授权并完成一轮8秒，见[实际诊断报告](docs/P007B_R06_ONLINE_DIAGNOSTIC_REPORT.md)；当前授权已结束，历史失败未复现，不能恢复服务或宣称根因已修复。
 
 ## P0-03 本机编码 probe
 
