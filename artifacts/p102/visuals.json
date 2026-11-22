@@ -1,0 +1,21 @@
+{
+  "recordedAt": "2026-11-22T15:30:30.606294+08:00",
+  "source": "Actual Edge navigation test screenshots; no native core mocked and no actual desktop capture",
+  "screenshots": {
+    "home.png": "aed98bb45c6fe9ce7eb5bc7a3b9b32fda18ef7990cdc9fb59119d2f1aa9dbcc3",
+    "devices.png": "7d2a7d3c5490bfa2f636cde606434b325226b9f0bbd7ad55cedbcee7e8abc2e2",
+    "connect.png": "7a44135e87009b794fe6704f562ba4c4a3c8a0be5de5eb52db90c574cf88179c",
+    "sessions.png": "badd7d2c06df0efbbedb7b76055b70e2198ead949f8db477e8cd710a27970ce1",
+    "settings.png": "a80f72c4d8539b6b8df434b8f90f5992196eb39970b841d1f0f055d62d3da84c",
+    "settings-900.png": "713d7860d2332526bfde4e5bc8908410baf749a75adb631d4819d1b307030b42",
+    "settings-640.png": "f41f4ec43332c2c7291ac92ae233ab4ad3499571fbd700dc476b6e450cbd14aa",
+    "settings-450.png": "5e075c61c20ce2233f1deb3dc02bb5c6f9588ce1596f841d0a5d0ed81c30053d"
+  },
+  "viewports": [
+    1280,
+    900,
+    640,
+    450
+  ],
+  "nativeImagesCommitted": false
+}

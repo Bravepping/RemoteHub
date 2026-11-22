@@ -1,76 +1,145 @@
-import { flushPromises, mount } from '@vue/test-utils';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.vue';
-import { getRuntimeInfo, runCaptureProbe } from './bridge';
+import { getRuntimeInfo, runCaptureProbe, type RuntimeInfo } from './bridge';
 
 vi.mock('./bridge', async (original) => {
   const actual = await original<typeof import('./bridge')>();
   return { ...actual, getRuntimeInfo: vi.fn(), runCaptureProbe: vi.fn() };
 });
-
-const runtime = {
-  app_version: '0.1.0',
-  os: 'windows',
-  arch: 'x86_64',
-  capture_backend: 'DXGI test fixture',
+const info: RuntimeInfo = {
+  app_version: 'fixture-version',
+  os: 'fixture-os',
+  arch: 'fixture-arch',
+  capture_backend: 'fixture-backend',
   remote_access_enabled: false,
 };
-
-describe('local probe consent and truthful states', () => {
-  beforeEach(() => vi.resetAllMocks());
-
-  it('blocks native capture when the desktop bridge is unavailable', async () => {
-    vi.mocked(getRuntimeInfo).mockRejectedValue(new Error('当前为浏览器预览'));
-    const wrapper = mount(App);
-    await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toContain('浏览器预览');
-    expect(wrapper.get('input').attributes('disabled')).toBeDefined();
+let wrapper: VueWrapper;
+async function open() {
+  wrapper = mount(App);
+  await flushPromises();
+  return wrapper;
+}
+async function visit(title: string) {
+  const link = wrapper.findAll('nav a').find((a) => a.text() === title)!;
+  await link.trigger('click');
+  await flushPromises();
+}
+describe('desktop navigation with real capability boundaries', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+    window.history.replaceState(null, '', '/');
+    vi.mocked(getRuntimeInfo).mockResolvedValue(info);
+  });
+  afterEach(() => {
+    wrapper?.unmount();
+    window.history.replaceState(null, '', '/');
+  });
+  it('has five reachable pages and does not invoke capture', async () => {
+    await open();
+    expect(wrapper.findAll('nav a')).toHaveLength(5);
+    for (const name of ['设备', '连接', '会话', '设置', '首页']) {
+      await visit(name);
+      expect(wrapper.get('h1').text()).toBe(name);
+      expect(wrapper.get('nav [aria-current="page"]').text()).toBe(name);
+    }
+    expect(getRuntimeInfo).toHaveBeenCalledTimes(1);
+    expect(runCaptureProbe).not.toHaveBeenCalled();
+    expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
+  });
+  it('renders core-returned fields only in read-only settings', async () => {
+    await open();
+    await visit('设置');
+    expect(wrapper.text()).toContain('fixture-version');
+    expect(wrapper.text()).toContain('fixture-backend');
+    expect(wrapper.find('input').exists()).toBe(false);
+  });
+  it('shows honest empty states instead of device or metric fixtures', async () => {
+    await open();
+    await visit('设备');
+    expect(wrapper.text()).toContain('设备列表尚未接入');
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined();
+    await visit('连接');
+    expect(wrapper.text()).toContain('连接能力暂不可用');
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined();
+    await visit('会话');
+    expect(wrapper.text()).toContain('暂无会话数据');
+    expect(wrapper.text()).not.toMatch(/\b0\s*(FPS|ms)\b|RH-\d/);
     expect(runCaptureProbe).not.toHaveBeenCalled();
   });
-
-  it('requires a fresh consent and only renders measurements returned by the core', async () => {
-    vi.mocked(getRuntimeInfo).mockResolvedValue(runtime);
-    vi.mocked(runCaptureProbe).mockResolvedValue({
-      width: 1920,
-      height: 1080,
-      frames: 12,
-      timeouts: 1,
-      elapsed_ms: 523,
-      observed_fps: 22.94,
-      frame_timestamps_us: [1],
-      adapter: 'fixture-gpu',
-    });
-    const wrapper = mount(App);
-    await flushPromises();
-    const button = wrapper.findAll('button')[1];
-    expect(button.attributes('disabled')).toBeDefined();
-    await wrapper.get('input').setValue(true);
-    await button.trigger('click');
-    await flushPromises();
-    expect(runCaptureProbe).toHaveBeenCalledTimes(1);
-    expect(wrapper.get('[aria-label="采集结果"]').text()).toContain('22.94');
-    expect(wrapper.get('[aria-label="采集结果"]').text()).toContain(
-      'fixture-gpu',
+  it('keeps all navigation available when the bridge is unavailable', async () => {
+    vi.mocked(getRuntimeInfo).mockRejectedValue(
+      new Error('private-error-fixture'),
     );
-    expect((wrapper.get('input').element as HTMLInputElement).checked).toBe(
-      false,
-    );
-    expect(button.attributes('disabled')).toBeDefined();
+    await open();
+    await visit('设置');
+    expect(wrapper.get('[role="alert"]').text()).toContain('浏览器预览');
+    expect(wrapper.text()).not.toContain('private-error-fixture');
+    expect(wrapper.text()).not.toContain('fixture-backend');
+    expect(wrapper.text()).toContain('未读取');
+    expect(runCaptureProbe).not.toHaveBeenCalled();
   });
-
-  it('shows native errors without displaying a successful capture result', async () => {
-    vi.mocked(getRuntimeInfo).mockResolvedValue(runtime);
-    vi.mocked(runCaptureProbe).mockRejectedValue(
-      'CAPTURE_UNAVAILABLE: display unavailable',
-    );
-    const wrapper = mount(App);
+  it('can retry a failed read and clears stale fields if a later read fails', async () => {
+    vi.mocked(getRuntimeInfo)
+      .mockRejectedValueOnce('unavailable')
+      .mockResolvedValueOnce(info)
+      .mockRejectedValueOnce('unavailable');
+    await open();
+    await visit('设置');
+    await wrapper.get('button').trigger('click');
     await flushPromises();
-    await wrapper.get('input').setValue(true);
-    await wrapper.findAll('button')[1].trigger('click');
+    expect(wrapper.text()).toContain('fixture-version');
+    await wrapper.get('button').trigger('click');
     await flushPromises();
-    expect(wrapper.get('[role="alert"]').text()).toContain(
-      'CAPTURE_UNAVAILABLE',
+    expect(wrapper.text()).not.toContain('fixture-version');
+    expect(wrapper.text()).toContain('未读取');
+    expect(getRuntimeInfo).toHaveBeenCalledTimes(3);
+  });
+  it('prevents overlapping capability refresh requests', async () => {
+    let done!: (value: RuntimeInfo) => void;
+    vi.mocked(getRuntimeInfo).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          done = resolve;
+        }),
     );
-    expect(wrapper.find('[aria-label="采集结果"]').exists()).toBe(false);
+    wrapper = mount(App);
+    await flushPromises();
+    expect(wrapper.get('button').attributes('disabled')).toBeDefined();
+    await wrapper.get('button').trigger('click');
+    expect(getRuntimeInfo).toHaveBeenCalledTimes(1);
+    done(info);
+    await flushPromises();
+    expect(wrapper.get('button').attributes('disabled')).toBeUndefined();
+  });
+  it('honors a known deep link, and ignores executable-looking hash input', async () => {
+    window.history.replaceState(null, '', '/#/sessions');
+    await open();
+    expect(wrapper.get('h1').text()).toBe('会话');
+    window.location.hash = '#/connect?autoStart=true';
+    window.dispatchEvent(new Event('hashchange'));
+    await flushPromises();
+    expect(wrapper.get('h1').text()).toBe('首页');
+    expect(runCaptureProbe).not.toHaveBeenCalled();
+  });
+  it('keeps explicit experiment builds in their existing isolated workspace without a duplicate read', async () => {
+    vi.mocked(getRuntimeInfo).mockResolvedValue({
+      ...info,
+      p004_enabled: true,
+    });
+    wrapper = mount(App, {
+      global: {
+        stubs: {
+          ExperimentWorkspace: {
+            template: '<div data-test="experiment">experiment fixture</div>',
+          },
+        },
+      },
+    });
+    await flushPromises();
+    expect(wrapper.find('[data-test="experiment"]').exists()).toBe(true);
+    expect(wrapper.find('nav').exists()).toBe(false);
+    expect(getRuntimeInfo).toHaveBeenCalledTimes(1);
+    expect(runCaptureProbe).not.toHaveBeenCalled();
   });
 });

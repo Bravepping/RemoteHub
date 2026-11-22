@@ -1,0 +1,20 @@
+{
+  "recordedAt": "2026-11-22T07:28:52.386Z",
+  "nativeDefaultAppObserved": true,
+  "observedPages": [
+    "home",
+    "settings"
+  ],
+  "actualCoreFieldsObserved": [
+    "app_version",
+    "os",
+    "arch",
+    "capture_backend",
+    "remote_access_enabled"
+  ],
+  "automaticNavigationCompleted": false,
+  "remainingNativeNavigation": "NOT_RUN: input guard detected concurrent human input; further actions stopped",
+  "windowLeftAvailableForUser": true,
+  "applicationCaptureOrRemoteControlInvoked": false,
+  "nativeScreenshotRetained": false
+}

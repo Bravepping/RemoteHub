@@ -1,0 +1,8 @@
+{
+  "recordedAt": "2026-11-22T07:28:04.775Z",
+  "scope": "Actual default Tauri window UI accessibility text only; no application media or input feature",
+  "page": "home",
+  "text": "跳到页面内容\nRemoteHub\n你的电脑，触手可及\n首页\n设备\n连接\n会话\n设置\n￼\n远程访问关闭\n仅在双方同意后连接\nREMOTEHUB / 桌面客户端\n首页\n本机能力与连接概览\n本机工作区\n本机状态\n本机核心已连接\n仅表示本机核心可响应，远程连接尚未开放。\n远程访问关闭\n重新检测\n设备\n尚未接入\n你的设备，将在这里相见\n设备身份与在线服务尚未接入。接入后，这里只会显示真实的已授权设备。\n查看设备\n连接状态\n￼\n还未建立连接\n连接能力尚未接入，不会自动联系其他电脑。\n连接路径\n暂无会话\n连接延迟\n暂不可用\n画面统计\n暂无会话\n前往连接页面\n每次连接，知情且可控\n连接能力接入后，仍需对端同意。当前仅提供本机信息和页面导航。\n查看安全状态\n连接由你决定 · 当前不会自动发起远程访问",
+  "source": "Windows UI accessibility observation",
+  "nativeScreenshotRetained": false
+}

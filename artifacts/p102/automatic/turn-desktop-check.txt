@@ -1,0 +1,13 @@
+   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
+warning: unused dependency `hub-webrtc`
+  --> apps\desktop\src-tauri\Cargo.toml:25:1
+   |
+25 | hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = note: `cargo::unused_dependencies` is set to `warn` by default
+help: consider removing the dependency on `hub-webrtc`
+warning: `remotehub-desktop` (manifest) generated 1 warning
+    Finished `dev` profile [unoptimized] target(s) in 0.82s
+
+EXIT=0

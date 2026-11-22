@@ -1,12 +1,10 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P1-01）
-
-用户已审查767ff44并明确接受R06尚未关闭剩余风险、批准Phase0限定退出，正式父项7/7；当前只授权P1-01工程基础，完成后提交等审查。R06技术OPEN_NOT_REPRODUCED/历史根因未知，不把风险接受当修复。P004例外和旧失败/统计限制保留，旧报告不改。
-
-当前入口：docs/PHASE0_EXIT_DECISION.md、P101_TEST_REPORT.md、P101_DESKTOP_CONTRACT.md、DEVELOPMENT_GUIDE.md及ADR0016。pnpm verify:p1固定新证据artifacts/p101：47质量命令、8真实Cargo配置、9隔离测试，82全feature/56默认Rust各1ignored、34前端/3Edge/12Python；截图隔离改动后Edge补测，旧图还原并核对。产品Rust/Vue/权限/锁不改，不新增P1-04命令/Pinia。Foundation/V+ PC/EasyTier仍是未实现、来源/接口/许可未核验的兼容目标。
-
-历史云授权已结束，最后已知停服13:40:16来自7fde54e证据，本轮未实时查询。当前不启阿里云、不采集真实桌面、不输入注入，P1-02至06/兼容运行原型未开工。以下是历轮历史记忆，旧待批准或运行授权只适用于当时，不覆盖本段和最新TASKS/用户指令。
+# 当前决议与恢复入口（2026-11-22，P1-02）
+用户已接受R06尚未关闭剩余风险并批准Phase0限定退出，正式父项7/7。已审查fdfb9e3，当前只授权P1-02五页导航；实现和离线回归完成，提交后等审查，不进入P1-03至06。R06技术OPEN_NOT_REPRODUCED/历史根因未确定，风险接受不等于修复；P004证据例外和历史报告限制保留。
+当前入口：docs/P102_TEST_REPORT.md、P102_PLAN.md、ADR0017、DEVELOPMENT_GUIDE及handoff.md。pnpm verify:p102独立artifacts/p102：47检查、8真实Cargo配置/9隔离测试；全feature82/默认56 Rust各1ignored、43前端/9Edge/12Python。路径保护2负例及Edge定向复跑9通过。旧P101及Phase0证据未改。
+普通产品壳按概念图实现首页/设备/连接/会话/设置；只读get_runtime_info，失败清旧值；其他能力诚实空态，无新IPC/Pinia/依赖。旧实验模板/同意逻辑保留，Rust媒体/候选/SDP/指纹/授权/CSP/capability和锁不改。Foundation/V+ PC/EasyTier仍为来源/接口/许可待核验的兼容目标，没有运行集成。
+原生实际观察仅首页/设置文本，其余原生点击因并发人工输入保护停止；Edge五页验证独立。辅助截图返回非产品背景后立即删除，未提交；后续原生只读文本，不将浏览器图冒充原生像素证据。本轮未调用RemoteHub真实采集或远控输入，无云端或双机媒体操作。旧云授权已结束，历史服务状态不作当前实时结论。以下历史记忆不能覆盖本段或最新用户授权。
 
 2026-11-21 首次工程。Windows / Tauri v2 / Vue 3 / Rust，遵循原交付设计；Phase 0 真实媒体优先。不可用时报告失败，不显示假设备/RTT/FPS。不实现未授权后台监控、权限提升、凭据采集。
 

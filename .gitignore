@@ -20,3 +20,5 @@
 **/p006c-private.json
 **/r06-private.json
 __pycache__/
+/artifacts/*/automatic/browser-results/
+/artifacts/p102/first-browser/

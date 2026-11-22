@@ -1,0 +1,7 @@
+{
+  "recordedAt": "2026-11-22T15:38:06.507677+08:00",
+  "command": "node apps/desktop/scripts/e2e.mjs (desktop working directory)",
+  "exitCode": 0,
+  "passed": true,
+  "reason": "Targeted rerun after cross-drive evidence path guard; actual Edge, no native capture or cloud"
+}

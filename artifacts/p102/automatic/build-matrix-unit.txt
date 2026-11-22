@@ -1,0 +1,19 @@
+✔ eight documented profiles accept their expected resolver shapes (1.0933ms)
+✔ a default build cannot silently enable a relay feature (0.3116ms)
+✔ default optional network dependency cannot be enabled without a reported feature (0.1262ms)
+✔ experimental defaults are rejected even if a no-default-features audit hides them (0.114ms)
+✔ loopback cannot acquire LAN or control features (0.1052ms)
+✔ direct mode cannot lose its authenticated relay dependency (0.0935ms)
+✔ R06 must resolve the synthetic-stream feature (0.0896ms)
+✔ a missing resolution is never treated as a default build (0.0774ms)
+✔ policy cannot request arbitrary Cargo switches or duplicate build profiles (0.2644ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 58.8442
+
+EXIT=0
