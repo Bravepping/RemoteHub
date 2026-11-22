@@ -73,6 +73,62 @@ Axum 中继的显式 `REMOTEHUB_V2_MODE=private-lan` 模式只接受指定的 RF
 
 TCP 的双方身份验证同时绑定所选中继地址。每个 WSS 房间和信令密钥从该次新鲜握手独立派生。WSS 仅用于经过设备签名的 offer/answer；中继可见信令，不能改写并通过设备签名。观看端验签并确认候选后，用现有 TCP 反馈并进入原停止/心跳流程。WSS 模式不发送鼠标/键盘事件，不接受未核验设备或模式混用，不回退；Windows 私网双机验收未开展。
 
+## 私网 WSS 双机测试准备（操作前先确认）
+
+测试工具 `v2_lan_test_setup.exe` 只离线生成约一小时有效的测试证书和两份角色配置，**不会启动进程、进入远控、导入系统证书或修改防火墙**。建议中继与共享端同机；两台电脑使用互不相同的局域网 IPv4。测试结束退出程序、关闭 PowerShell 窗口，并清理这次专用目录和观看端副本；不要重复使用这套证书和令牌。
+
+共享端将下面两个示例地址替换为两台电脑实际的局域网 IPv4；Windows 输出必须是当前用户 LocalAppData 下一个尚不存在的直属子目录。先解压测试包，进入其目录再运行：
+
+```powershell
+$sharingIp = '192.168.1.20'
+$watchingIp = '192.168.1.21'
+$testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid().ToString('N'))
+.\v2_lan_test_setup.exe $sharingIp $watchingIp $testDir
+```
+
+`host/host.json` 和中继私钥只留在共享端，生成后不要移动该目录（其中使用绝对路径）。只把 `viewer/viewer.json` 通过可信的私下方式交给观看端，勿发到聊天、提交仓库或放在公用目录。生成器仅显示公开的 CA SHA-256，不显示令牌。观看端应通过独立可信渠道核对生成器显示的指纹；不要把令牌当作设备身份，也不要从 TLS 提示中接受临时证书。中继路径默认 TCP 48620，设备既有直接 TCP 会话用 48604。遇到 Windows 防火墙/权限提示先停下，不改设置。
+
+在观看端加载 `viewer.json` 或启动程序之前，必须复算 CA 指纹，并与共享端显示的完整指纹独立核对；不一致就停止。把下面路径换为收到的 `viewer.json`，命令只打印公开指纹，不打印令牌：
+
+```powershell
+$profile = Get-Content -LiteralPath '.\viewer.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+$hex = $profile.REMOTEHUB_V2_DESKTOP_CA_DER_HEX
+if ($hex -notmatch '^(?:[0-9a-f]{2}){1,16384}$') { throw 'Invalid CA bytes' }
+[byte[]]$der = for ($i = 0; $i -lt $hex.Length; $i += 2) { [Convert]::ToByte($hex.Substring($i, 2), 16) }
+$sha = [Security.Cryptography.SHA256]::Create()
+try { ([BitConverter]::ToString($sha.ComputeHash($der))).Replace('-', '').ToLowerInvariant() }
+finally { $sha.Dispose() }
+```
+
+实际测试须另获同意。获准后用独立的 PowerShell 窗口为中继、共享端客户端和观看端客户端分别加载配置（只写该窗口的进程环境，不写用户或系统环境），再人工启动相应程序。下面函数每个窗口需单独粘贴；它只读取该角色用到的固定键：
+
+```powershell
+function Import-RemoteHubWssProfile([string]$path, [switch]$Relay) {
+    $profile = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $names = if ($Relay) {
+        'REMOTEHUB_V2_MODE','REMOTEHUB_V2_BIND','REMOTEHUB_V2_TLS_CERT','REMOTEHUB_V2_TLS_KEY',
+        'REMOTEHUB_V2_LAN_HOST_IP','REMOTEHUB_V2_LAN_VIEWER_IP',
+        'REMOTEHUB_V2_LAN_HOST_TOKEN','REMOTEHUB_V2_LAN_VIEWER_TOKEN'
+    } else {
+        'REMOTEHUB_V2_DESKTOP_RELAY','REMOTEHUB_V2_DESKTOP_CA_DER_HEX','REMOTEHUB_V2_DESKTOP_TOKEN'
+    }
+    foreach ($name in $names) {
+        $value = $profile.PSObject.Properties[$name].Value
+        if ($value -isnot [string] -or [string]::IsNullOrEmpty($value)) {
+            throw 'RemoteHub profile incomplete'
+        }
+    }
+    foreach ($name in $names) {
+        [Environment]::SetEnvironmentVariable($name, $profile.PSObject.Properties[$name].Value, 'Process')
+    }
+}
+```
+
+- 共享端中继窗口：`Import-RemoteHubWssProfile '<测试目录>\host\host.json' -Relay`，再运行 `.\v2_signaling.exe`；保持窗口打开，结束后按 Ctrl+C。
+- 共享端客户端窗口：用同一份 `host\host.json` 调用函数但不加 `-Relay`，再运行 `.\remotehub-desktop.exe`。
+- 观看端客户端窗口：对私下收到的 `viewer.json` 调用函数（不加 `-Relay`），再运行 `.\remotehub-desktop.exe`。两端核验对端设备指纹、明确选择「私网 WSS 信令（仅视频）」并分别确认本次会话。只共享空白记事本的测试画面；点「停止并回收」、关闭两端程序和中继窗口。不启用键鼠。
+- 测试通过须看到画面并确认停止后双方结束；单独复测中继不可用时不建立连接、不回退。只反馈成功/失败和固定错误码，不上传截图、配置、临时配对码、证书私钥或令牌。
+
 ## 本分支已执行验证
 
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（135 项）、`pnpm lint`、`pnpm build` 通过。
@@ -80,6 +136,7 @@ TCP 的双方身份验证同时绑定所选中继地址。每个 WSS 房间和�
 - Linux：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked` 23 项通过，覆盖私网规则、真实回环 TLS 套接字的来源和角色检查、WS/WSS 的原生 WebRTC 回环链路、双向挑战顺序与防重放、设备签名后应用 SDP/ICE、内联候选及错误设备公钥的拒绝、取消清理和禁止降级；未采集屏幕或注入键鼠。`cargo test -p hub-signal-v2 --locked` 6 项、`cargo fmt --all -- --check` 通过。
 - Linux：`cargo test -p hub-identity --locked` 12 项通过，覆盖只读重载的非 Windows 拒绝、手动配对的公钥/指纹校验及本机身份绑定，以及签名中的角色、篡改、过期与重放。
 - Linux：`cargo test -p hub-webrtc --features v2-verified-lan --locked` 26 项通过、1 项忽略；含 4 项内存双端测试，拒绝错指纹、错端口、错临时码、旧协议和签名篡改/重放。
+- Linux：`cargo test -p hub-rendezvous-probe --bin v2_lan_test_setup --locked` 3 项通过，覆盖角色配置分离、绝不覆盖既有输出、签发的证书精确 IP 校验和有效期；只生成测试夹具。Windows x64 目标的权限检查源码通过编译和 Clippy，尚未在 Windows 真机运行生成器或权限测试。
 - Windows x64 MSVC 目标：桌面常规 `p3-lan`、可选 `v2-loopback-diagnostic` 、`v2-verified-lan` 和 `v2-private-wss-lan` 交叉检查、诊断、配对及已验证设备 LAN 构建严格 Clippy、WebRTC 目标测试代码检查通过；未在 Windows 真机运行诊断版。交叉检查本身不是真机证据。
 - Windows 实机（用户报告，2026-11-22；`c8122d2` 测试包）：两台电脑在同一局域网互相核验对端配对卡和完整指纹后，观看端画面正常；共享端点「停止并回收」后，观看端也结束。补测通过：不手动停止时，两端在会话时限后结束；一端未核验当前对端时拒绝会话、无画面且未退回普通模式。未覆盖双机错误公钥/篡改、键鼠、公网与 TURN。
 - Windows 实机（用户报告，2026-11-22）：两台电脑在同一局域网使用同一份 `77479f2` Windows x64 包，按约定回归场景测试均正常（画面、自然结束及英文键入后手动停止）。这不覆盖公网、TURN、安装器或 R06 的全量可靠性验证。
