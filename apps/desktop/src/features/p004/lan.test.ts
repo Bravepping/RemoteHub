@@ -1,6 +1,12 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { invoke } from '@tauri-apps/api/core';
-import { LanProbe, lanOffer, selectedPeer, type LanStatus } from './lan';
+import {
+  LanProbe,
+  lanOffer,
+  selectedPeer,
+  type LanConfig,
+  type LanStatus,
+} from './lan';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 afterEach(() => {
   vi.useRealTimers();
@@ -46,7 +52,7 @@ function activeLan() {
         '\r\n',
       ),
     },
-    createDataChannel: () => dc,
+    createDataChannel: vi.fn(() => dc),
     addTransceiver: () => ({ setCodecPreferences: vi.fn() }),
     setLocalDescription: vi.fn(),
     createOffer: vi.fn(),
@@ -106,7 +112,7 @@ function activeLan() {
   const update = vi.fn();
   const failed = vi.fn();
   const probe = new LanProbe(video, update, failed, vi.fn(), vi.fn());
-  const start = () =>
+  const start = (overrides: Partial<LanConfig> = {}) =>
     probe.start({
       role: 'receiver',
       consent: true,
@@ -116,9 +122,11 @@ function activeLan() {
       seconds: 30,
       port: 48604,
       pairingCode: 'fixture',
+      ...overrides,
     });
   return {
     probe,
+    pc,
     dc,
     failed,
     update,
@@ -140,6 +148,27 @@ it('requests authenticated native stop before closing the browser DataChannel', 
   expect(dc.close).not.toHaveBeenCalled();
   await stopping;
   expect(order).toEqual(['native-stop', 'browser-close']);
+});
+
+it('uses only scoped video, no control DataChannel, and tolerates a verified stop during stats', async () => {
+  const { probe, pc, failed, start, state, metrics } = activeLan();
+  pc.localDescription.sdp =
+    'v=0\r\na=candidate:1 1 UDP 1 12345678-abcd-abcd-abcd-123456789012.local 48604 typ host';
+  await start({ verifiedPeer: true, realControl: false, controlSim: false });
+  expect(pc.createDataChannel).not.toHaveBeenCalled();
+  expect(probe.enableInput(true)).toBe(false);
+  expect(invoke).toHaveBeenCalledWith('p004_lan_signal', {
+    sessionId: 'approved',
+    offer: 'v=0\r\na=candidate:1 1 UDP 1 10.0.0.2 48604 typ host',
+  });
+  metrics.mockImplementationOnce(() => {
+    state({ state: 'stopped', resources_released: true });
+    throw 'RECEIVER_STOPPED';
+  });
+  await vi.advanceTimersByTimeAsync(1050);
+  expect(metrics).toHaveBeenCalledTimes(1);
+  expect(pc.connectionState).toBe('closed');
+  expect(failed).not.toHaveBeenCalled();
 });
 
 it('revokes immediately and retains a raw error event during authenticated host finish', async () => {

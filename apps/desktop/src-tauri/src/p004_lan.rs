@@ -51,6 +51,8 @@ pub struct Config {
     control_sim: bool,
     #[serde(default)]
     real_control: bool,
+    #[serde(default)]
+    verified_peer: bool,
     role: String,
     consent: bool,
     local_ip: String,
@@ -61,6 +63,15 @@ pub struct Config {
 }
 impl Config {
     fn validate(&self) -> Result<LanScope, String> {
+        if self.verified_peer {
+            if !cfg!(feature = "v2-verified-lan") {
+                return Err("LAN_VERIFIED_MODE_DISABLED".into());
+            }
+            if self.real_control || self.control_sim {
+                return Err("LAN_VERIFIED_VIDEO_ONLY".into());
+            }
+        }
+
         if self.control_sim && !cfg!(feature = "p005-control") {
             return Err("CONTROL_FEATURE_DISABLED".into());
         }
@@ -150,6 +161,25 @@ pub async fn p004_lan_start(
     // Validate ownership of the selected interface before asking for consent.
     let check = std::net::UdpSocket::bind((scope.local, 0)).map_err(|_| "LAN_LOCAL_BIND_FAILED")?;
     drop(check);
+    #[cfg(feature = "v2-verified-lan")]
+    let verified = if config.verified_peer {
+        Some(
+            window
+                .state::<crate::v2_pairing::PairingState>()
+                .current()?,
+        )
+    } else {
+        None
+    };
+    #[cfg(feature = "v2-verified-lan")]
+    let verified_text = verified.as_ref().map_or_else(String::new, |peer| {
+        format!(
+            "\n只在对端证明拥有这个已核验的设备身份后开始视频：\n{}\n不启用键鼠。身份不匹配时不会改用普通连接。",
+            peer.fingerprint()
+        )
+    });
+    #[cfg(not(feature = "v2-verified-lan"))]
+    let verified_text = "";
     let hwnd = window.hwnd().map_err(|_| "NATIVE_WINDOW_REQUIRED")?.0 as usize;
     let action = if config.role == "sender" {
         "采集这台电脑的主屏并发送给"
@@ -167,7 +197,7 @@ pub async fn p004_lan_start(
     } else {
         ""
     };
-    let message=format!("本次将{action} {}，视频最长 {} 秒。仅连接这一台指定电脑。{control_text}\n\n发送端最多等待配对 120 秒；连接中断会停止采集。不会保存画面。\n\n是否同意本次实验？",scope.peer,config.seconds);
+    let message=format!("本次将{action} {}，视频最长 {} 秒。仅连接这一台指定电脑。{control_text}{verified_text}\n\n发送端最多等待配对 120 秒；连接中断会停止采集。不会保存画面。\n\n是否同意本次实验？",scope.peer,config.seconds);
     let allowed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
@@ -188,7 +218,44 @@ pub async fn p004_lan_start(
     if state.closing.load(Ordering::Acquire) {
         return Err("WINDOW_CLOSING".into());
     }
-    let (session, code) = if config.role == "sender" {
+    #[cfg(feature = "v2-verified-lan")]
+    let verified_session = if let Some(peer) = verified {
+        let identity = tauri::async_runtime::spawn_blocking(hub_identity::open_existing_default)
+            .await
+            .map_err(|_| "LAN_DEVICE_AUTH_FAILED")?
+            .map_err(|_| "LAN_DEVICE_AUTH_FAILED")?;
+        if state.closing.load(Ordering::Acquire) {
+            return Err("WINDOW_CLOSING".into());
+        }
+        crate::p004::origin(&window)?;
+        let auth = hub_webrtc::lan::VerifiedLanConfig {
+            local_identity: Arc::new(identity),
+            peer,
+        };
+        Some(if config.role == "sender" {
+            let (session, code) =
+                LanSession::host_verified(scope, config.seconds, config.port, auth).await?;
+            (session, Some(code))
+        } else {
+            (
+                LanSession::receiver_verified(
+                    scope,
+                    config.seconds,
+                    config.port,
+                    config.pairing_code.as_deref().unwrap_or_default(),
+                    auth,
+                )?,
+                None,
+            )
+        })
+    } else {
+        None
+    };
+    #[cfg(not(feature = "v2-verified-lan"))]
+    let verified_session: Option<(Arc<LanSession>, Option<String>)> = None;
+    let (session, code) = if let Some(session) = verified_session {
+        session
+    } else if config.role == "sender" {
         #[cfg(feature = "p3-lan")]
         let input = if config.real_control {
             Some(LanSession::host_input(scope, config.seconds, config.port).await?)
@@ -506,6 +573,7 @@ mod tests {
         let mut config = Config {
             real_control: false,
             control_sim: false,
+            verified_peer: false,
             role: "sender".into(),
             consent: false,
             local_ip: "192.168.10.2".into(),
@@ -527,5 +595,17 @@ mod tests {
         assert_eq!(config.validate().is_ok(), cfg!(feature = "p3-lan"));
         config.control_sim = true;
         assert!(config.validate().is_err());
+        config.verified_peer = true;
+        assert_eq!(
+            config.validate().unwrap_err(),
+            if cfg!(feature = "v2-verified-lan") {
+                "LAN_VERIFIED_VIDEO_ONLY"
+            } else {
+                "LAN_VERIFIED_MODE_DISABLED"
+            }
+        );
+        config.control_sim = false;
+        config.real_control = false;
+        assert_eq!(config.validate().is_ok(), cfg!(feature = "v2-verified-lan"));
     }
 }

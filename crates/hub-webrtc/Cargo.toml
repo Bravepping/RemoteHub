@@ -8,6 +8,7 @@ license.workspace = true
 [features]
 v2-loopback-signaling = ["dep:hub-signal-v2"]
 v2-verified-signaling = ["v2-loopback-signaling", "dep:hub-identity"]
+v2-verified-lan = ["p3-lan", "dep:hub-identity"]
 p3-lan = ["dep:windows-sys"]
 p006-turn-probe = ["dep:zeroize"]
 p006-direct-probe = ["p006-turn-probe"]
@@ -59,3 +60,6 @@ ring = { version = "=0.17.14", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", optional = true, features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging", "Win32_UI_HiDpi"] }
+
+[dev-dependencies]
+hub-identity = { path = "../hub-identity", features = ["ephemeral-test"] }

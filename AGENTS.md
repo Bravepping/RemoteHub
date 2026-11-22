@@ -11,30 +11,30 @@
 - 技术栈固定：Windows + Tauri v2 / Vue 3 / TypeScript / Pinia / Rust，采集 DXGI，编码 Media Foundation H.264，媒体 webrtc-rs/WebView2，输入可靠 DataChannel + Win32 SendInput；服务端 Axum WebSocket，后续 STUN/TURN。
 - **Sunshine、Moonlight V+ PC、EasyTier 都不是 V2 必需依赖**。暂不引入多余服务/微服务、数据库、用户系统或第三方播放器。
 
+## 当前任务：产品会话集成
+
+- **当前验收项是两台 Windows 的「已验证设备（仅视频）」会话**。使用 `v2-verified-lan` 构建，两端分别核验对方完整 SHA-256 指纹、明确选择同一模式、提供当前临时配对码并作原生批准；验证画面与自然结束/手动停止。不经身份核验、签名不符、模式不同的连接必须结束，不能自动退回普通模式。该模式不启用键鼠，不把双机测试结果预先标为通过。
+- 先保留及回归已经现场通过的普通 LAN TCP 模式；不要重写现有 DXGI/MF H.264、WebView2、输入与结束链路。设备配对不授予远控权限。本机配对记录不持久化；启动新会话时只读重载已提交的本机身份。
+- Axum 的 WS/WSS 和签名 offer/answer 已有回环测试；**跨机 WSS 尚未接入产品**。下一步接入真实产品信令时必须同时验证双方设备、公钥/证书、原生同意、SDP 和实际候选路径。没有可信测试证据前，不开放公网、不启用 TURN，不把回环测试当作双机通过。
+
 ## 已有事实：禁止重复造轮子
 
-- `apps/desktop/src/features/desktop/RemoteWorkspace.vue`：正式产品 UI 已有 30 秒 LAN 会话、视频、控制启停；不是默认普通版功能，须显式启用 `p3-lan` feature。
-- `apps/desktop/src-tauri/src/p004_lan.rs`：有界 LAN 实验/产品桥接、原生同意、停止与报告；暂沿用既有 IPC，不随意增加宽泛权限。
-- `crates/hub-capture-win` / `hub-encode-win`：DXGI + MF H.264。
-- `crates/hub-webrtc`：已有 LAN/ICE/PeerConnection、`remote_input.rs`（严格事件与 SendInput）、`input_pair.rs`（选中候选诊断）、`control_channel.rs`（DataChannel 和撤销清理）。
-- `crates/hub-identity`：Ed25519/CurrentUser DPAPI 本地身份；**不等于已实现云认证**。
-- `crates/hub-rendezvous-probe/src/bin/v2_signaling.rs`：V2 Axum WebSocket 信令初版，**尚无可信的实际编译、双端运行及产品 UI 接入验收**。
-- 源自原版 `main@d7dbc9b` 的 3 轮 Windows 双机 LAN 测试显示 853/900/900 帧、29/81/132 条输入消息全部获 ACK，用户现场确认英文输入同步。两轮在会话结束时有 `CONTROL_CHANNEL_ERROR`，记为 **P3-END-01 OPEN**。**R06 连接可靠性历史风险仍 OPEN**；完整 Phase3、DPI 矩阵、公网/安装器均未验收。
-- 这些是**来源分支历史证据**；不得把它们改写成 `v2/clean-core` 新构建的实测结果。
+- `apps/desktop/src/features/desktop/RemoteWorkspace.vue` 与 `apps/desktop/src-tauri/src/p004_lan.rs`：有界 LAN 会话、原生同意、停止和报告，沿用既有 IPC，不增加宽泛权限。普通远控以 `p3-lan` 启用，身份核验视频以 `v2-verified-lan` 显式启用。
+- `crates/hub-capture-win` / `hub-encode-win`：DXGI + MF H.264。`hub-webrtc` 已有 LAN/ICE/PeerConnection、选中候选诊断、DataChannel、SendInput 与撤销清理。
+- `crates/hub-identity` 有 Ed25519 和 CurrentUser DPAPI 本地身份、完整指纹核验和会话证明；这不等于云认证。`v2_signaling.rs` 已通过实际本机 Axum 测试，仍只监听回环。
+- 原版 `main@d7dbc9b` 记录 853/900/900 帧和 29/81/132 条输入 ACK；这些计数是来源分支历史证据。精简分支 `77479f2` 的普通 LAN 双机视频、英文输入及结束已由用户确认正常，**P3-END-01 普通 LAN 回归已通过**。新模式、R06、DPI、公网与安装器尚未验收，实际结果详见根 `README.md`。
 
 ## 开发顺序（可连续推进）
 
-1. **先得到可编译的干净核心**：Windows 编译 `p3-lan`，运行直接关联的 Rust/前端测试；检查并修复 V2 `v2_signaling` 的实际编译/本地 WS 握手。不能仅凭源码就标 PASS。
-2. **稳定已经跑通的 LAN 远控**：优先定位 `P3-END-01` 关闭通道异常、误报/真实错误、撤销和停止时序；再补常用英文键盘、鼠标/滚轮及断线清理。仅修改所需代码，不改写既有成功路径。
-3. **接入 V2 Axum 信令**：保留旧 LAN TCP 方式作回退，将 offer/answer/ICE 接入实际产品 UI。先 loopback/LAN 验证；对外部署前完成加密、身份及来源授权。
-4. **完成公网连接**：STUN/ICE 直连优先，TURN 回退；选路必须依据真实 selected candidate pair，不用 UI 模拟状态代替；限制凭据、会话和中继资源。
-5. **Windows 安装交付**：可安装、可卸载、真实本地双机验收；逐步扩展 1080p/更长会话/多 DPI，而不是先重做 UI。
+1. **产品会话集成**：优先完成已验证设备视频双机验收，再接入产品 WSS；输入需单独的原生明确许可和撤销验收，保留普通 LAN TCP 为手动选择，不允许无提示降级。
+2. **公网连接**：在设备、加密和来源授权准备齐全后，先测 STUN/ICE 直连，再测 TURN 回退。以真实 selected candidate pair 判断选路，不用模拟状态代替；限制凭据、会话和中继资源。
+3. **Windows 安装交付**：可安装、可卸载、真实双机验收；再逐步扩展 1080p、更长会话和多 DPI。
 
 完成一个可验证增量后直接进入下一个**已批准的代码开发与离线测试任务**；只在存在实际阻塞、改变产品安全边界或需要真实外部操作时询问用户。
 
 ## 敏捷与 Git 规则
 
-- **不强制撰写 Plan / ADR / Contract / Evidence 或每项单独报告**。只在根 `README.md` 更新：当前状态、执行过的测试命令与结果、未完成项/风险。保留必要自动测试源码与简短有意义的注释。
+- **不强制撰写 Plan / ADR / Contract / Evidence 或每项单独报告**。根 `AGENTS.md` 写当前任务和执行边界，根 `README.md` 记录实际进度、测试命令与结果、未完成项和风险。保留必要自动测试源码与简短有意义的注释。
 - 每次修改尽量可编译/可回滚；按功能提交小 commit。不要强制推送、改写原仓库历史或删除用户数据。
 - 若测试失败，报告精确错误及已定位范围，优先修复再推进；不得把 fixture、纯单元测试、build success 记作真实双机远控通过。
 - 默认先在 Windows 环境执行：
@@ -43,10 +43,10 @@
   pnpm typecheck
   pnpm test
   cargo fmt --all -- --check
-  cargo test -p hub-webrtc --features p3-lan --locked
-  cargo test -p remotehub-desktop --features p3-lan --locked
+  cargo test -p hub-webrtc --features v2-verified-lan --locked
+  cargo test -p remotehub-desktop --features v2-verified-lan --locked
   cargo test -p hub-rendezvous-probe --bin v2_signaling --locked
-  cargo build -p remotehub-desktop --profile probe --features p3-lan,custom-protocol --locked
+  cargo build -p remotehub-desktop --profile probe --features v2-verified-lan,custom-protocol --locked
   ```
   开始前确认可用 MSVC、Windows SDK、WebView2、Rust 和 pnpm；缺依赖如实说明，不自行关闭 TLS、提权或改安全设置。真实硬件操作不属于上述自动测试。
 - 不运行会实际采集/注入输入的程序来“自动测试”；先列出精确 EXE 路径/SHA256、目标电脑、动作与停止方式，请用户操作/同意，Agent 只做脱敏统计与取证。
@@ -67,4 +67,4 @@
 **未完成 / 阻塞：** 一个明确的下一步问题或风险。  
 **紧接着做：** 下一个最小可运行增量；没有外部操作/安全阻塞就继续开发。
 
-根 README 为当前阶段唯一进度入口，不要求逐任务生成长文档。
+根 README 为验收进度入口，不要求逐任务生成长文档。

@@ -45,6 +45,85 @@ fn should_announce_finish(stats: &Stats, input_mode: bool) -> bool {
             || (input_mode && stats.state == "draining" && stats.frames_sent > 0))
 }
 
+/// Caller-pinned peer and local identity for one explicitly approved video
+/// session. Pairing does not grant permission to share screen or input.
+#[cfg(feature = "v2-verified-lan")]
+pub struct VerifiedLanConfig {
+    pub local_identity: Arc<hub_identity::Identity>,
+    pub peer: Arc<hub_identity::pairing::VerifiedPeer>,
+}
+
+#[cfg(feature = "v2-verified-lan")]
+impl VerifiedLanConfig {
+    fn validate(&self, scope: LanScope) -> Result<(), String> {
+        LanScope::new(scope.local, scope.peer)?;
+        if !self.peer.is_for(&self.local_identity.public()) {
+            return Err("LAN_VERIFIED_PEER_BINDING".into());
+        }
+        Ok(())
+    }
+}
+
+#[cfg(feature = "v2-verified-lan")]
+fn validate_verified_sdp(sdp: &str, scope: LanScope, answer: bool) -> Result<(), String> {
+    let negotiation = validate_description(sdp, NetworkScope::Lan(scope), answer)?;
+    if !sdp.lines().map(str::trim).any(|line| line == "a=rtcp-mux") {
+        return Err("LAN_VERIFIED_RTCP_MUX_REQUIRED".into());
+    }
+    // All candidates were checked against the selected interface above.
+    // A component-2-only or empty inline set cannot connect video.
+    if negotiation.candidate_types.is_empty()
+        || !sdp.lines().map(str::trim).any(|line| {
+            line.strip_prefix("a=candidate:")
+                .and_then(|candidate| candidate.split_whitespace().nth(1))
+                == Some("1")
+        })
+    {
+        return Err("LAN_VERIFIED_INLINE_CANDIDATE_REQUIRED".into());
+    }
+    // Repeated identical SHA-256 fingerprints are harmless; alternative
+    // digests or algorithms make the DTLS identity ambiguous.
+    let mut fingerprints = sdp
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| line.strip_prefix("a=fingerprint:"));
+    let fingerprint = fingerprints
+        .next()
+        .ok_or("SHA256_DTLS_FINGERPRINT_REQUIRED")?;
+    if !fingerprint.starts_with("sha-256 ")
+        || fingerprints.any(|next| !fingerprint.eq_ignore_ascii_case(next))
+    {
+        return Err("LAN_VERIFIED_DTLS_FINGERPRINT_AMBIGUOUS".into());
+    }
+    Ok(())
+}
+
+#[cfg(feature = "v2-verified-lan")]
+fn reversed_scope(scope: LanScope) -> LanScope {
+    LanScope {
+        local: scope.peer,
+        peer: scope.local,
+    }
+}
+
+#[cfg(feature = "v2-verified-lan")]
+fn check_verified_socket(
+    socket: &TcpStream,
+    scope: LanScope,
+    host_port: u16,
+    host: bool,
+) -> Result<(), String> {
+    let local = socket.local_addr().map_err(|_| "LAN_LOCAL_ADDRESS")?;
+    let peer = socket.peer_addr().map_err(|_| "LAN_PEER_ADDRESS")?;
+    if local.ip() != std::net::IpAddr::V4(scope.local)
+        || peer.ip() != std::net::IpAddr::V4(scope.peer)
+        || (if host { local.port() } else { peer.port() }) != host_port
+    {
+        return Err("LAN_VERIFIED_SOCKET_SCOPE".into());
+    }
+    Ok(())
+}
+
 pub struct LanSession {
     #[cfg(feature = "p3-lan")]
     input_enabled: AtomicBool,
@@ -58,6 +137,8 @@ pub struct LanSession {
     cancelled: AtomicBool,
     started: AtomicBool,
     key: Mutex<Option<Arc<Key>>>,
+    #[cfg(feature = "v2-verified-lan")]
+    verified: Mutex<Option<VerifiedLanConfig>>,
     source: Mutex<Option<Arc<Session>>>,
     status: Mutex<LanStatus>,
     task: Mutex<Option<JoinHandle<()>>>,
@@ -102,6 +183,8 @@ impl LanSession {
             cancelled: AtomicBool::new(false),
             started: AtomicBool::new(false),
             key: Mutex::new(Some(Arc::new(key))),
+            #[cfg(feature = "v2-verified-lan")]
+            verified: Mutex::new(None),
             source: Mutex::new(None),
             status: Mutex::new(LanStatus {
                 browser_control: None,
@@ -167,16 +250,35 @@ impl LanSession {
         this.input_enabled.store(input, Ordering::Release);
         #[cfg(not(feature = "p3-lan"))]
         let _ = input;
-        let listener = TcpListener::bind((scope.local, port))
+        this.start_host().await?;
+        Ok((this, display))
+    }
+    async fn start_host(self: &Arc<Self>) -> Result<(), String> {
+        let listener = TcpListener::bind((self.scope.local, self.port))
             .await
             .map_err(|_| "LAN_LISTEN_FAILED")?;
-        this.started.store(true, Ordering::Release);
-        let owner = this.clone();
+        self.started.store(true, Ordering::Release);
+        let owner = self.clone();
         let task = tokio::spawn(async move {
             let result = owner.host_main(listener).await;
             owner.finish(result).await;
         });
-        *this.task.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);
+        *self.task.lock().unwrap_or_else(|p| p.into_inner()) = Some(task);
+        Ok(())
+    }
+    #[cfg(feature = "v2-verified-lan")]
+    pub async fn host_verified(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        auth: VerifiedLanConfig,
+    ) -> Result<(Arc<Self>, String), String> {
+        auth.validate(scope)?;
+        let key = Key::generate();
+        let display = key.display();
+        let this = Self::new(scope, seconds, port, "sender", key)?;
+        *this.verified.lock().unwrap_or_else(|p| p.into_inner()) = Some(auth);
+        this.start_host().await?;
         Ok((this, display))
     }
     pub fn receiver(
@@ -194,6 +296,26 @@ impl LanSession {
         code: &str,
     ) -> Result<Arc<Self>, String> {
         Self::new_mode(scope, seconds, port, "receiver", Key::parse(code)?, true)
+    }
+    #[cfg(feature = "v2-verified-lan")]
+    pub fn receiver_verified(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        code: &str,
+        auth: VerifiedLanConfig,
+    ) -> Result<Arc<Self>, String> {
+        auth.validate(scope)?;
+        let this = Self::receiver(scope, seconds, port, code)?;
+        *this.verified.lock().unwrap_or_else(|p| p.into_inner()) = Some(auth);
+        Ok(this)
+    }
+    #[cfg(feature = "v2-verified-lan")]
+    fn take_verified(&self) -> Option<VerifiedLanConfig> {
+        self.verified
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
     }
     fn input_mode(&self) -> bool {
         #[cfg(feature = "p3-lan")]
@@ -289,6 +411,8 @@ impl LanSession {
                 s.resources_released = true;
             });
             self.key.lock().unwrap_or_else(|p| p.into_inner()).take();
+            #[cfg(feature = "v2-verified-lan")]
+            drop(self.take_verified());
         }
         if !self.stats().resources_released {
             return Err("LAN_CLEANUP_PENDING".into());
@@ -308,6 +432,8 @@ impl LanSession {
             true
         };
         self.key.lock().unwrap_or_else(|p| p.into_inner()).take();
+        #[cfg(feature = "v2-verified-lan")]
+        drop(self.take_verified());
         self.update(|s| {
             if let Err(error) = result {
                 if error != "CANCELLED" {
@@ -327,6 +453,10 @@ impl LanSession {
         });
     }
     async fn host_main(&self, listener: TcpListener) -> Result<(), String> {
+        #[cfg(feature = "v2-verified-lan")]
+        let verified = self.take_verified();
+        #[cfg(feature = "v2-verified-lan")]
+        let mut signed_sdp = None;
         let deadline = Instant::now() + Duration::from_secs(120);
         let mut accepted = None;
         let mut attempts = 0;
@@ -336,6 +466,32 @@ impl LanSession {
             attempts += 1;
             if address.ip() != std::net::IpAddr::V4(self.scope.peer) {
                 continue;
+            }
+            #[cfg(feature = "v2-verified-lan")]
+            if let Some(auth) = verified.as_ref() {
+                check_verified_socket(&socket, self.scope, self.port, true)?;
+                let (codec, proof, offer) = tokio::select! {
+                    biased;
+                    _ = self.cancelled() => return Ok(()),
+                    result = timeout(Duration::from_secs(5), async {
+                        let (mut codec, mut proof) = crate::lan_device::authenticate_host(
+                            &mut socket, self.secret()?, &auth.local_identity, &auth.peer,
+                            self.scope, self.port,
+                        ).await?;
+                        let (kind, payload) = codec.accept(lan_wire::read(&mut socket).await?)?;
+                        if kind != "offer" {
+                            return Err("EXPECTED_SIGNED_LAN_OFFER".to_owned());
+                        }
+                        let offer = proof.open(&payload)?;
+                        Ok::<_, String>((codec, proof, offer))
+                    }) => result
+                        .map_err(|_| "LAN_DEVICE_AUTH_TIMEOUT")?
+                        .map_err(|_| "LAN_DEVICE_AUTH_FAILED")?,
+                };
+                validate_verified_sdp(&offer, self.scope, false)?;
+                signed_sdp = Some(proof);
+                accepted = Some((socket, codec, offer));
+                break;
             }
             let frame = tokio::select! {r=timeout(Duration::from_secs(5),lan_wire::read(&mut socket))=>match r{Ok(Ok(f))=>f,_=>continue},_=self.cancelled()=>return Ok(())};
             let mut codec = match Codec::new(self.secret()?, frame.nonce.clone(), true) {
@@ -408,6 +564,28 @@ impl LanSession {
             Session::new_lan(self.seconds, self.scope)?
         };
         *self.source.lock().unwrap_or_else(|p| p.into_inner()) = Some(source.clone());
+        #[cfg(feature = "v2-verified-lan")]
+        if let Some(mut proof) = signed_sdp {
+            let answer = tokio::select! {
+                biased;
+                _ = self.cancelled() => return Ok(()),
+                result = source.signal(offer) => result?,
+            };
+            validate_verified_sdp(&answer, reversed_scope(self.scope), true)?;
+            let payload = proof.seal(answer).map_err(|_| "LAN_DEVICE_AUTH_FAILED")?;
+            let frame = codec
+                .encode("answer", payload)
+                .map_err(|_| "LAN_DEVICE_AUTH_FAILED")?;
+            drop(verified);
+            tokio::select! {
+                biased;
+                _ = self.cancelled() => return Ok(()),
+                result = timeout(Duration::from_secs(2), lan_wire::write(&mut socket, frame)) => {
+                    result.map_err(|_| "LAN_ANSWER_TIMEOUT")??;
+                }
+            }
+            return self.control(socket, codec).await;
+        }
         let answer = source.signal(offer).await?;
         let (kind, payload) = if self.control_enabled {
             (
@@ -467,11 +645,56 @@ impl LanSession {
         offer: String,
         response: &mut Option<oneshot::Sender<Result<String, String>>>,
     ) -> Result<(), String> {
+        #[cfg(feature = "v2-verified-lan")]
+        let (verified, deadline) = (
+            self.take_verified(),
+            Instant::now() + Duration::from_secs(14),
+        );
+        #[cfg(feature = "v2-verified-lan")]
+        if verified.is_some() {
+            validate_verified_sdp(&offer, reversed_scope(self.scope), false)?;
+        }
         let socket = TcpSocket::new_v4().map_err(|_| "LAN_SOCKET_FAILED")?;
         socket
             .bind((self.scope.local, 0).into())
             .map_err(|_| "LAN_LOCAL_BIND_FAILED")?;
         let mut socket = tokio::select! {r=timeout(Duration::from_secs(5),socket.connect((self.scope.peer,self.port).into()))=>r.map_err(|_|"LAN_CONNECT_TIMEOUT")?.map_err(|_|"LAN_CONNECT_FAILED")?,_=self.cancelled()=>return Err("CANCELLED".into())};
+        #[cfg(feature = "v2-verified-lan")]
+        if let Some(auth) = verified {
+            check_verified_socket(&socket, self.scope, self.port, false)?;
+            let (mut codec, mut proof) = tokio::select! {
+                biased;
+                _ = self.cancelled() => return Err("CANCELLED".into()),
+                result = timeout(Duration::from_secs(5), crate::lan_device::authenticate_viewer(
+                    &mut socket, self.secret()?, &auth.local_identity, &auth.peer,
+                    self.scope, self.port,
+                )) => result
+                    .map_err(|_| "LAN_DEVICE_AUTH_TIMEOUT")?
+                    .map_err(|_| "LAN_DEVICE_AUTH_FAILED")?,
+            };
+            let answer = tokio::select! {
+                biased;
+                _ = self.cancelled() => return Err("CANCELLED".into()),
+                result = timeout(deadline.saturating_duration_since(Instant::now()), async {
+                    let payload = proof.seal(offer)?;
+                    lan_wire::write(&mut socket, codec.encode("offer", payload)?).await?;
+                    let (kind, payload) = codec.accept(lan_wire::read(&mut socket).await?)?;
+                    if kind != "answer" {
+                        return Err("EXPECTED_SIGNED_LAN_ANSWER".to_owned());
+                    }
+                    proof.open(&payload)
+                }) => result.map_err(|_| "LAN_ANSWER_TIMEOUT")?
+                    .map_err(|_| "LAN_DEVICE_AUTH_FAILED")?,
+            };
+            drop(auth);
+            validate_verified_sdp(&answer, self.scope, true)?;
+            if self.cancelled.load(Ordering::Acquire) {
+                return Err("CANCELLED".into());
+            }
+            return self
+                .accept_receiver_answer(socket, codec, answer, response)
+                .await;
+        }
         let mut codec = Codec::new(self.secret()?, uuid::Uuid::new_v4().to_string(), false)?;
         let (kind, payload) = if self.control_enabled {
             (
@@ -512,6 +735,16 @@ impl LanSession {
             answer
         };
         self.validate_sdp(&answer, NetworkScope::Lan(self.scope), true)?;
+        self.accept_receiver_answer(socket, codec, answer, response)
+            .await
+    }
+    async fn accept_receiver_answer(
+        &self,
+        socket: TcpStream,
+        codec: Codec,
+        answer: String,
+        response: &mut Option<oneshot::Sender<Result<String, String>>>,
+    ) -> Result<(), String> {
         self.update(|s| {
             s.state = "connected".into();
             s.authenticated = true;
@@ -719,6 +952,75 @@ pub fn validate_metrics(data: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(feature = "v2-verified-lan")]
+    #[test]
+    fn verified_video_requires_local_inline_rtp_and_unambiguous_dtls_identity() {
+        let scope = LanScope::new(
+            "192.168.1.2".parse().unwrap(),
+            "192.168.1.3".parse().unwrap(),
+        )
+        .unwrap();
+        let fingerprint = ["AA"; 32].join(":");
+        let video = format!(
+            "v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\na=recvonly\r\na=rtcp-mux\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\na=fingerprint:sha-256 {fingerprint}\r\n"
+        );
+        assert!(validate_description(&video, NetworkScope::Lan(scope), false).is_ok());
+        assert_eq!(
+            validate_verified_sdp(&video, scope, false).unwrap_err(),
+            "LAN_VERIFIED_INLINE_CANDIDATE_REQUIRED"
+        );
+        let offer = format!("{video}a=candidate:1 1 UDP 1 192.168.1.3 49152 typ host\r\n");
+        assert!(validate_verified_sdp(&offer, scope, false).is_ok());
+        assert!(validate_verified_sdp(&offer, reversed_scope(scope), false).is_err());
+        assert_eq!(
+            validate_verified_sdp(
+                &format!("{offer}a=fingerprint:sha-256 {}\r\n", ["BB"; 32].join(":")),
+                scope,
+                false,
+            )
+            .unwrap_err(),
+            "LAN_VERIFIED_DTLS_FINGERPRINT_AMBIGUOUS"
+        );
+        assert!(validate_verified_sdp(
+            &format!("{offer}m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n"),
+            scope,
+            false
+        )
+        .is_err());
+    }
+
+    #[cfg(feature = "v2-verified-lan")]
+    #[test]
+    fn verified_receiver_rejects_a_pin_owned_by_another_local_device() {
+        use hub_identity::{pairing::PairingCandidate, Identity};
+        let local_identity = Arc::new(Identity::generate_ephemeral().unwrap());
+        let other_local = Identity::generate_ephemeral().unwrap();
+        let peer_identity = Identity::generate_ephemeral().unwrap();
+        let peer = Arc::new(
+            other_local
+                .verify_peer(
+                    &PairingCandidate::parse(&peer_identity.pairing_code()).unwrap(),
+                    &peer_identity.public().fingerprint,
+                )
+                .unwrap(),
+        );
+        let scope = LanScope::new(
+            "192.168.1.2".parse().unwrap(),
+            "192.168.1.3".parse().unwrap(),
+        )
+        .unwrap();
+        assert!(matches!(
+            LanSession::receiver_verified(
+                scope,
+                5,
+                48604,
+                &Key::generate().display(),
+                VerifiedLanConfig { local_identity, peer },
+            ),
+            Err(error) if error == "LAN_VERIFIED_PEER_BINDING"
+        ));
+    }
 
     #[test]
     fn finish_is_only_sent_during_successful_input_drain_or_release() {

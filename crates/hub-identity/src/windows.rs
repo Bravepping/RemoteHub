@@ -24,6 +24,7 @@ const ENTROPY: &[u8] = b"RemoteHub.Identity.CurrentUser.v1";
 const FILE_MAGIC: &[u8; 8] = b"RHDPA001";
 const MAX_FILE: usize = 16 * 1024;
 const KEY_FILE: &str = "identity.dpapi";
+const LOCK_FILE: &str = "identity.lock";
 const COMMIT_MAGIC: &[u8; 8] = b"RHCOM001";
 
 struct LocalAllocation(*mut core::ffi::c_void);
@@ -221,6 +222,27 @@ impl Security {
         creation: u32,
         flags: u32,
     ) -> Result<File, Error> {
+        self.open_with_missing(path, access, share, creation, flags, Error::Storage)
+    }
+    fn open_existing_readonly(&self, path: &Path, share: u32, flags: u32) -> Result<File, Error> {
+        self.open_with_missing(
+            path,
+            FILE_GENERIC_READ,
+            share,
+            OPEN_EXISTING,
+            flags,
+            Error::IncompleteStore,
+        )
+    }
+    fn open_with_missing(
+        &self,
+        path: &Path,
+        access: u32,
+        share: u32,
+        creation: u32,
+        flags: u32,
+        missing: Error,
+    ) -> Result<File, Error> {
         let handle = unsafe {
             CreateFileW(
                 wide(path)?.as_ptr(),
@@ -233,10 +255,10 @@ impl Security {
             )
         };
         if handle == INVALID_HANDLE_VALUE {
-            return Err(if unsafe { GetLastError() } == ERROR_SHARING_VIOLATION {
-                Error::Busy
-            } else {
-                Error::Storage
+            return Err(match unsafe { GetLastError() } {
+                ERROR_SHARING_VIOLATION => Error::Busy,
+                ERROR_FILE_NOT_FOUND | ERROR_PATH_NOT_FOUND => missing,
+                _ => Error::Storage,
             });
         }
         Ok(File::from(unsafe { OwnedHandle::from_raw_handle(handle) }))
@@ -320,9 +342,18 @@ impl Security {
         self.verify(&dir, true, private)?;
         Ok(dir) // No FILE_SHARE_DELETE: hold directory identity for the entire operation.
     }
+    fn existing_directory(&self, path: &Path, private: bool) -> Result<File, Error> {
+        let dir = self.open_existing_readonly(
+            path,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            FILE_FLAG_BACKUP_SEMANTICS,
+        )?;
+        self.verify(&dir, true, private)?;
+        Ok(dir)
+    }
 }
 
-pub(super) fn open_default() -> Result<Identity, Error> {
+fn local_app_data() -> Result<PathBuf, Error> {
     let mut raw = null_mut();
     if unsafe { SHGetKnownFolderPath(&FOLDERID_LocalAppData, 0, null_mut(), &mut raw) } < 0
         || raw.is_null()
@@ -343,13 +374,28 @@ pub(super) fn open_default() -> Result<Identity, Error> {
     unsafe {
         CoTaskMemFree(raw.cast());
     }
-    let root = path.ok_or(Error::Storage)?.join("RemoteHub");
+    path.ok_or(Error::Storage)
+}
+
+pub(super) fn open_default() -> Result<Identity, Error> {
+    let root = local_app_data()?.join("RemoteHub");
     let security = Security::new()?;
     let _parent = security.directory(&root, false)?;
     open_or_create(&root.join("identity-v1"))
 }
 
-pub(super) fn open_or_create(root: &Path) -> Result<Identity, Error> {
+pub(super) fn open_existing_default() -> Result<Identity, Error> {
+    let local_app_data = local_app_data()?;
+    validate_root_path(&local_app_data)?;
+    let root = local_app_data.join("RemoteHub");
+    let security = Security::new()?;
+    // Pin these path components against deletion/replacement for our read.
+    let _local = security.existing_directory(&local_app_data, false)?;
+    let _parent = security.existing_directory(&root, false)?;
+    open_existing(&security, &root.join("identity-v1"))
+}
+
+fn validate_root_path(root: &Path) -> Result<(), Error> {
     use std::path::{Component, Prefix};
     if !root.is_absolute()
         || root
@@ -359,28 +405,27 @@ pub(super) fn open_or_create(root: &Path) -> Result<Identity, Error> {
     {
         return Err(Error::UnsafeStorage);
     }
-    let security = Security::new()?;
-    let _directory = security.directory(root, true)?;
-    let mut lock = security.open(
-        &root.join("identity.lock"),
-        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
-        0,
-        OPEN_ALWAYS,
-        0,
-    )?;
-    security.verify(&lock, false, true)?;
+    Ok(())
+}
+
+fn read_commit_marker(lock: &mut File) -> Result<Option<[u8; 32]>, Error> {
     let mut marker = Vec::new();
-    Read::by_ref(&mut lock)
+    Read::by_ref(lock)
         .take(41)
         .read_to_end(&mut marker)
         .map_err(|_| Error::Storage)?;
-    let committed: Option<[u8; 32]> = if marker.is_empty() {
-        None
+    if marker.is_empty() {
+        Ok(None)
     } else if marker.len() == 40 && &marker[..8] == COMMIT_MAGIC {
-        Some(marker[8..].try_into().map_err(|_| Error::InvalidStore)?)
+        Ok(Some(
+            marker[8..].try_into().map_err(|_| Error::InvalidStore)?,
+        ))
     } else {
-        return Err(Error::InvalidStore);
-    };
+        Err(Error::InvalidStore)
+    }
+}
+
+fn reject_pending(root: &Path) -> Result<(), Error> {
     if std::fs::read_dir(root)
         .map_err(|_| Error::Storage)?
         .any(|entry| {
@@ -391,6 +436,42 @@ pub(super) fn open_or_create(root: &Path) -> Result<Identity, Error> {
     {
         return Err(Error::IncompleteStore);
     }
+    Ok(())
+}
+
+fn open_existing(security: &Security, root: &Path) -> Result<Identity, Error> {
+    validate_root_path(root)?;
+    let _directory = security.existing_directory(root, true)?;
+    // Share mode 0 excludes the existing read/write creator and other mutators.
+    // OPEN_EXISTING and FILE_GENERIC_READ ensure none of these opens can repair state.
+    let mut lock = security.open_existing_readonly(&root.join(LOCK_FILE), 0, 0)?;
+    security.verify(&lock, false, true)?;
+    let committed = read_commit_marker(&mut lock)?.ok_or(Error::IncompleteStore)?;
+    reject_pending(root)?;
+    let mut key = security.open_existing_readonly(&root.join(KEY_FILE), FILE_SHARE_READ, 0)?;
+    security.verify(&key, false, true)?;
+    let identity = load_verified(&mut key)?;
+    let digest: [u8; 32] = Sha256::digest(identity.public().public_key).into();
+    if committed != digest {
+        return Err(Error::InvalidStore);
+    }
+    Ok(identity)
+}
+
+pub(super) fn open_or_create(root: &Path) -> Result<Identity, Error> {
+    validate_root_path(root)?;
+    let security = Security::new()?;
+    let _directory = security.directory(root, true)?;
+    let mut lock = security.open(
+        &root.join(LOCK_FILE),
+        FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+        0,
+        OPEN_ALWAYS,
+        0,
+    )?;
+    security.verify(&lock, false, true)?;
+    let committed = read_commit_marker(&mut lock)?;
+    reject_pending(root)?;
     let path = root.join(KEY_FILE);
     match std::fs::symlink_metadata(&path) {
         Ok(_) => {
@@ -475,8 +556,11 @@ fn verify_or_commit(
 fn load(security: &Security, path: &Path) -> Result<Identity, Error> {
     let mut file = security.open(path, FILE_GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, 0)?;
     security.verify(&file, false, true)?;
+    load_verified(&mut file)
+}
+fn load_verified(file: &mut File) -> Result<Identity, Error> {
     let mut bytes = Vec::new();
-    Read::by_ref(&mut file)
+    Read::by_ref(file)
         .take((MAX_FILE + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| Error::Storage)?;
@@ -563,6 +647,73 @@ mod tests {
         drop(again);
         clean(&root);
     }
+    #[test]
+    fn existing_store_is_never_created_or_repaired() {
+        let root = root();
+        let security = Security::new().unwrap();
+        let open = || open_existing(&security, &root);
+        assert!(matches!(open(), Err(Error::IncompleteStore)));
+        assert!(!root.exists());
+
+        security.create_directory(&root).unwrap();
+        let lock_path = root.join(LOCK_FILE);
+        let key_path = root.join(KEY_FILE);
+        assert!(matches!(open(), Err(Error::IncompleteStore)));
+        assert!(!lock_path.exists() && !key_path.exists());
+
+        let identity = open_or_create(&root).unwrap();
+        let key_bytes = std::fs::read(&key_path).unwrap();
+        let marker = std::fs::read(&lock_path).unwrap();
+        assert!(open().unwrap().public() == identity.public());
+        assert!(std::fs::read(&key_path).unwrap() == key_bytes);
+        assert_eq!(std::fs::read(&lock_path).unwrap(), marker);
+
+        std::fs::write(&lock_path, []).unwrap();
+        assert!(matches!(open(), Err(Error::IncompleteStore)));
+        assert_eq!(std::fs::metadata(&lock_path).unwrap().len(), 0);
+        assert!(std::fs::read(&key_path).unwrap() == key_bytes);
+
+        std::fs::write(&lock_path, &marker).unwrap();
+        let mut changed_marker = marker.clone();
+        changed_marker[8] ^= 1;
+        std::fs::write(&lock_path, &changed_marker).unwrap();
+        assert!(matches!(open(), Err(Error::InvalidStore)));
+        assert_eq!(std::fs::read(&lock_path).unwrap(), changed_marker);
+
+        std::fs::write(&lock_path, &marker).unwrap();
+        std::fs::remove_file(&key_path).unwrap();
+        assert!(matches!(open(), Err(Error::IncompleteStore)));
+        assert!(!key_path.exists());
+        assert_eq!(std::fs::read(&lock_path).unwrap(), marker);
+        clean(&root);
+    }
+
+    #[test]
+    fn existing_store_rejects_pending_and_busy_without_repair() {
+        let root = root();
+        open_or_create(&root).unwrap();
+        let security = Security::new().unwrap();
+        let lock = security
+            .open(
+                &root.join(LOCK_FILE),
+                FILE_GENERIC_WRITE,
+                0,
+                OPEN_EXISTING,
+                0,
+            )
+            .unwrap();
+        assert!(matches!(open_existing(&security, &root), Err(Error::Busy)));
+        drop(lock);
+        let pending = root.join("pending-readonly-test");
+        std::fs::write(&pending, b"fixture").unwrap();
+        assert!(matches!(
+            open_existing(&security, &root),
+            Err(Error::IncompleteStore)
+        ));
+        assert_eq!(std::fs::read(&pending).unwrap(), b"fixture");
+        clean(&root);
+    }
+
     #[test]
     fn corrupted_store_is_not_overwritten_or_regenerated() {
         let root = root();

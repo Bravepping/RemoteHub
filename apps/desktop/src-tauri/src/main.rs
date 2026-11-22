@@ -73,6 +73,7 @@ struct RuntimeInfo {
     p3_enabled: bool,
     v2_loopback_diagnostic_enabled: bool,
     v2_peer_pairing_enabled: bool,
+    v2_verified_lan_enabled: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
@@ -114,6 +115,10 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
         )),
         v2_peer_pairing_enabled: cfg!(all(
             feature = "v2-peer-pairing",
+            not(feature = "p006-relay")
+        )),
+        v2_verified_lan_enabled: cfg!(all(
+            feature = "v2-verified-lan",
             not(feature = "p006-relay")
         )),
         p004_enabled: cfg!(feature = "p004-probe"),

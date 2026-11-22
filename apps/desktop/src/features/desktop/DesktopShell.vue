@@ -122,6 +122,7 @@ onUnmounted(() => {
         :v2-loopback-diagnostic-enabled="
           runtime?.v2_loopback_diagnostic_enabled === true
         "
+        :v2-verified-lan-enabled="runtime?.v2_verified_lan_enabled === true"
         @session-state="remoteState = $event"
       />
       <HomePage

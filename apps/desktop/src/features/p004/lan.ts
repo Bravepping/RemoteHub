@@ -30,6 +30,7 @@ export interface LanStatus {
   error: string | null;
 }
 export interface LanConfig {
+  verifiedPeer?: boolean;
   realControl?: boolean;
   controlSim?: boolean;
   role: 'sender' | 'receiver';
@@ -206,9 +207,10 @@ export class LanProbe {
       };
     });
     if (this.stopped) return;
-    const publication = config.realControl
-      ? publishInputOffer(pc.localDescription!.sdp, config.localIp)
-      : undefined;
+    const publication =
+      config.realControl || config.verifiedPeer
+        ? publishInputOffer(pc.localDescription!.sdp, config.localIp)
+        : undefined;
     this.candidateSummary = publication?.summary;
     if (publication && publication.summary.published === 0)
       throw new Error('INPUT_NO_PUBLISHED_HOST_CANDIDATE');
@@ -259,12 +261,15 @@ export class LanProbe {
   }
   private async poll() {
     if (this.stopped || !this.id) return;
+    const productSession = !!(
+      this.config?.realControl || this.config?.verifiedPeer
+    );
     try {
       let status = await invoke<LanStatus>('p004_lan_stats', {
         sessionId: this.id,
       });
       if (this.stopped) return;
-      if (this.config?.realControl && authenticatedClosing(status)) {
+      if (productSession && authenticatedClosing(status)) {
         this.control?.revoke();
         this.controlErrorDeadline = undefined;
       } else if (
@@ -281,7 +286,7 @@ export class LanProbe {
           receiver = await this.receiverSnapshot();
         } catch (error) {
           if (
-            !this.config?.realControl ||
+            !productSession ||
             !authenticatedClosing(status) ||
             String(error).includes('BROWSER_SELECTED_OFF_PEER')
           )
@@ -299,10 +304,7 @@ export class LanProbe {
               data: receiver,
             });
           } catch (error) {
-            if (
-              !this.config?.realControl ||
-              !String(error).includes('RECEIVER_STOPPED')
-            )
+            if (!productSession || !String(error).includes('RECEIVER_STOPPED'))
               throw error;
             // Stop can land between the status sample and the metrics IPC.
             status = await invoke<LanStatus>('p004_lan_stats', {
@@ -317,8 +319,7 @@ export class LanProbe {
       } else receiver = status.receiver_samples.at(-1);
       const playing =
         (receiver?.framesDecoded ?? 0) > 0 && (receiver?.videoWidth ?? 0) > 0;
-      const finishing =
-        !!this.config?.realControl && authenticatedClosing(status);
+      const finishing = productSession && authenticatedClosing(status);
       if (!status.resources_released && !finishing)
         this.control?.beginBatch(
           playing && receiver?.peerMatches === true && !this.video.paused,
@@ -359,7 +360,8 @@ export class LanProbe {
     return this.control?.input(event) ?? false;
   }
   private async readFinalReceiver(): Promise<LanReceiver | undefined> {
-    if (!this.config?.realControl || !this.pc) return undefined;
+    if ((!this.config?.realControl && !this.config?.verifiedPeer) || !this.pc)
+      return undefined;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
@@ -403,7 +405,7 @@ export class LanProbe {
           sessionId: this.id,
           browserClosed: closed,
           ...(this.control ? { control: this.control.snapshot() } : {}),
-          ...(this.config?.realControl
+          ...(this.config?.realControl || this.config?.verifiedPeer
             ? {
                 receiverFinal: this.finalReceiver ?? null,
                 candidateSummary: this.candidateSummary ?? null,

@@ -20,6 +20,8 @@ pub mod ice_policy;
 pub mod input_pair;
 #[cfg(windows)]
 pub mod lan;
+#[cfg(all(feature = "v2-verified-lan", any(windows, test)))]
+pub(crate) mod lan_device;
 pub mod lan_wire;
 pub mod pinned_runtime;
 #[cfg(all(windows, feature = "p006-relay"))]

@@ -52,7 +52,7 @@ mod pairing {
     use hub_identity::pairing::{PairingCandidate, PairingError, VerifiedPeer};
     use std::sync::{
         atomic::{AtomicBool, Ordering},
-        Mutex,
+        Arc, Mutex,
     };
     use tauri::{Manager, WebviewWindow};
     use windows::{
@@ -68,8 +68,23 @@ mod pairing {
     #[derive(Default)]
     pub(crate) struct PairingState {
         busy: AtomicBool,
-        // A single in-memory result, never read by capture/input/connection code.
-        peer: Mutex<Option<VerifiedPeer>>,
+        // Replacing the record cannot alter a previously approved session's snapshot.
+        peer: Mutex<Option<Arc<VerifiedPeer>>>,
+    }
+
+    #[cfg(feature = "v2-verified-lan")]
+    impl PairingState {
+        pub(crate) fn current(&self) -> Result<Arc<VerifiedPeer>, &'static str> {
+            if self.busy.load(Ordering::Acquire) {
+                return Err("LAN_VERIFIED_PEER_REQUIRED");
+            }
+            self.peer
+                .lock()
+                .map_err(|_| "LAN_VERIFIED_PEER_REQUIRED")?
+                .as_ref()
+                .cloned()
+                .ok_or("LAN_VERIFIED_PEER_REQUIRED")
+        }
     }
 
     fn error_code(error: PairingError) -> &'static str {
@@ -127,7 +142,7 @@ mod pairing {
             return Err("V2_PAIRING_DENIED".into());
         }
         crate::experiment_origin::origin(&window)?;
-        *state.peer.lock().map_err(|_| "V2_PAIRING_BUSY")? = Some(peer);
+        *state.peer.lock().map_err(|_| "V2_PAIRING_BUSY")? = Some(Arc::new(peer));
         Ok(Verified { fingerprint })
     }
 }

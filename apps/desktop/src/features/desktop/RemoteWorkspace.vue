@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { LanProbe, type LanStatus, type LanReceiver } from '../p004/lan';
-const props = defineProps<{ v2LoopbackDiagnosticEnabled?: boolean }>();
+const props = defineProps<{
+  v2LoopbackDiagnosticEnabled?: boolean;
+  v2VerifiedLanEnabled?: boolean;
+}>();
 const video = ref<HTMLVideoElement>();
 const surface = ref<HTMLDivElement>();
 const role = ref<'sender' | 'receiver'>('receiver');
@@ -17,6 +20,33 @@ const error = ref('');
 const native = ref<LanStatus>();
 const receiver = ref<LanReceiver>();
 const input = ref(false);
+const mode = ref<'legacy' | 'verified'>('legacy');
+const activeVerified = ref(false);
+const verifiedMode = computed(
+  () => props.v2VerifiedLanEnabled === true && mode.value === 'verified',
+);
+const videoOnly = computed(() =>
+  busy.value ? activeVerified.value : verifiedMode.value,
+);
+watch(
+  verifiedMode,
+  () => {
+    consent.value = false;
+    code.value = '';
+    invitation.value = '';
+    error.value = '';
+    native.value = undefined;
+    receiver.value = undefined;
+  },
+  { flush: 'sync' },
+);
+watch(
+  [role, peer, local],
+  () => {
+    if (verifiedMode.value) consent.value = false;
+  },
+  { flush: 'sync' },
+);
 const diagnosticConsent = ref(false);
 const diagnosticBusy = ref(false);
 const diagnosticCount = ref<number>();
@@ -46,6 +76,14 @@ const diagnosticMessages: Readonly<Record<string, string>> = {
   V2_SIGNAL_FAILED: '本机信令交换未通过验证。',
   V2_DISABLED: '当前客户端未启用本机信令诊断。',
 };
+const verifiedLanErrors: Readonly<Record<string, string>> = {
+  LAN_VERIFIED_PEER_REQUIRED:
+    '请先在“设备”页核对并验证指定对端的完整指纹，再重新开始。',
+  LAN_DEVICE_AUTH_FAILED:
+    '未能认证指定对端。请确认两端都选择“已验证设备（仅视频）”，且已互相核对指纹。',
+  LAN_VERIFIED_MODE_DISABLED: '当前客户端未启用已验证设备视频模式。',
+  LAN_VERIFIED_VIDEO_ONLY: '已验证设备模式只允许主屏视频，不允许键鼠输入。',
+};
 function safeError(value: unknown) {
   const text = String(value);
   const match = text.match(
@@ -63,10 +101,21 @@ async function detect() {
   }
 }
 async function start() {
-  if (diagnosticBusy.value || busy.value || !video.value || !consent.value)
+  if (
+    diagnosticBusy.value ||
+    busy.value ||
+    !video.value ||
+    !consent.value ||
+    !local.value.trim() ||
+    !peer.value.trim() ||
+    (role.value === 'receiver' && !code.value)
+  )
     return;
+  const verified = verifiedMode.value;
+  activeVerified.value = verified;
   busy.value = true;
   error.value = '';
+  invitation.value = '';
   native.value = undefined;
   receiver.value = undefined;
   input.value = false;
@@ -83,7 +132,11 @@ async function start() {
       }
     },
     (e) => {
-      error.value = safeError(e);
+      error.value = verified
+        ? Object.hasOwn(verifiedLanErrors, e)
+          ? verifiedLanErrors[e]
+          : '已验证设备视频会话未建立或已中断。请检查本机地址、临时配对码和两端的会话设置。'
+        : safeError(e);
     },
     (c) => {
       invitation.value = c;
@@ -101,7 +154,8 @@ async function start() {
     port: 48604,
     seconds: 30,
     pairingCode: pairing,
-    realControl: true,
+    ...(verified ? { verifiedPeer: true } : {}),
+    realControl: !verified,
     controlSim: false,
   });
 }
@@ -155,11 +209,12 @@ async function stop() {
   await session?.stop();
 }
 function activate() {
+  if (videoOnly.value) return;
   input.value = session?.enableInput(true) ?? false;
   if (input.value) surface.value?.focus();
 }
 function send(event: Record<string, unknown>) {
-  if (input.value) session?.input(event);
+  if (!videoOnly.value && input.value) session?.input(event);
 }
 function move(e: MouseEvent, force = false) {
   if (!input.value || !video.value) return false;
@@ -230,17 +285,38 @@ onBeforeUnmount(() => {
     </div>
     <p role="status">
       {{ labels[state] ?? '正在读取状态' }} · 本次最长30秒 · 主屏720p30
+      <template v-if="videoOnly"> · 模式：已验证设备（仅视频）</template>
     </p>
     <p v-if="busy && role === 'sender'" class="remote-warning">
-      本机主屏正在共享或等待共享，并已批准本次实际键鼠控制。可点“停止并回收”、关闭窗口，或在本机按
-      Ctrl+Alt+F12 紧急停止。
+      <template v-if="videoOnly">
+        本机主屏正在共享或等待共享，仅允许观看。可点“停止并回收”或关闭窗口。
+      </template>
+      <template v-else>
+        本机主屏正在共享或等待共享，并已批准本次实际键鼠控制。可点“停止并回收”、关闭窗口，或在本机按
+        Ctrl+Alt+F12 紧急停止。
+      </template>
     </p>
     <template v-if="!busy">
       <div class="remote-fields">
+        <label v-if="v2VerifiedLanEnabled === true">
+          局域网会话模式
+          <select v-model="mode" aria-label="局域网会话模式">
+            <option value="legacy">临时配对码（视频与键鼠）</option>
+            <option value="verified">已验证设备（仅视频）</option>
+          </select>
+        </label>
         <label
           >本机角色<select v-model="role">
-            <option value="receiver">控制端：观看并操作另一台电脑</option>
-            <option value="sender">被控端：共享本机主屏</option>
+            <option value="receiver">
+              {{
+                videoOnly
+                  ? '观看端：观看另一台主屏'
+                  : '控制端：观看并操作另一台电脑'
+              }}
+            </option>
+            <option value="sender">
+              {{ videoOnly ? '共享端：共享本机主屏' : '被控端：共享本机主屏' }}
+            </option>
           </select></label
         >
         <label
@@ -262,11 +338,15 @@ onBeforeUnmount(() => {
             spellcheck="false"
         /></label>
       </div>
+      <p v-if="videoOnly">
+        两台电脑都需要在“设备”页验证对端，再选择此模式。观看端仍须输入临时配对码，两端都须确认本次视频会话。
+      </p>
       <label
-        ><input
-          v-model="consent"
-          type="checkbox"
-        />我同意本次指定电脑的主屏视频和实际鼠标、基本键盘控制；不授予无人值守或管理员权限。</label
+        ><input v-model="consent" type="checkbox" />{{
+          videoOnly
+            ? '我同意本次与指定设备建立局域网主屏视频会话，仅观看，不授权键鼠。'
+            : '我同意本次指定电脑的主屏视频和实际鼠标、基本键盘控制；不授予无人值守或管理员权限。'
+        }}</label
       >
       <p>
         <button
@@ -290,7 +370,7 @@ onBeforeUnmount(() => {
       }}</code>
     </p>
     <p v-if="error" role="alert">{{ error }}</p>
-    <p v-if="busy && role === 'receiver'">
+    <p v-if="busy && role === 'receiver' && !videoOnly">
       <button
         class="outline-button"
         :disabled="
@@ -309,8 +389,8 @@ onBeforeUnmount(() => {
     <div
       ref="surface"
       class="remote-surface"
-      tabindex="0"
-      aria-label="远程主屏操作区域"
+      :tabindex="videoOnly ? undefined : 0"
+      :aria-label="videoOnly ? '远程主屏视频区域' : '远程主屏操作区域'"
       @blur="pause"
       @keydown="key($event, true)"
       @keyup="key($event, false)"
@@ -319,7 +399,11 @@ onBeforeUnmount(() => {
       @mouseup="button($event, false)"
       @mouseleave="pause"
       @wheel="wheel"
-      @contextmenu.prevent
+      @contextmenu="
+        (e) => {
+          if (!videoOnly) e.preventDefault();
+        }
+      "
     >
       <video
         ref="video"
@@ -337,18 +421,25 @@ onBeforeUnmount(() => {
     <p>
       视频解码 {{ receiver?.framesDecoded ?? '未取得' }} · 呈现
       {{ receiver?.framesRendered ?? '未取得' }} · 对端校验
-      {{ receiver?.peerMatches === true ? '通过' : '尚未通过' }} · 输入发送/确认
-      {{
-        receiver?.control
-          ? `${receiver.control.sentMoves}/${receiver.control.ackReceived}`
-          : '未取得'
-      }}
-      · Rust接收/确认
-      {{
-        native?.source?.control
-          ? `${native.source.control.accepted_moves}/${native.source.control.acks_sent}`
-          : '未取得'
-      }}
+      {{ receiver?.peerMatches === true ? '通过' : '尚未通过' }}
+      <template v-if="videoOnly">
+        · 信令设备身份 {{ native?.authenticated ? '已验证' : '尚未验证' }} ·
+        键鼠未启用
+      </template>
+      <template v-else>
+        · 输入发送/确认
+        {{
+          receiver?.control
+            ? `${receiver.control.sentMoves}/${receiver.control.ackReceived}`
+            : '未取得'
+        }}
+        · Rust接收/确认
+        {{
+          native?.source?.control
+            ? `${native.source.control.accepted_moves}/${native.source.control.acks_sent}`
+            : '未取得'
+        }}
+      </template>
     </p>
     <p>
       资源回收：{{

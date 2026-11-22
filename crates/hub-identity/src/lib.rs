@@ -155,5 +155,20 @@ pub fn open_default() -> Result<Identity, Error> {
     Err(Error::Unsupported)
 }
 
+/// Open only an already committed CurrentUser identity. This never creates or
+/// repairs app directories, lock files, commit markers, or keys.
+pub fn open_existing_default() -> Result<Identity, Error> {
+    #[cfg(windows)]
+    return windows::open_existing_default();
+    #[cfg(not(windows))]
+    Err(Error::Unsupported)
+}
+
+#[cfg(all(test, not(windows)))]
+#[test]
+fn existing_default_is_unsupported_outside_windows() {
+    assert!(matches!(open_existing_default(), Err(Error::Unsupported)));
+}
+
 #[cfg(test)]
 mod tests;
