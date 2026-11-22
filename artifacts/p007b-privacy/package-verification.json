@@ -1,0 +1,23 @@
+{
+  "recordedAt": "2026-11-22T12:47:08.789147+08:00",
+  "sourceCommit": "1af8599d840d63f042932ab97af3007c2dd5a412",
+  "archiveSha256": "6cf08d04670fab5068ac1f288daf96ab55e7d912d0e25de0e2fe6a1a1a669706",
+  "programSha256": "7deac839ee2e8fcc0e3ad47433f2431a0ce242bd3a297e90da0ef717effd79c0",
+  "membersVerified": 9,
+  "crcVerified": true,
+  "packagedProgramSelfCheckPassed": true,
+  "packagedShaScriptPassed": true,
+  "relativeLinksChecked": 57,
+  "oldReportsUnchanged": true,
+  "cloudTest": "NOT_RUN",
+  "physicalTwoPcTest": "NOT_RUN",
+  "nativeGuiTest": "NOT_RUN",
+  "desktopCaptured": false,
+  "note": "Only self-check mode executed; no GUI window, configuration, consent or network activation.",
+  "allMembersHaveZeroBaselineSuspectMatches": true,
+  "textMembersGenericPrivacyPassed": true,
+  "invalidExampleConfigOnly": true,
+  "pendingPublicationLinks": [
+    "published.json: upload not yet performed"
+  ]
+}
