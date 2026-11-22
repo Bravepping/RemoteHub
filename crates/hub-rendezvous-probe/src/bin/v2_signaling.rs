@@ -175,7 +175,7 @@ impl App {
         seq: u64,
         data: String,
     ) -> Result<(), &'static str> {
-        if !signal_wire::valid_signal(&data) {
+        if !signal.valid_payload(&data) {
             return Err("SIGNAL_SIZE");
         }
         if !signal.allows_sender(role) {
@@ -850,6 +850,186 @@ mod tests {
         };
         assert_eq!(error, ClientError::Rejected);
         assert!(!format!("{error:?} {error}").contains("TEST_SECRET_DO_NOT_ECHO"));
+        task.abort();
+    }
+    async fn client_pair(address: SocketAddr) -> (LoopbackRelay, LoopbackRelay) {
+        let token = RelayToken::new(TOKEN.to_owned()).unwrap();
+        let room = || RoomId::new(ROOM.to_owned()).unwrap();
+        let wait = Duration::from_secs(3);
+        let mut host = LoopbackRelay::connect(address, &token, room(), Role::Host)
+            .await
+            .unwrap();
+        assert!(matches!(
+            host.next_event(wait).await,
+            Ok(RelayEvent::Waiting)
+        ));
+        let mut viewer = LoopbackRelay::connect(address, &token, room(), Role::Viewer)
+            .await
+            .unwrap();
+        assert!(matches!(
+            host.next_event(wait).await,
+            Ok(RelayEvent::Paired)
+        ));
+        assert!(matches!(
+            viewer.next_event(wait).await,
+            Ok(RelayEvent::Paired)
+        ));
+        (host, viewer)
+    }
+
+    #[tokio::test]
+    async fn native_challenges_relay_in_either_order_or_concurrently_before_offer() {
+        let (address, app, task) = start_server().await;
+        let wait = Duration::from_secs(3);
+        for turn in 0..3 {
+            let (mut host, mut viewer) = client_pair(address).await;
+            if turn == 0 {
+                host.send_signal(SignalKind::HostChallenge, "TEST_HOST_CHALLENGE".into())
+                    .await
+                    .unwrap();
+                assert!(
+                    matches!(viewer.next_event(wait).await, Ok(RelayEvent::Signal { kind: SignalKind::HostChallenge, data }) if data == "TEST_HOST_CHALLENGE")
+                );
+                assert_eq!(
+                    viewer
+                        .send_signal(SignalKind::Offer, "TEST_PREMATURE_OFFER".into())
+                        .await,
+                    Err(ClientError::Protocol)
+                );
+                viewer
+                    .send_signal(SignalKind::ViewerChallenge, "TEST_VIEWER_CHALLENGE".into())
+                    .await
+                    .unwrap();
+                assert!(
+                    matches!(host.next_event(wait).await, Ok(RelayEvent::Signal { kind: SignalKind::ViewerChallenge, data }) if data == "TEST_VIEWER_CHALLENGE")
+                );
+            } else if turn == 1 {
+                viewer
+                    .send_signal(SignalKind::ViewerChallenge, "TEST_VIEWER_CHALLENGE".into())
+                    .await
+                    .unwrap();
+                assert!(
+                    matches!(host.next_event(wait).await, Ok(RelayEvent::Signal { kind: SignalKind::ViewerChallenge, data }) if data == "TEST_VIEWER_CHALLENGE")
+                );
+                assert_eq!(
+                    viewer
+                        .send_signal(SignalKind::Offer, "TEST_PREMATURE_OFFER".into())
+                        .await,
+                    Err(ClientError::Protocol)
+                );
+                host.send_signal(SignalKind::HostChallenge, "TEST_HOST_CHALLENGE".into())
+                    .await
+                    .unwrap();
+                assert!(
+                    matches!(viewer.next_event(wait).await, Ok(RelayEvent::Signal { kind: SignalKind::HostChallenge, data }) if data == "TEST_HOST_CHALLENGE")
+                );
+            } else {
+                tokio::try_join!(
+                    host.send_signal(SignalKind::HostChallenge, "TEST_HOST_CHALLENGE".into()),
+                    viewer.send_signal(SignalKind::ViewerChallenge, "TEST_VIEWER_CHALLENGE".into()),
+                )
+                .unwrap();
+                assert!(matches!(
+                    host.next_event(wait).await,
+                    Ok(RelayEvent::Signal {
+                        kind: SignalKind::ViewerChallenge,
+                        ..
+                    })
+                ));
+                assert!(matches!(
+                    viewer.next_event(wait).await,
+                    Ok(RelayEvent::Signal {
+                        kind: SignalKind::HostChallenge,
+                        ..
+                    })
+                ));
+            }
+            assert_eq!(
+                host.send_signal(SignalKind::HostChallenge, "TEST_DUPLICATE_CHALLENGE".into())
+                    .await,
+                Err(ClientError::Protocol)
+            );
+            viewer
+                .send_signal(SignalKind::Offer, "TEST_OFFER_AFTER_BOTH".into())
+                .await
+                .unwrap();
+            assert!(
+                matches!(host.next_event(wait).await, Ok(RelayEvent::Signal { kind: SignalKind::Offer, data }) if data == "TEST_OFFER_AFTER_BOTH")
+            );
+            host.send_signal(SignalKind::Answer, "TEST_ANSWER_AFTER_BOTH".into())
+                .await
+                .unwrap();
+            assert!(
+                matches!(viewer.next_event(wait).await, Ok(RelayEvent::Signal { kind: SignalKind::Answer, data }) if data == "TEST_ANSWER_AFTER_BOTH")
+            );
+            viewer.leave().await.unwrap();
+            assert!(matches!(
+                host.next_event(wait).await,
+                Ok(RelayEvent::PeerLeft)
+            ));
+            assert!(app.rooms.lock().unwrap().is_empty());
+        }
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn raw_ws_cannot_bypass_challenge_roles_or_offer_order() {
+        let (address, app, task) = start_server().await;
+        for bad in ["wrong-role", "duplicate", "premature"] {
+            let (mut host, _) = connect_async(request(address, Some(TOKEN))).await.unwrap();
+            send(
+                &mut host,
+                json!({"type":"hello","version":2,"room":ROOM,"role":"host"}),
+            )
+            .await;
+            assert_eq!(receive(&mut host).await, json!({"type":"waiting"}));
+            let (mut viewer, _) = connect_async(request(address, Some(TOKEN))).await.unwrap();
+            send(
+                &mut viewer,
+                json!({"type":"hello","version":2,"room":ROOM,"role":"viewer"}),
+            )
+            .await;
+            assert_eq!(receive(&mut host).await, json!({"type":"paired"}));
+            assert_eq!(receive(&mut viewer).await, json!({"type":"paired"}));
+            if bad == "wrong-role" {
+                send(
+                    &mut viewer,
+                    json!({"type":"signal","seq":1,"signal":"host_challenge","data":"TEST"}),
+                )
+                .await;
+                assert_eq!(
+                    receive(&mut viewer).await,
+                    json!({"type":"error","code":"SIGNAL_ROLE_DENIED"})
+                );
+                assert_eq!(receive(&mut host).await, json!({"type":"peer_left"}));
+            } else {
+                send(
+                    &mut viewer,
+                    json!({"type":"signal","seq":1,"signal":"viewer_challenge","data":"TEST"}),
+                )
+                .await;
+                assert_eq!(
+                    receive(&mut host).await,
+                    json!({"type":"signal","from":"viewer","seq":1,"signal":"viewer_challenge","data":"TEST"})
+                );
+                let second = if bad == "duplicate" {
+                    "viewer_challenge"
+                } else {
+                    "offer"
+                };
+                send(
+                    &mut viewer,
+                    json!({"type":"signal","seq":2,"signal":second,"data":"TEST"}),
+                )
+                .await;
+                assert_eq!(
+                    receive(&mut viewer).await,
+                    json!({"type":"error","code":"SIGNAL_ORDER"})
+                );
+                assert_eq!(receive(&mut host).await, json!({"type":"peer_left"}));
+            }
+            assert!(app.rooms.lock().unwrap().is_empty());
+        }
         task.abort();
     }
 }

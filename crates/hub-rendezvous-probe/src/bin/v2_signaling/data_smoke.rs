@@ -4,7 +4,9 @@ use super::{
     tls_smoke::{fixture, make_ca, start_tls},
 };
 use hub_identity::{
-    session::{PendingSessionProof, SessionBinding, SessionRole},
+    session::{
+        PendingSessionProof, SessionBinding, SessionChallenge, SessionRole, CHALLENGE_BYTES,
+    },
     Identity,
 };
 use hub_webrtc::{
@@ -93,6 +95,95 @@ struct TestDevices {
     viewer: Identity,
 }
 
+// The test expects one SDP and one trickle ICE message from each peer.
+// Each verifier keeps its own slots, while only the public challenges cross WSS.
+struct DirectionProofs {
+    pending: [PendingSessionProof; 2],
+    received: [SessionChallenge; 2],
+}
+struct DeviceProofs<'a> {
+    devices: &'a TestDevices,
+    from_host: DirectionProofs,
+    from_viewer: DirectionProofs,
+}
+struct Proof<'a> {
+    binding: &'a SessionBinding,
+    identity: &'a Identity,
+    role: SessionRole,
+    challenge: SessionChallenge,
+    pending: &'a mut PendingSessionProof,
+}
+impl DeviceProofs<'_> {
+    fn for_signal(&mut self, role: SessionRole, index: usize) -> Proof<'_> {
+        let (identity, direction) = match role {
+            SessionRole::Host => (&self.devices.host, &mut self.from_host),
+            SessionRole::Viewer => (&self.devices.viewer, &mut self.from_viewer),
+        };
+        Proof {
+            binding: &self.devices.binding,
+            identity,
+            role,
+            challenge: direction.received[index],
+            pending: &mut direction.pending[index],
+        }
+    }
+}
+
+fn issue(binding: &SessionBinding, signer: SessionRole) -> [PendingSessionProof; 2] {
+    std::array::from_fn(|_| {
+        PendingSessionProof::issue(binding, signer, wall_seconds(), Duration::from_secs(15))
+            .unwrap()
+    })
+}
+
+async fn forward_challenges(
+    from: &mut AuthenticatedLoopbackRelay,
+    to: &mut AuthenticatedLoopbackRelay,
+    kind: SignalKind,
+    pending: &[PendingSessionProof; 2],
+) -> [SessionChallenge; 2] {
+    let packed = pending
+        .each_ref()
+        .map(|slot| slot.challenge().to_bytes().to_vec());
+    let wire = exchange(
+        from,
+        to,
+        kind,
+        serde_json::to_string(&packed).unwrap(),
+        None,
+    )
+    .await;
+    let payload: [Vec<u8>; 2] = serde_json::from_str(&wire).unwrap();
+    payload.map(|entry| {
+        let fixed: [u8; CHALLENGE_BYTES] = entry.try_into().unwrap();
+        SessionChallenge::from_bytes(fixed).unwrap()
+    })
+}
+
+async fn exchange_challenges<'a>(
+    devices: &'a TestDevices,
+    host: &mut AuthenticatedLoopbackRelay,
+    viewer: &mut AuthenticatedLoopbackRelay,
+) -> DeviceProofs<'a> {
+    let pending_viewer = issue(&devices.binding, SessionRole::Viewer);
+    let pending_host = issue(&devices.binding, SessionRole::Host);
+    let received_viewer =
+        forward_challenges(host, viewer, SignalKind::HostChallenge, &pending_viewer).await;
+    let received_host =
+        forward_challenges(viewer, host, SignalKind::ViewerChallenge, &pending_host).await;
+    DeviceProofs {
+        devices,
+        from_host: DirectionProofs {
+            pending: pending_host,
+            received: received_host,
+        },
+        from_viewer: DirectionProofs {
+            pending: pending_viewer,
+            received: received_viewer,
+        },
+    }
+}
+
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct SignedSignal {
@@ -105,6 +196,9 @@ fn signal_bytes(kind: SignalKind, payload: &str) -> Vec<u8> {
         SignalKind::Offer => b'O',
         SignalKind::Answer => b'A',
         SignalKind::Ice => b'I',
+        SignalKind::HostChallenge | SignalKind::ViewerChallenge => {
+            unreachable!("device signatures apply only to SDP and ICE")
+        }
     };
     let mut bytes = Vec::with_capacity(1 + payload.len());
     bytes.push(label);
@@ -120,33 +214,22 @@ fn wall_seconds() -> u64 {
 }
 
 // The relay forwards these inner authenticated frames without the pairing key.
-// For the WSS fixture, the devices know each other's public key and convey
-// the verifier's fresh challenge out of band; no public bootstrap is implied.
+// For the WSS fixture, peer public keys still come from trusted fixture state.
 async fn exchange(
     from: &mut AuthenticatedLoopbackRelay,
     to: &mut AuthenticatedLoopbackRelay,
     kind: SignalKind,
     payload: String,
-    proof: Option<(&TestDevices, SessionRole)>,
+    proof: Option<Proof<'_>>,
 ) -> String {
     let (outbound, pending) = match proof {
-        Some((d, role)) => {
-            let identity = match role {
-                SessionRole::Host => &d.host,
-                SessionRole::Viewer => &d.viewer,
-            };
-            let pending = PendingSessionProof::issue(
-                &d.binding,
-                role,
-                wall_seconds(),
-                Duration::from_secs(15),
-            )
-            .unwrap();
-            let signature = identity
+        Some(proof) => {
+            let signature = proof
+                .identity
                 .sign_session_proof(
-                    &d.binding,
-                    role,
-                    pending.challenge(),
+                    proof.binding,
+                    proof.role,
+                    proof.challenge,
                     &signal_bytes(kind, &payload),
                     wall_seconds(),
                 )
@@ -155,7 +238,7 @@ async fn exchange(
                 payload,
                 signature: signature.to_vec(),
             };
-            (serde_json::to_string(&signed).unwrap(), Some(pending))
+            (serde_json::to_string(&signed).unwrap(), Some(proof.pending))
         }
         None => (payload, None),
     };
@@ -166,7 +249,7 @@ async fn exchange(
         panic!("expected authenticated signaling");
     };
     assert_eq!(signal, kind);
-    let Some(mut pending) = pending else {
+    let Some(pending) = pending else {
         return data;
     };
     let received: SignedSignal = serde_json::from_str(&data).unwrap();
@@ -197,7 +280,7 @@ async fn exercise(
     host: &mut Peer,
     viewer_relay: &mut AuthenticatedLoopbackRelay,
     host_relay: &mut AuthenticatedLoopbackRelay,
-    devices: Option<&TestDevices>,
+    mut proofs: Option<DeviceProofs<'_>>,
 ) {
     let channel = viewer
         .pc
@@ -216,7 +299,9 @@ async fn exercise(
         host_relay,
         SignalKind::Offer,
         offer.sdp,
-        devices.map(|d| (d, SessionRole::Viewer)),
+        proofs
+            .as_mut()
+            .map(|p| p.for_signal(SessionRole::Viewer, 0)),
     )
     .await;
     host.pc
@@ -231,7 +316,7 @@ async fn exercise(
         viewer_relay,
         SignalKind::Answer,
         answer.sdp,
-        devices.map(|d| (d, SessionRole::Host)),
+        proofs.as_mut().map(|p| p.for_signal(SessionRole::Host, 0)),
     )
     .await;
     viewer
@@ -246,7 +331,9 @@ async fn exercise(
         host_relay,
         SignalKind::Ice,
         viewer_ice,
-        devices.map(|d| (d, SessionRole::Viewer)),
+        proofs
+            .as_mut()
+            .map(|p| p.for_signal(SessionRole::Viewer, 1)),
     )
     .await;
     host.pc
@@ -259,7 +346,7 @@ async fn exercise(
         viewer_relay,
         SignalKind::Ice,
         host_ice,
-        devices.map(|d| (d, SessionRole::Host)),
+        proofs.as_mut().map(|p| p.for_signal(SessionRole::Host, 1)),
     )
     .await;
     viewer
@@ -379,6 +466,10 @@ async fn native_peers_round_trip(
             AuthenticatedRelayEvent::Paired
         ));
     }
+    let proofs = match devices.as_ref() {
+        Some(d) => Some(exchange_challenges(d, &mut host_relay, &mut viewer_relay).await),
+        None => None,
+    };
     let mut viewer = Peer::new().await;
     let mut host = Peer::new().await;
     let result = timeout(
@@ -388,7 +479,7 @@ async fn native_peers_round_trip(
             &mut host,
             &mut viewer_relay,
             &mut host_relay,
-            devices.as_ref(),
+            proofs,
         ),
     )
     .await;

@@ -250,7 +250,7 @@ impl LoopbackRelay {
     /// Only sends signaling. Caller must still obtain native approval and
     /// authenticate the intended peer/session before any media or input.
     pub async fn send_signal(&mut self, kind: SignalKind, data: String) -> Result<(), ClientError> {
-        if !wire::valid_signal(&data) {
+        if !kind.valid_payload(&data) {
             return Err(ClientError::Payload);
         }
         if self.socket.is_none() {
@@ -369,7 +369,7 @@ impl LoopbackRelay {
                 && from == self.role.peer()
                 && signal.allows_sender(from)
                 && self.received.checked_add(1) == Some(seq)
-                && wire::valid_signal(&data) =>
+                && signal.valid_payload(&data) =>
             {
                 self.flow = self.flow.after(signal).ok_or(ClientError::Protocol)?;
                 self.received = seq;

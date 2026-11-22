@@ -138,5 +138,32 @@ fn kind_name(kind: SignalKind) -> &'static str {
         SignalKind::Offer => "offer",
         SignalKind::Answer => "answer",
         SignalKind::Ice => "ice",
+        SignalKind::HostChallenge => "host_challenge",
+        SignalKind::ViewerChallenge => "viewer_challenge",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn authenticated_kind_matches_exact_wire_label_for_both_roles() {
+        for kind in [
+            SignalKind::Offer,
+            SignalKind::Answer,
+            SignalKind::Ice,
+            SignalKind::HostChallenge,
+            SignalKind::ViewerChallenge,
+        ] {
+            assert_eq!(
+                Some(kind_name(kind)),
+                serde_json::to_value(kind).unwrap().as_str()
+            );
+        }
+        assert_ne!(
+            kind_name(SignalKind::HostChallenge),
+            kind_name(SignalKind::ViewerChallenge)
+        );
     }
 }

@@ -8,6 +8,7 @@ pub const VERSION: u8 = 2;
 pub const PATH: &str = "/v2/ws";
 pub const MAX_WIRE: usize = 64 * 1024;
 pub const MAX_SIGNAL: usize = 32 * 1024;
+pub const MAX_CHALLENGE_DATA: usize = 1024;
 pub const ROOM_LIFETIME: Duration = Duration::from_secs(600);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -29,6 +30,10 @@ impl Role {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SignalKind {
+    /// Host-issued challenge for the viewer's subsequent proof.
+    HostChallenge,
+    /// Viewer-issued challenge for the host's subsequent proof.
+    ViewerChallenge,
     Offer,
     Answer,
     Ice,
@@ -38,8 +43,19 @@ impl SignalKind {
     pub fn allows_sender(self, role: Role) -> bool {
         matches!(
             (self, role),
-            (Self::Offer, Role::Viewer) | (Self::Answer, Role::Host) | (Self::Ice, _)
+            (Self::Offer | Self::ViewerChallenge, Role::Viewer)
+                | (Self::Answer | Self::HostChallenge, Role::Host)
+                | (Self::Ice, _)
         )
+    }
+
+    pub fn is_challenge(self) -> bool {
+        matches!(self, Self::HostChallenge | Self::ViewerChallenge)
+    }
+
+    /// The end-to-end envelope is opaque here; only enforce small wire bounds.
+    pub fn valid_payload(self, data: &str) -> bool {
+        (!self.is_challenge() || data.len() <= MAX_CHALLENGE_DATA) && valid_signal(data)
     }
 }
 
@@ -80,6 +96,9 @@ pub enum ServerFrame {
 pub enum Flow {
     #[default]
     BeforeOffer,
+    HostChallengeOnly,
+    ViewerChallengeOnly,
+    BothChallenges,
     BeforeAnswer,
     Established,
 }
@@ -87,7 +106,15 @@ pub enum Flow {
 impl Flow {
     pub fn after(self, signal: SignalKind) -> Option<Self> {
         match (self, signal) {
-            (Self::BeforeOffer, SignalKind::Offer) => Some(Self::BeforeAnswer),
+            (Self::BeforeOffer, SignalKind::HostChallenge) => Some(Self::HostChallengeOnly),
+            (Self::BeforeOffer, SignalKind::ViewerChallenge) => Some(Self::ViewerChallengeOnly),
+            (Self::HostChallengeOnly, SignalKind::ViewerChallenge)
+            | (Self::ViewerChallengeOnly, SignalKind::HostChallenge) => Some(Self::BothChallenges),
+            // Existing clients can still start with Offer. Once either peer
+            // opts into challenge exchange, both challenges must precede it.
+            (Self::BeforeOffer | Self::BothChallenges, SignalKind::Offer) => {
+                Some(Self::BeforeAnswer)
+            }
             (Self::BeforeAnswer, SignalKind::Answer) => Some(Self::Established),
             (Self::BeforeAnswer | Self::Established, SignalKind::Ice) => Some(self),
             _ => None,
@@ -159,6 +186,64 @@ mod tests {
             decode::<ServerFrame>(&" ".repeat(MAX_WIRE + 1)),
             Err(WireError::Size)
         ));
+    }
+
+    #[test]
+    fn existing_offer_answer_and_ice_frames_keep_identical_json() {
+        for (kind, encoded) in [
+            (SignalKind::Offer, "offer"),
+            (SignalKind::Answer, "answer"),
+            (SignalKind::Ice, "ice"),
+        ] {
+            assert_eq!(
+                encode(&ClientFrame::Signal {
+                    seq: 1,
+                    signal: kind,
+                    data: "fixture".into(),
+                })
+                .unwrap(),
+                format!(r#"{{"type":"signal","seq":1,"signal":"{encoded}","data":"fixture"}}"#)
+            );
+        }
+    }
+
+    #[test]
+    fn either_challenge_order_requires_both_and_never_repeats() {
+        for (first, first_role, second, second_role) in [
+            (
+                SignalKind::HostChallenge,
+                Role::Host,
+                SignalKind::ViewerChallenge,
+                Role::Viewer,
+            ),
+            (
+                SignalKind::ViewerChallenge,
+                Role::Viewer,
+                SignalKind::HostChallenge,
+                Role::Host,
+            ),
+        ] {
+            assert!(first.allows_sender(first_role));
+            assert!(!first.allows_sender(second_role));
+            let first_only = Flow::default().after(first).unwrap();
+            for denied in [
+                first,
+                SignalKind::Offer,
+                SignalKind::Answer,
+                SignalKind::Ice,
+            ] {
+                assert!(first_only.after(denied).is_none());
+            }
+            let both = first_only.after(second).unwrap();
+            assert!(both.after(first).is_none());
+            assert!(both.after(second).is_none());
+            let before_answer = both.after(SignalKind::Offer).unwrap();
+            assert!(before_answer.after(first).is_none());
+            assert!(before_answer.after(second).is_none());
+            assert!(before_answer.after(SignalKind::Answer).is_some());
+        }
+        assert!(SignalKind::HostChallenge.valid_payload(&"x".repeat(MAX_CHALLENGE_DATA)));
+        assert!(!SignalKind::ViewerChallenge.valid_payload(&"x".repeat(MAX_CHALLENGE_DATA + 1)));
     }
 
     #[test]
