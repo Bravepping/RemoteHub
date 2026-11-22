@@ -107,16 +107,18 @@ impl App {
         }
         let room = rooms.get_mut(key).ok_or("ROOM_NOT_FOUND")?;
         if room.created.elapsed() >= ROOM_LIFETIME { return Err("ROOM_EXPIRED"); }
-        let slot = match role { Role::Host => &mut room.host, Role::Viewer => &mut room.viewer };
-        if slot.is_some() { return Err("ROLE_OCCUPIED"); }
-        *slot = Some(Peer::new(id, tx));
+        let occupied = match role { Role::Host => room.host.is_some(), Role::Viewer => room.viewer.is_some() };
+        if occupied { return Err("ROLE_OCCUPIED"); }
+        let new_peer = Peer::new(id, tx);
+        match role { Role::Host => room.host = Some(new_peer), Role::Viewer => room.viewer = Some(new_peer) }
         if room.host.is_some() && room.viewer.is_some() {
             let msg = wire(&ServerFrame::Paired)?;
             for peer in [room.host.as_ref(), room.viewer.as_ref()].into_iter().flatten() {
                 peer.tx.try_send(msg.clone()).map_err(|_| "CLIENT_BACKPRESSURE")?;
             }
         } else {
-            slot.as_ref().ok_or("ROLE_MISSING")?.tx.try_send(wire(&ServerFrame::Waiting)?)
+            let peer = match role { Role::Host => room.host.as_ref(), Role::Viewer => room.viewer.as_ref() };
+            peer.ok_or("ROLE_MISSING")?.tx.try_send(wire(&ServerFrame::Waiting)?)
                 .map_err(|_| "CLIENT_BACKPRESSURE")?;
         }
         Ok(())
@@ -206,8 +208,7 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
         tokio::select! {
             outgoing = rx.recv() => {
                 let Some(message) = outgoing else { break; };
-                if tokio::time::timeout(Duration::from_secs(2), socket.send(message)).await
-                    .is_err() { break; }
+                if !matches!(tokio::time::timeout(Duration::from_secs(2), socket.send(message)).await, Ok(Ok(()))) { break; }
             }
             incoming = socket.next() => {
                 match incoming {
@@ -314,4 +315,48 @@ mod tests {
         assert!(app.join("123", Role::Host, Uuid::new_v4(), tx.clone()).is_err());
         assert!(app.join(&"a".repeat(32), Role::Viewer, Uuid::new_v4(), tx).is_err());
     }
+    #[tokio::test]
+    async fn real_loopback_ws_handshake_relay_and_disconnect() {
+        use tokio_tungstenite::{
+            connect_async,
+            tungstenite::{client::IntoClientRequest, http::HeaderValue, Message as WsMessage},
+        };
+        let app = Arc::new(App {
+            token: Zeroizing::new("a".repeat(64)),
+            rooms: Mutex::new(HashMap::new()),
+            active: AtomicUsize::new(0),
+        });
+        let router = Router::new().route("/v2/ws", get(upgrade)).with_state(app);
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let task = tokio::spawn(async move { axum::serve(listener, router).await.unwrap(); });
+        let request = || {
+            let mut req = format!("ws://{address}/v2/ws").into_client_request().unwrap();
+            req.headers_mut().insert(
+                header::AUTHORIZATION,
+                HeaderValue::from_str(&format!("Bearer {}", "a".repeat(64))).unwrap(),
+            );
+            req
+        };
+        let (mut host, _) = connect_async(request()).await.unwrap();
+        let room = "0123456789abcdef0123456789abcdef";
+        host.send(WsMessage::Text(format!(r#"{{"type":"hello","version":2,"room":"{room}","role":"host"}}"#).into())).await.unwrap();
+        let waiting = tokio::time::timeout(Duration::from_secs(3), host.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
+        assert!(waiting.contains(r#""type":"waiting""#));
+        let (mut viewer, _) = connect_async(request()).await.unwrap();
+        viewer.send(WsMessage::Text(format!(r#"{{"type":"hello","version":2,"room":"{room}","role":"viewer"}}"#).into())).await.unwrap();
+        for socket in [&mut host, &mut viewer] {
+            let msg = tokio::time::timeout(Duration::from_secs(3), socket.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
+            assert!(msg.contains(r#""type":"paired""#));
+        }
+        viewer.send(WsMessage::Text(r#"{"type":"signal","seq":1,"signal":"offer","data":"SDP_TEST_ONLY"}"#.into())).await.unwrap();
+        let relayed = tokio::time::timeout(Duration::from_secs(3), host.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
+        assert!(relayed.contains("SDP_TEST_ONLY"));
+        assert!(relayed.contains(r#""from":"viewer""#));
+        viewer.send(WsMessage::Text(r#"{"type":"leave"}"#.into())).await.unwrap();
+        let left = tokio::time::timeout(Duration::from_secs(3), host.next()).await.unwrap().unwrap().unwrap().into_text().unwrap();
+        assert!(left.contains(r#""type":"peer_left""#));
+        task.abort();
+    }
+
 }
