@@ -15,13 +15,13 @@
 
 - **当前任务是把已验收的「已验证设备（仅视频）」扩展到跨机 WSS 信令。** 同一局域网的 Windows 双机已通过现有 LAN TCP 模式的画面、自然结束、手动停止和未核验拒绝。既有流程仍要求完整指纹、临时码和明确原生许可。不经身份核验、签名不符、模式不同的连接必须结束，不能自动退回普通模式。该模式不启用键鼠，不把双机测试结果预先标为通过。
 - 先保留及回归已经现场通过的普通 LAN TCP 模式；不要重写现有 DXGI/MF H.264、WebView2、输入与结束链路。设备配对不授予远控权限。本机配对记录不持久化；启动新会话时只读重载已提交的本机身份。
-- Axum 的 WS/WSS 和签名 offer/answer 已有回环测试；**跨机 WSS 尚未接入产品**。下一步接入真实产品信令时必须同时验证双方设备、公钥/证书、原生同意、SDP 和实际候选路径。没有可信测试证据前，不开放公网、不启用 TURN，不把回环测试当作双机通过。
+- Axum 的 WS/WSS 和签名 offer/answer 已有回环测试；跨机 WSS 已有显式桌面选项，**尚待 Windows 双机实测**。实测必须同时验证双方设备、公钥/证书、原生同意、SDP 和实际候选路径。没有可信测试证据前，不开放公网、不启用 TURN，不把回环测试当作双机通过。
 
 ## 已有事实：禁止重复造轮子
 
-- `apps/desktop/src/features/desktop/RemoteWorkspace.vue` 与 `apps/desktop/src-tauri/src/p004_lan.rs`：有界 LAN 会话、原生同意、停止和报告，沿用既有 IPC，不增加宽泛权限。普通远控以 `p3-lan` 启用，身份核验视频以 `v2-verified-lan` 显式启用。
+- `apps/desktop/src/features/desktop/RemoteWorkspace.vue` 与 `apps/desktop/src-tauri/src/p004_lan.rs`：有界 LAN 会话、原生同意、停止和报告，沿用既有 IPC，不增加宽泛权限。普通远控以 `p3-lan` 启用，身份核验视频以 `v2-verified-lan` 显式启用，私网 WSS 仅视频选项用 `v2-private-wss-lan`，不得隐式切换。
 - `crates/hub-capture-win` / `hub-encode-win`：DXGI + MF H.264。`hub-webrtc` 已有 LAN/ICE/PeerConnection、选中候选诊断、DataChannel、SendInput 与撤销清理。
-- `crates/hub-identity` 有 Ed25519 和 CurrentUser DPAPI 本地身份、完整指纹核验和会话证明；这不等于云认证。`v2_signaling.rs` 已通过实际本机 Axum 测试；默认只监听回环。显式私网 WSS 是独立的传输准备，不代表已接入桌面或获准部署。
+- `crates/hub-identity` 有 Ed25519 和 CurrentUser DPAPI 本地身份、完整指纹核验和会话证明；这不等于云认证。`v2_signaling.rs` 已通过实际本机 Axum 测试；默认只监听回环。显式私网 WSS 不代表获准部署，也不代表已完成桌面双机实测。
 - 原版 `main@d7dbc9b` 记录 853/900/900 帧和 29/81/132 条输入 ACK；这些计数是来源分支历史证据。精简分支 `77479f2` 的普通 LAN 双机视频、英文输入及结束已由用户确认正常，**P3-END-01 普通 LAN 回归已通过**。新模式、R06、DPI、公网与安装器尚未验收，实际结果详见根 `README.md`。
 
 ## 开发顺序（可连续推进）

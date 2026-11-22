@@ -22,6 +22,8 @@ mod p007b_diag;
 mod v2_loopback;
 #[cfg(all(feature = "p004-lan", not(feature = "p006-relay")))]
 mod v2_pairing;
+#[cfg(all(feature = "v2-private-wss-lan", not(feature = "p006-relay")))]
+mod v2_private_wss;
 
 #[cfg(not(feature = "p006-relay"))]
 use hub_capture_win::ProbeReport;
@@ -74,6 +76,7 @@ struct RuntimeInfo {
     v2_loopback_diagnostic_enabled: bool,
     v2_peer_pairing_enabled: bool,
     v2_verified_lan_enabled: bool,
+    v2_private_wss_lan_enabled: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
@@ -119,6 +122,10 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
         )),
         v2_verified_lan_enabled: cfg!(all(
             feature = "v2-verified-lan",
+            not(feature = "p006-relay")
+        )),
+        v2_private_wss_lan_enabled: cfg!(all(
+            feature = "v2-private-wss-lan",
             not(feature = "p006-relay")
         )),
         p004_enabled: cfg!(feature = "p004-probe"),

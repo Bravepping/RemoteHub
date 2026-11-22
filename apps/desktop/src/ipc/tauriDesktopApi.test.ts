@@ -24,6 +24,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
       v2_loopback_diagnostic_enabled: true,
       v2_peer_pairing_enabled: true,
       v2_verified_lan_enabled: true,
+      v2_private_wss_lan_enabled: true,
       p007b_diag_enabled: false,
     });
     const result = await tauriDesktopApi.readRuntime();
@@ -34,6 +35,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
       v2_loopback_diagnostic_enabled: true,
       v2_peer_pairing_enabled: true,
       v2_verified_lan_enabled: true,
+      v2_private_wss_lan_enabled: true,
       p007b_diag_enabled: false,
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -65,6 +67,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
     { ...fixture, v2_loopback_diagnostic_enabled: 'true' },
     { ...fixture, v2_peer_pairing_enabled: 'true' },
     { ...fixture, v2_verified_lan_enabled: 'true' },
+    { ...fixture, v2_private_wss_lan_enabled: 'true' },
     { ...fixture, unexpected_private_field: 'private-fixture' },
     Object.create(fixture),
   ])(

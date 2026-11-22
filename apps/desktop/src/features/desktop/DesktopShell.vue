@@ -123,6 +123,9 @@ onUnmounted(() => {
           runtime?.v2_loopback_diagnostic_enabled === true
         "
         :v2-verified-lan-enabled="runtime?.v2_verified_lan_enabled === true"
+        :v2-private-wss-lan-enabled="
+          runtime?.v2_private_wss_lan_enabled === true
+        "
         @session-state="remoteState = $event"
       />
       <HomePage

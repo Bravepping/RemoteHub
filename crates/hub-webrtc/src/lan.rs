@@ -64,6 +64,12 @@ impl VerifiedLanConfig {
     }
 }
 
+#[cfg(feature = "v2-private-wss-lan")]
+#[path = "private_wss_lan.rs"]
+mod private_wss;
+#[cfg(feature = "v2-private-wss-lan")]
+pub use private_wss::{LoopbackTlsTrust, PrivateWssLanConfig, RelayToken};
+
 #[cfg(feature = "v2-verified-lan")]
 fn validate_verified_sdp(sdp: &str, scope: LanScope, answer: bool) -> Result<(), String> {
     let negotiation = validate_description(sdp, NetworkScope::Lan(scope), answer)?;
@@ -139,6 +145,8 @@ pub struct LanSession {
     key: Mutex<Option<Arc<Key>>>,
     #[cfg(feature = "v2-verified-lan")]
     verified: Mutex<Option<VerifiedLanConfig>>,
+    #[cfg(feature = "v2-private-wss-lan")]
+    private_wss: Mutex<Option<PrivateWssLanConfig>>,
     source: Mutex<Option<Arc<Session>>>,
     status: Mutex<LanStatus>,
     task: Mutex<Option<JoinHandle<()>>>,
@@ -185,6 +193,8 @@ impl LanSession {
             key: Mutex::new(Some(Arc::new(key))),
             #[cfg(feature = "v2-verified-lan")]
             verified: Mutex::new(None),
+            #[cfg(feature = "v2-private-wss-lan")]
+            private_wss: Mutex::new(None),
             source: Mutex::new(None),
             status: Mutex::new(LanStatus {
                 browser_control: None,
@@ -281,6 +291,22 @@ impl LanSession {
         this.start_host().await?;
         Ok((this, display))
     }
+
+    #[cfg(feature = "v2-private-wss-lan")]
+    pub async fn host_private_wss(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        auth: PrivateWssLanConfig,
+    ) -> Result<(Arc<Self>, String), String> {
+        auth.validate(scope)?;
+        let key = Key::generate();
+        let display = key.display();
+        let this = Self::new(scope, seconds, port, "sender", key)?;
+        *this.private_wss.lock().unwrap_or_else(|p| p.into_inner()) = Some(auth);
+        this.start_host().await?;
+        Ok((this, display))
+    }
     pub fn receiver(
         scope: LanScope,
         seconds: u32,
@@ -309,6 +335,26 @@ impl LanSession {
         let this = Self::receiver(scope, seconds, port, code)?;
         *this.verified.lock().unwrap_or_else(|p| p.into_inner()) = Some(auth);
         Ok(this)
+    }
+    #[cfg(feature = "v2-private-wss-lan")]
+    pub fn receiver_private_wss(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        code: &str,
+        auth: PrivateWssLanConfig,
+    ) -> Result<Arc<Self>, String> {
+        auth.validate(scope)?;
+        let this = Self::receiver(scope, seconds, port, code)?;
+        *this.private_wss.lock().unwrap_or_else(|p| p.into_inner()) = Some(auth);
+        Ok(this)
+    }
+    #[cfg(feature = "v2-private-wss-lan")]
+    fn take_private_wss(&self) -> Option<PrivateWssLanConfig> {
+        self.private_wss
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .take()
     }
     #[cfg(feature = "v2-verified-lan")]
     fn take_verified(&self) -> Option<VerifiedLanConfig> {
@@ -413,6 +459,8 @@ impl LanSession {
             self.key.lock().unwrap_or_else(|p| p.into_inner()).take();
             #[cfg(feature = "v2-verified-lan")]
             drop(self.take_verified());
+            #[cfg(feature = "v2-private-wss-lan")]
+            drop(self.take_private_wss());
         }
         if !self.stats().resources_released {
             return Err("LAN_CLEANUP_PENDING".into());
@@ -434,6 +482,8 @@ impl LanSession {
         self.key.lock().unwrap_or_else(|p| p.into_inner()).take();
         #[cfg(feature = "v2-verified-lan")]
         drop(self.take_verified());
+        #[cfg(feature = "v2-private-wss-lan")]
+        drop(self.take_private_wss());
         self.update(|s| {
             if let Err(error) = result {
                 if error != "CANCELLED" {
@@ -453,6 +503,8 @@ impl LanSession {
         });
     }
     async fn host_main(&self, listener: TcpListener) -> Result<(), String> {
+        #[cfg(feature = "v2-private-wss-lan")]
+        let private_wss = self.take_private_wss();
         #[cfg(feature = "v2-verified-lan")]
         let verified = self.take_verified();
         #[cfg(feature = "v2-verified-lan")]
@@ -466,6 +518,11 @@ impl LanSession {
             attempts += 1;
             if address.ip() != std::net::IpAddr::V4(self.scope.peer) {
                 continue;
+            }
+            #[cfg(feature = "v2-private-wss-lan")]
+            if let Some(auth) = private_wss {
+                drop(listener);
+                return self.host_wss_main(socket, auth).await;
             }
             #[cfg(feature = "v2-verified-lan")]
             if let Some(auth) = verified.as_ref() {
@@ -645,6 +702,8 @@ impl LanSession {
         offer: String,
         response: &mut Option<oneshot::Sender<Result<String, String>>>,
     ) -> Result<(), String> {
+        #[cfg(feature = "v2-private-wss-lan")]
+        let private_wss = self.take_private_wss();
         #[cfg(feature = "v2-verified-lan")]
         let (verified, deadline) = (
             self.take_verified(),
@@ -654,11 +713,24 @@ impl LanSession {
         if verified.is_some() {
             validate_verified_sdp(&offer, reversed_scope(self.scope), false)?;
         }
+        #[cfg(feature = "v2-private-wss-lan")]
+        if private_wss.is_some() {
+            validate_verified_sdp(&offer, reversed_scope(self.scope), false)?;
+        }
         let socket = TcpSocket::new_v4().map_err(|_| "LAN_SOCKET_FAILED")?;
         socket
             .bind((self.scope.local, 0).into())
             .map_err(|_| "LAN_LOCAL_BIND_FAILED")?;
         let mut socket = tokio::select! {r=timeout(Duration::from_secs(5),socket.connect((self.scope.peer,self.port).into()))=>r.map_err(|_|"LAN_CONNECT_TIMEOUT")?.map_err(|_|"LAN_CONNECT_FAILED")?,_=self.cancelled()=>return Err("CANCELLED".into())};
+        #[cfg(feature = "v2-private-wss-lan")]
+        if let Some(auth) = private_wss {
+            let (codec, answer) = self
+                .receive_wss_answer(&mut socket, auth, offer, deadline)
+                .await?;
+            return self
+                .accept_receiver_answer(socket, codec, answer, response)
+                .await;
+        }
         #[cfg(feature = "v2-verified-lan")]
         if let Some(auth) = verified {
             check_verified_socket(&socket, self.scope, self.port, false)?;

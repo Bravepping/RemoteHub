@@ -53,6 +53,8 @@ pub struct Config {
     real_control: bool,
     #[serde(default)]
     verified_peer: bool,
+    #[serde(default)]
+    verified_wss: bool,
     role: String,
     consent: bool,
     local_ip: String,
@@ -63,6 +65,15 @@ pub struct Config {
 }
 impl Config {
     fn validate(&self) -> Result<LanScope, String> {
+        if self.verified_wss {
+            if !cfg!(feature = "v2-private-wss-lan") {
+                return Err("LAN_WSS_MODE_DISABLED".into());
+            }
+            if !self.verified_peer || self.real_control || self.control_sim {
+                return Err("LAN_VERIFIED_VIDEO_ONLY".into());
+            }
+        }
+
         if self.verified_peer {
             if !cfg!(feature = "v2-verified-lan") {
                 return Err("LAN_VERIFIED_MODE_DISABLED".into());
@@ -145,6 +156,23 @@ pub async fn p004_lan_start(
 ) -> Result<Started, String> {
     crate::p004::origin(&window)?;
     let scope = config.validate()?;
+    #[cfg(feature = "v2-private-wss-lan")]
+    let wss_settings = if config.verified_wss {
+        Some(crate::v2_private_wss::PrivateWssSettings::load(
+            scope.local,
+        )?)
+    } else {
+        None
+    };
+    #[cfg(feature = "v2-private-wss-lan")]
+    let wss_text = wss_settings.as_ref().map_or_else(String::new, |wss| {
+        format!(
+            "\n加密连接协商中继：{}。视频仍只发给指定对端；中继不可用就结束，不回退。",
+            wss.relay
+        )
+    });
+    #[cfg(not(feature = "v2-private-wss-lan"))]
+    let wss_text = "";
     let gate = window.state::<Arc<crate::ProbeState>>();
     if gate.0.swap(true, Ordering::AcqRel) {
         return Err("CAPTURE_BUSY".into());
@@ -197,7 +225,7 @@ pub async fn p004_lan_start(
     } else {
         ""
     };
-    let message=format!("本次将{action} {}，视频最长 {} 秒。仅连接这一台指定电脑。{control_text}{verified_text}\n\n发送端最多等待配对 120 秒；连接中断会停止采集。不会保存画面。\n\n是否同意本次实验？",scope.peer,config.seconds);
+    let message=format!("本次将{action} {}，视频最长 {} 秒。画面只在指定的两台电脑间传输。{control_text}{verified_text}{wss_text}\n\n发送端最多等待配对 120 秒；连接中断会停止采集。不会保存画面。\n\n是否同意本次实验？",scope.peer,config.seconds);
     let allowed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
@@ -232,22 +260,38 @@ pub async fn p004_lan_start(
             local_identity: Arc::new(identity),
             peer,
         };
-        Some(if config.role == "sender" {
-            let (session, code) =
-                LanSession::host_verified(scope, config.seconds, config.port, auth).await?;
-            (session, Some(code))
+        #[cfg(feature = "v2-private-wss-lan")]
+        let wss = if let Some(settings) = wss_settings {
+            let auth = hub_webrtc::lan::PrivateWssLanConfig {
+                device: auth,
+                relay: settings.relay,
+                token: settings.token,
+                trust: settings.trust,
+            };
+            let session = if config.role == "sender" {
+                let (session, code) =
+                    LanSession::host_private_wss(scope, config.seconds, config.port, auth).await?;
+                (session, Some(code))
+            } else {
+                (
+                    LanSession::receiver_private_wss(
+                        scope,
+                        config.seconds,
+                        config.port,
+                        config.pairing_code.as_deref().unwrap_or_default(),
+                        auth,
+                    )?,
+                    None,
+                )
+            };
+            Some(session)
         } else {
-            (
-                LanSession::receiver_verified(
-                    scope,
-                    config.seconds,
-                    config.port,
-                    config.pairing_code.as_deref().unwrap_or_default(),
-                    auth,
-                )?,
-                None,
-            )
-        })
+            let session = start_verified_tcp(&config, scope, auth).await?;
+            Some(session)
+        };
+        #[cfg(not(feature = "v2-private-wss-lan"))]
+        let wss = Some(start_verified_tcp(&config, scope, auth).await?);
+        wss
     } else {
         None
     };
@@ -341,6 +385,28 @@ pub async fn p004_lan_start(
         pairing_code: code,
     })
 }
+#[cfg(feature = "v2-verified-lan")]
+async fn start_verified_tcp(
+    config: &Config,
+    scope: LanScope,
+    auth: hub_webrtc::lan::VerifiedLanConfig,
+) -> Result<(Arc<LanSession>, Option<String>), String> {
+    if config.role == "sender" {
+        let (session, code) =
+            LanSession::host_verified(scope, config.seconds, config.port, auth).await?;
+        Ok((session, Some(code)))
+    } else {
+        let session = LanSession::receiver_verified(
+            scope,
+            config.seconds,
+            config.port,
+            config.pairing_code.as_deref().unwrap_or_default(),
+            auth,
+        )?;
+        Ok((session, None))
+    }
+}
+
 #[tauri::command]
 pub async fn p004_lan_signal(
     window: WebviewWindow,
@@ -574,6 +640,7 @@ mod tests {
             real_control: false,
             control_sim: false,
             verified_peer: false,
+            verified_wss: false,
             role: "sender".into(),
             consent: false,
             local_ip: "192.168.10.2".into(),
@@ -607,5 +674,20 @@ mod tests {
         config.control_sim = false;
         config.real_control = false;
         assert_eq!(config.validate().is_ok(), cfg!(feature = "v2-verified-lan"));
+        config.verified_wss = true;
+        config.verified_peer = false;
+        assert_eq!(
+            config.validate().unwrap_err(),
+            if cfg!(feature = "v2-private-wss-lan") {
+                "LAN_VERIFIED_VIDEO_ONLY"
+            } else {
+                "LAN_WSS_MODE_DISABLED"
+            }
+        );
+        config.verified_peer = true;
+        assert_eq!(
+            config.validate().is_ok(),
+            cfg!(feature = "v2-private-wss-lan")
+        );
     }
 }

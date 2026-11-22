@@ -130,3 +130,88 @@ it.each(['receiver', 'sender'] as const)(
     view.unmount();
   },
 );
+
+it.each(['receiver', 'sender'] as const)(
+  'starts explicit private WSS with verified video and no relay credentials from JS on %s',
+  async (role) => {
+    const view = mount(RemoteWorkspace, {
+      props: { v2VerifiedLanEnabled: true, v2PrivateWssLanEnabled: true },
+    });
+    const selection = view.get(selector);
+    expect(
+      selection.findAll('option').map((option) => option.attributes('value')),
+    ).toEqual(['legacy', 'verified', 'private-wss']);
+    expect((selection.element as HTMLSelectElement).value).toBe('legacy');
+    await view.findAll('select')[1].setValue(role);
+    const [peer, local] = view.findAll('input');
+    await peer.setValue('192.168.1.3');
+    await local.setValue('192.168.1.2');
+    await selection.setValue('private-wss');
+    expect(view.text()).toContain('不会自动切换为普通局域网连接');
+    if (role === 'receiver')
+      await view.get('input[type="password"]').setValue('temporary-pin');
+    const button = view
+      .findAll('button')
+      .find(
+        (item) =>
+          item.text() === (role === 'sender' ? '确认后等待配对' : '确认后连接'),
+      )!;
+    expect(button.attributes('disabled')).toBeDefined();
+    await view.get('input[type="checkbox"]').setValue(true);
+    await button.trigger('click');
+    expect(mocked.start).toHaveBeenCalledExactlyOnceWith({
+      role,
+      consent: true,
+      peerIp: '192.168.1.3',
+      localIp: '192.168.1.2',
+      port: 48604,
+      seconds: 30,
+      pairingCode: role === 'receiver' ? 'temporary-pin' : '',
+      verifiedPeer: true,
+      verifiedWss: true,
+      realControl: false,
+      controlSim: false,
+    });
+    expect(view.text()).not.toContain('启用本次键鼠控制');
+    mocked.reportError?.('LAN_WSS_CONFIG_REQUIRED');
+    await flushPromises();
+    expect(view.get('[role="alert"]').text()).toContain(
+      '在两台电脑配置原生客户端',
+    );
+    mocked.reportError?.('secret-token-fixture');
+    await flushPromises();
+    expect(view.get('[role="alert"]').text()).not.toContain(
+      'secret-token-fixture',
+    );
+    expect(view.get('[role="alert"]').text()).toContain('没有切换到其他模式');
+    expect(mocked.start).toHaveBeenCalledTimes(1);
+    view.unmount();
+  },
+);
+
+it('fails closed rather than starting ordinary LAN if the selected WSS capability disappears', async () => {
+  const view = mount(RemoteWorkspace, {
+    props: { v2VerifiedLanEnabled: true, v2PrivateWssLanEnabled: true },
+  });
+  const selection = view.get(selector);
+  await selection.setValue('private-wss');
+  const [peer, local, pin, consent] = view.findAll('input');
+  await peer.setValue('192.168.1.3');
+  await local.setValue('192.168.1.2');
+  await pin.setValue('temporary-pin');
+  await consent.setValue(true);
+  await view.setProps({ v2PrivateWssLanEnabled: false });
+  expect(view.text()).toContain('当前启动未启用所选模式');
+  expect((selection.element as HTMLSelectElement).value).toBe('private-wss');
+  expect((pin.element as HTMLInputElement).value).toBe('');
+  expect((consent.element as HTMLInputElement).checked).toBe(false);
+  await pin.setValue('another-temporary-pin');
+  await consent.setValue(true);
+  const start = view
+    .findAll('button')
+    .find((item) => item.text() === '确认后连接')!;
+  expect(start.attributes('disabled')).toBeDefined();
+  await start.trigger('click');
+  expect(mocked.start).not.toHaveBeenCalled();
+  view.unmount();
+});

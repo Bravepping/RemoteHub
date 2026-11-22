@@ -31,6 +31,33 @@ impl Key {
         uuid::Uuid::from_bytes(self.0).to_string()
     }
 }
+#[cfg(all(
+    feature = "v2-verified-lan",
+    any(test, all(windows, feature = "v2-private-wss-lan"))
+))]
+impl Key {
+    /// A distinct derivation domain; different purposes cannot reuse MACs
+    /// from the LAN wire or from another bootstrap field.
+    pub(crate) fn expand_wss(
+        &self,
+        purpose: &'static [u8],
+        verified_transcript: &[u8; 32],
+    ) -> Result<[u8; 32], String> {
+        let mut mac = Hmac::<Sha256>::new_from_slice(&self.0).map_err(|_| "WIRE_KEY")?;
+        mac.update(b"RemoteHub.LAN.device-wss-bootstrap.kdf.v1\0");
+        mac.update(purpose);
+        mac.update(&[0]);
+        mac.update(verified_transcript);
+        Ok(mac.finalize().into_bytes().into())
+    }
+
+    pub(crate) fn from_wss_material(material: [u8; 32]) -> Self {
+        let mut key = [0; 16];
+        key.copy_from_slice(&material[..16]);
+        Self(key)
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Frame {

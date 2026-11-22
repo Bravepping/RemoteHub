@@ -9,6 +9,7 @@ license.workspace = true
 v2-loopback-signaling = ["dep:hub-signal-v2"]
 v2-verified-signaling = ["v2-loopback-signaling", "dep:hub-identity"]
 v2-verified-lan = ["p3-lan", "dep:hub-identity"]
+v2-private-wss-lan = ["v2-verified-lan", "v2-loopback-signaling"]
 p3-lan = ["dep:windows-sys"]
 p006-turn-probe = ["dep:zeroize"]
 p006-direct-probe = ["p006-turn-probe"]

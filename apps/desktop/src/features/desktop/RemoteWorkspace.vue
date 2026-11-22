@@ -5,6 +5,7 @@ import { LanProbe, type LanStatus, type LanReceiver } from '../p004/lan';
 const props = defineProps<{
   v2LoopbackDiagnosticEnabled?: boolean;
   v2VerifiedLanEnabled?: boolean;
+  v2PrivateWssLanEnabled?: boolean;
 }>();
 const video = ref<HTMLVideoElement>();
 const surface = ref<HTMLDivElement>();
@@ -20,19 +21,26 @@ const error = ref('');
 const native = ref<LanStatus>();
 const receiver = ref<LanReceiver>();
 const input = ref(false);
-const mode = ref<'legacy' | 'verified'>('legacy');
-const activeVerified = ref(false);
-const verifiedMode = computed(
-  () => props.v2VerifiedLanEnabled === true && mode.value === 'verified',
+type LanMode = 'legacy' | 'verified' | 'private-wss';
+const mode = ref<LanMode>('legacy');
+const activeMode = ref<LanMode>('legacy');
+const modeAllowed = computed(
+  () =>
+    mode.value === 'legacy' ||
+    (mode.value === 'verified' && props.v2VerifiedLanEnabled === true) ||
+    (mode.value === 'private-wss' && props.v2PrivateWssLanEnabled === true),
 );
-const videoOnly = computed(() =>
-  busy.value ? activeVerified.value : verifiedMode.value,
+const displayedMode = computed(() =>
+  busy.value ? activeMode.value : mode.value,
 );
+const videoOnly = computed(() => displayedMode.value !== 'legacy');
+const privateWss = computed(() => displayedMode.value === 'private-wss');
 watch(
-  verifiedMode,
+  [mode, modeAllowed],
   () => {
     consent.value = false;
     code.value = '';
+    if (busy.value) return;
     invitation.value = '';
     error.value = '';
     native.value = undefined;
@@ -43,7 +51,7 @@ watch(
 watch(
   [role, peer, local],
   () => {
-    if (verifiedMode.value) consent.value = false;
+    if (mode.value !== 'legacy') consent.value = false;
   },
   { flush: 'sync' },
 );
@@ -84,6 +92,16 @@ const verifiedLanErrors: Readonly<Record<string, string>> = {
   LAN_VERIFIED_MODE_DISABLED: '当前客户端未启用已验证设备视频模式。',
   LAN_VERIFIED_VIDEO_ONLY: '已验证设备模式只允许主屏视频，不允许键鼠输入。',
 };
+const privateWssErrors: Readonly<Record<string, string>> = {
+  ...verifiedLanErrors,
+  LAN_DEVICE_AUTH_FAILED:
+    '未能认证指定对端。请确认双方都选择了私网 WSS 模式，且已互相核对指纹。',
+  LAN_WSS_CONFIG_REQUIRED:
+    '缺少有效的私网 WSS 启动配置。请按部署说明在两台电脑配置原生客户端后重试，不要在此输入信令地址、令牌或证书。',
+  LAN_WSS_MODE_DISABLED: '当前客户端未启用私网 WSS 视频模式。',
+  LAN_WSS_AUTH_FAILED:
+    '私网 WSS 信令连接或会话认证未通过。请检查两端的原生启动配置、完整指纹和本次配对码。',
+};
 function safeError(value: unknown) {
   const text = String(value);
   const match = text.match(
@@ -104,6 +122,7 @@ async function start() {
   if (
     diagnosticBusy.value ||
     busy.value ||
+    !modeAllowed.value ||
     !video.value ||
     !consent.value ||
     !local.value.trim() ||
@@ -111,8 +130,11 @@ async function start() {
     (role.value === 'receiver' && !code.value)
   )
     return;
-  const verified = verifiedMode.value;
-  activeVerified.value = verified;
+  const selectedMode = mode.value;
+  const verified = selectedMode !== 'legacy';
+  const wss = selectedMode === 'private-wss';
+  const knownErrors = wss ? privateWssErrors : verifiedLanErrors;
+  activeMode.value = selectedMode;
   busy.value = true;
   error.value = '';
   invitation.value = '';
@@ -133,9 +155,11 @@ async function start() {
     },
     (e) => {
       error.value = verified
-        ? Object.hasOwn(verifiedLanErrors, e)
-          ? verifiedLanErrors[e]
-          : '已验证设备视频会话未建立或已中断。请检查本机地址、临时配对码和两端的会话设置。'
+        ? Object.hasOwn(knownErrors, e)
+          ? knownErrors[e]
+          : wss
+            ? '私网 WSS 视频会话未建立或已中断。请检查本机启动配置、临时配对码和两端的会话设置。没有切换到其他模式。'
+            : '已验证设备视频会话未建立或已中断。请检查本机地址、临时配对码和两端的会话设置。'
         : safeError(e);
     },
     (c) => {
@@ -155,6 +179,7 @@ async function start() {
     seconds: 30,
     pairingCode: pairing,
     ...(verified ? { verifiedPeer: true } : {}),
+    ...(wss ? { verifiedWss: true } : {}),
     realControl: !verified,
     controlSim: false,
   });
@@ -285,7 +310,8 @@ onBeforeUnmount(() => {
     </div>
     <p role="status">
       {{ labels[state] ?? '正在读取状态' }} · 本次最长30秒 · 主屏720p30
-      <template v-if="videoOnly"> · 模式：已验证设备（仅视频）</template>
+      <template v-if="privateWss"> · 模式：私网 WSS 信令（仅视频）</template>
+      <template v-else-if="videoOnly"> · 模式：已验证设备（仅视频）</template>
     </p>
     <p v-if="busy && role === 'sender'" class="remote-warning">
       <template v-if="videoOnly">
@@ -298,11 +324,30 @@ onBeforeUnmount(() => {
     </p>
     <template v-if="!busy">
       <div class="remote-fields">
-        <label v-if="v2VerifiedLanEnabled === true">
+        <label
+          v-if="
+            v2VerifiedLanEnabled === true ||
+            v2PrivateWssLanEnabled === true ||
+            mode !== 'legacy'
+          "
+        >
           局域网会话模式
           <select v-model="mode" aria-label="局域网会话模式">
             <option value="legacy">临时配对码（视频与键鼠）</option>
-            <option value="verified">已验证设备（仅视频）</option>
+            <option
+              v-if="v2VerifiedLanEnabled === true || mode === 'verified'"
+              :disabled="v2VerifiedLanEnabled !== true"
+              value="verified"
+            >
+              已验证设备（仅视频）
+            </option>
+            <option
+              v-if="v2PrivateWssLanEnabled === true || mode === 'private-wss'"
+              :disabled="v2PrivateWssLanEnabled !== true"
+              value="private-wss"
+            >
+              私网 WSS 信令（仅视频）
+            </option>
           </select>
         </label>
         <label
@@ -331,7 +376,8 @@ onBeforeUnmount(() => {
           >本机IPv4<input v-model="local" autocomplete="off" spellcheck="false"
         /></label>
         <label v-if="role === 'receiver'"
-          >被控端本次配对码<input
+          >{{ videoOnly ? '共享端本次配对码' : '被控端本次配对码'
+          }}<input
             v-model="code"
             type="password"
             autocomplete="off"
@@ -340,6 +386,13 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="videoOnly">
         两台电脑都需要在“设备”页验证对端，再选择此模式。观看端仍须输入临时配对码，两端都须确认本次视频会话。
+      </p>
+      <p v-if="privateWss">
+        WSS 仅传递信令，视频仍通过两台电脑所选的局域网 IPv4
+        传输。请在两台电脑预先配置原生客户端；此模式不会自动切换为普通局域网连接。
+      </p>
+      <p v-if="!modeAllowed">
+        当前启动未启用所选模式。请明确选择其他模式或重新配置客户端。
       </p>
       <label
         ><input v-model="consent" type="checkbox" />{{
@@ -353,6 +406,7 @@ onBeforeUnmount(() => {
           class="outline-button"
           :disabled="
             diagnosticBusy ||
+            !modeAllowed ||
             !consent ||
             !local ||
             !peer ||

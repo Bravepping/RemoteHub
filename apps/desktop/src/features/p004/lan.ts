@@ -31,6 +31,7 @@ export interface LanStatus {
 }
 export interface LanConfig {
   verifiedPeer?: boolean;
+  verifiedWss?: boolean;
   realControl?: boolean;
   controlSim?: boolean;
   role: 'sender' | 'receiver';

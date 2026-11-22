@@ -15,6 +15,8 @@ use hub_identity::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+#[cfg(any(test, feature = "v2-private-wss-lan"))]
+use std::net::SocketAddrV4;
 use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
@@ -26,6 +28,8 @@ use tokio::{
 use uuid::Uuid;
 
 const HELLO: &str = "device.hello.v1";
+#[cfg(any(test, feature = "v2-private-wss-lan"))]
+const HELLO_WSS: &str = "device.wss-hello.v1";
 const HOST_CHALLENGE: &str = "device.host-challenge.v1";
 const VIEWER_PROOF: &str = "device.viewer-proof.v1";
 const HOST_PROOF: &str = "device.host-proof.v1";
@@ -46,13 +50,45 @@ pub(crate) async fn authenticate_host<'a>(
     scope: LanScope,
     host_port: u16,
 ) -> Result<(Codec, VerifiedSdp<'a>), String> {
+    let authenticated =
+        authenticate_host_with_mode(io, key, identity, peer, scope, host_port, Mode::TcpVideo)
+            .await?;
+    Ok((authenticated.codec, authenticated.sdp))
+}
+
+#[cfg(any(test, feature = "v2-private-wss-lan"))]
+pub(crate) async fn authenticate_host_wss<'a>(
+    io: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    key: Arc<Key>,
+    identity: &'a Identity,
+    peer: &VerifiedPeer,
+    scope: LanScope,
+    host_port: u16,
+    relay: SocketAddrV4,
+) -> Result<(Codec, VerifiedSdp<'a>, WssBootstrap), String> {
+    let authenticated =
+        authenticate_host_with_mode(io, key, identity, peer, scope, host_port, Mode::wss(relay)?)
+            .await?;
+    let bootstrap = authenticated.bootstrap.ok_or("LAN_DEVICE_WSS_BOOTSTRAP")?;
+    Ok((authenticated.codec, authenticated.sdp, bootstrap))
+}
+
+async fn authenticate_host_with_mode<'a>(
+    io: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    key: Arc<Key>,
+    identity: &'a Identity,
+    peer: &VerifiedPeer,
+    scope: LanScope,
+    host_port: u16,
+    mode: Mode,
+) -> Result<Authenticated<'a>, String> {
     with_deadline(async {
         let endpoint = Endpoint::new(scope, host_port, SessionRole::Host)?;
         let first = read_auth_frame(io).await?;
         let viewer_nonce = checked_nonce(&first.nonce)?;
         let mut codec = Codec::new(key.clone(), first.nonce.clone(), true)?;
         let (kind, payload) = codec.accept(first)?;
-        if kind != HELLO || payload != VIDEO_ONLY {
+        if kind != mode.hello_kind() || payload != mode.hello_payload() {
             return Err("LAN_DEVICE_HELLO_REQUIRED".into());
         }
         let context = Context::new(
@@ -62,6 +98,7 @@ pub(crate) async fn authenticate_host<'a>(
             identity,
             peer,
             SessionRole::Host,
+            mode,
         )?;
         let [mut expected_viewer, expected_offer] =
             issue_pair(&context.binding, SessionRole::Viewer)?;
@@ -100,10 +137,14 @@ pub(crate) async fn authenticate_host<'a>(
         if from_hex::<32>(&acknowledged)? != acknowledgment(&host_signature, &proof_data) {
             return Err("LAN_DEVICE_ACK_MISMATCH".into());
         }
-        let next_codec = context.next_codec(key, &proof_data, true)?;
-        Ok((
-            next_codec,
-            VerifiedSdp {
+        #[cfg(any(test, feature = "v2-private-wss-lan"))]
+        let bootstrap = mode.derive_wss(&key, &proof_data, &viewer_signature, &host_signature)?;
+        let codec = context.next_codec(key, &proof_data, true)?;
+        Ok(Authenticated {
+            codec,
+            #[cfg(any(test, feature = "v2-private-wss-lan"))]
+            bootstrap,
+            sdp: VerifiedSdp {
                 identity,
                 binding: context.binding,
                 role: SessionRole::Host,
@@ -112,7 +153,7 @@ pub(crate) async fn authenticate_host<'a>(
                 incoming: Some(expected_offer),
                 offer_hash: None,
             },
-        ))
+        })
     })
     .await
 }
@@ -125,11 +166,43 @@ pub(crate) async fn authenticate_viewer<'a>(
     scope: LanScope,
     host_port: u16,
 ) -> Result<(Codec, VerifiedSdp<'a>), String> {
+    let authenticated =
+        authenticate_viewer_with_mode(io, key, identity, peer, scope, host_port, Mode::TcpVideo)
+            .await?;
+    Ok((authenticated.codec, authenticated.sdp))
+}
+
+#[cfg(any(test, feature = "v2-private-wss-lan"))]
+pub(crate) async fn authenticate_viewer_wss<'a>(
+    io: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    key: Arc<Key>,
+    identity: &'a Identity,
+    peer: &VerifiedPeer,
+    scope: LanScope,
+    host_port: u16,
+    relay: SocketAddrV4,
+) -> Result<(Codec, VerifiedSdp<'a>, WssBootstrap), String> {
+    let authenticated =
+        authenticate_viewer_with_mode(io, key, identity, peer, scope, host_port, Mode::wss(relay)?)
+            .await?;
+    let bootstrap = authenticated.bootstrap.ok_or("LAN_DEVICE_WSS_BOOTSTRAP")?;
+    Ok((authenticated.codec, authenticated.sdp, bootstrap))
+}
+
+async fn authenticate_viewer_with_mode<'a>(
+    io: &mut (impl AsyncRead + AsyncWrite + Unpin),
+    key: Arc<Key>,
+    identity: &'a Identity,
+    peer: &VerifiedPeer,
+    scope: LanScope,
+    host_port: u16,
+    mode: Mode,
+) -> Result<Authenticated<'a>, String> {
     with_deadline(async {
         let endpoint = Endpoint::new(scope, host_port, SessionRole::Viewer)?;
         let viewer_nonce = Uuid::new_v4();
         let mut codec = Codec::new(key.clone(), viewer_nonce.to_string(), false)?;
-        send(io, &mut codec, HELLO, VIDEO_ONLY.into()).await?;
+        send(io, &mut codec, mode.hello_kind(), mode.hello_payload()).await?;
         let challenge = receive(io, &mut codec, HOST_CHALLENGE).await?;
         let challenge = from_hex::<{ 16 + PAIR_BYTES }>(&challenge)?;
         let (host_nonce, host_challenges) = challenge.split_at(16);
@@ -144,6 +217,7 @@ pub(crate) async fn authenticate_viewer<'a>(
             identity,
             peer,
             SessionRole::Viewer,
+            mode,
         )?;
         let host_challenges = Challenges::parse(host_challenges)?;
         let [mut expected_host, expected_answer] = issue_pair(&context.binding, SessionRole::Host)?;
@@ -178,10 +252,14 @@ pub(crate) async fn authenticate_viewer<'a>(
             hex_bytes(&[&acknowledgment(&host_signature, &proof_data)]),
         )
         .await?;
-        let next_codec = context.next_codec(key, &proof_data, false)?;
-        Ok((
-            next_codec,
-            VerifiedSdp {
+        #[cfg(any(test, feature = "v2-private-wss-lan"))]
+        let bootstrap = mode.derive_wss(&key, &proof_data, &viewer_signature, &host_signature)?;
+        let codec = context.next_codec(key, &proof_data, false)?;
+        Ok(Authenticated {
+            codec,
+            #[cfg(any(test, feature = "v2-private-wss-lan"))]
+            bootstrap,
+            sdp: VerifiedSdp {
                 identity,
                 binding: context.binding,
                 role: SessionRole::Viewer,
@@ -190,9 +268,95 @@ pub(crate) async fn authenticate_viewer<'a>(
                 incoming: Some(expected_answer),
                 offer_hash: None,
             },
-        ))
+        })
     })
     .await
+}
+
+struct Authenticated<'a> {
+    codec: Codec,
+    sdp: VerifiedSdp<'a>,
+    #[cfg(any(test, feature = "v2-private-wss-lan"))]
+    bootstrap: Option<WssBootstrap>,
+}
+
+/// Fresh, per-connection rendezvous values only after successful pinned-device
+/// proofs. They do not replace the relay's role ACL, TLS pin or native consent.
+#[cfg(any(test, feature = "v2-private-wss-lan"))]
+pub(crate) struct WssBootstrap {
+    pub(crate) room: String,
+    pub(crate) codec_nonce: String,
+    pub(crate) session_nonce: [u8; 32],
+    pub(crate) signal_key: Arc<Key>,
+    pub(crate) host_challenge: String,
+    pub(crate) viewer_challenge: String,
+}
+
+#[derive(Clone, Copy)]
+enum Mode {
+    TcpVideo,
+    #[cfg(any(test, feature = "v2-private-wss-lan"))]
+    PrivateWss([u8; 6]),
+}
+
+impl Mode {
+    #[cfg(any(test, feature = "v2-private-wss-lan"))]
+    fn wss(relay: SocketAddrV4) -> Result<Self, String> {
+        let octets = relay.ip().octets();
+        if !relay.ip().is_private() || matches!(octets[3], 0 | 255) || relay.port() == 0 {
+            return Err("LAN_DEVICE_WSS_ENDPOINT".into());
+        }
+        let mut route = [0; 6];
+        route[..4].copy_from_slice(&octets);
+        route[4..].copy_from_slice(&relay.port().to_be_bytes());
+        Ok(Self::PrivateWss(route))
+    }
+
+    fn hello_kind(self) -> &'static str {
+        match self {
+            Self::TcpVideo => HELLO,
+            #[cfg(any(test, feature = "v2-private-wss-lan"))]
+            Self::PrivateWss(_) => HELLO_WSS,
+        }
+    }
+
+    fn hello_payload(self) -> String {
+        match self {
+            Self::TcpVideo => VIDEO_ONLY.into(),
+            #[cfg(any(test, feature = "v2-private-wss-lan"))]
+            Self::PrivateWss(route) => hex_bytes(&[&route]),
+        }
+    }
+
+    #[cfg(any(test, feature = "v2-private-wss-lan"))]
+    fn derive_wss(
+        self,
+        key: &Key,
+        handshake: &[u8; 32],
+        viewer_signature: &[u8; 64],
+        host_signature: &[u8; 64],
+    ) -> Result<Option<WssBootstrap>, String> {
+        let Self::PrivateWss(_) = self else {
+            return Ok(None);
+        };
+        let transcript = digest(&[
+            b"RemoteHub.LAN.device-wss-bootstrap.transcript.v1\0",
+            handshake,
+            viewer_signature,
+            host_signature,
+        ]);
+        let derive = |purpose: &'static [u8]| key.expand_wss(purpose, &transcript);
+        Ok(Some(WssBootstrap {
+            room: hex_bytes(&[&derive(b"room")?[..16]]),
+            codec_nonce: Uuid::from_slice(&derive(b"codec-nonce")?[..16])
+                .map_err(|_| "LAN_DEVICE_WSS_BOOTSTRAP")?
+                .to_string(),
+            session_nonce: derive(b"session-nonce")?,
+            signal_key: Arc::new(Key::from_wss_material(derive(b"signal-key")?)),
+            host_challenge: hex_bytes(&[&derive(b"challenge-host")?]),
+            viewer_challenge: hex_bytes(&[&derive(b"challenge-viewer")?]),
+        }))
+    }
 }
 
 /// The second challenge in each direction is reserved exclusively for one
@@ -370,20 +534,34 @@ impl Context {
         identity: &Identity,
         peer: &VerifiedPeer,
         role: SessionRole,
+        mode: Mode,
     ) -> Result<Self, String> {
         let local = identity.public();
         let (host, viewer) = match role {
             SessionRole::Host => (&local.public_key, peer.public_key()),
             SessionRole::Viewer => (peer.public_key(), &local.public_key),
         };
-        let context_hash = digest(&[
-            b"RemoteHub.LAN.device-context.v1\0",
-            viewer_nonce.as_bytes(),
-            host_nonce.as_bytes(),
-            &endpoint.0,
-            host,
-            viewer,
-        ]);
+        let context_hash = match mode {
+            // Keep the existing TCP-video proof and codec bytes exactly the same.
+            Mode::TcpVideo => digest(&[
+                b"RemoteHub.LAN.device-context.v1\0",
+                viewer_nonce.as_bytes(),
+                host_nonce.as_bytes(),
+                &endpoint.0,
+                host,
+                viewer,
+            ]),
+            #[cfg(any(test, feature = "v2-private-wss-lan"))]
+            Mode::PrivateWss(relay) => digest(&[
+                b"RemoteHub.LAN.device-context.v1.private-wss\0",
+                viewer_nonce.as_bytes(),
+                host_nonce.as_bytes(),
+                &endpoint.0,
+                &relay,
+                host,
+                viewer,
+            ]),
+        };
         let binding = peer
             .session_binding(&local, role, *viewer_nonce.as_bytes(), context_hash)
             .map_err(|e| e.to_string())?;
@@ -711,5 +889,247 @@ mod tests {
             viewer_sdp.seal("x".repeat(MAX_SDP + 1)).unwrap_err(),
             "LAN_DEVICE_SDP_SIZE"
         );
+    }
+    #[tokio::test]
+    async fn wss_bootstrap_yields_matching_fresh_material_and_separate_tcp_and_wss_codecs() {
+        let (host, pin_viewer, viewer, pin_host) = pins();
+        let (host_scope, viewer_scope) = scopes();
+        let key = Arc::new(Key::generate());
+        let relay = "192.168.23.4:48620".parse().unwrap(); // Relay is co-located with host.
+        let mut previous_room = None;
+        let mut previous_signal_key = None;
+        for _ in 0..2 {
+            let (mut host_io, mut viewer_io) = duplex(4096);
+            let (
+                (mut host_tcp, mut host_sdp, host_bootstrap),
+                (mut viewer_tcp, mut viewer_sdp, viewer_bootstrap),
+            ) = tokio::try_join!(
+                authenticate_host_wss(
+                    &mut host_io,
+                    key.clone(),
+                    &host,
+                    &pin_viewer,
+                    host_scope,
+                    PORT,
+                    relay
+                ),
+                authenticate_viewer_wss(
+                    &mut viewer_io,
+                    key.clone(),
+                    &viewer,
+                    &pin_host,
+                    viewer_scope,
+                    PORT,
+                    relay
+                ),
+            )
+            .unwrap();
+            assert_eq!(host_bootstrap.room, viewer_bootstrap.room);
+            assert_eq!(host_bootstrap.codec_nonce, viewer_bootstrap.codec_nonce);
+            assert_eq!(host_bootstrap.session_nonce, viewer_bootstrap.session_nonce);
+            assert_eq!(
+                host_bootstrap.host_challenge,
+                viewer_bootstrap.host_challenge
+            );
+            assert_eq!(
+                host_bootstrap.viewer_challenge,
+                viewer_bootstrap.viewer_challenge
+            );
+            assert_ne!(
+                host_bootstrap.host_challenge,
+                host_bootstrap.viewer_challenge
+            );
+            assert_ne!(host_tcp.nonce, host_bootstrap.codec_nonce);
+            assert_ne!(previous_room.as_ref(), Some(&host_bootstrap.room));
+            previous_room = Some(host_bootstrap.room.clone());
+
+            let relay_codec = |key, host| {
+                Codec::new_v2(
+                    key,
+                    host_bootstrap.codec_nonce.clone(),
+                    &host_bootstrap.room,
+                    host,
+                )
+                .unwrap()
+            };
+            let mut host_wss = relay_codec(host_bootstrap.signal_key.clone(), true);
+            let mut viewer_wss = relay_codec(viewer_bootstrap.signal_key, false);
+            let challenge = viewer_wss
+                .encode(
+                    "viewer_challenge",
+                    viewer_bootstrap.viewer_challenge.clone(),
+                )
+                .unwrap();
+            for wrong in [Some(key.clone()), previous_signal_key.take()]
+                .into_iter()
+                .flatten()
+            {
+                let mut wrong_wss = relay_codec(wrong, true);
+                let copy =
+                    serde_json::from_value(serde_json::to_value(&challenge).unwrap()).unwrap();
+                assert_eq!(wrong_wss.accept(copy).unwrap_err(), "AUTH_REJECTED");
+            }
+            previous_signal_key = Some(host_bootstrap.signal_key);
+            let (kind, data) = host_wss.accept(challenge).unwrap();
+            assert_eq!(kind, "viewer_challenge");
+            assert_eq!(data, host_bootstrap.viewer_challenge);
+            let body = viewer_sdp.seal(OFFER.into()).unwrap();
+            let (_, body) = host_wss
+                .accept(viewer_wss.encode("offer", body).unwrap())
+                .unwrap();
+            assert_eq!(host_sdp.open(&body).unwrap(), OFFER);
+            let body = host_sdp.seal(ANSWER.into()).unwrap();
+            let (_, body) = viewer_wss
+                .accept(host_wss.encode("answer", body).unwrap())
+                .unwrap();
+            assert_eq!(viewer_sdp.open(&body).unwrap(), ANSWER);
+            let tcp_frame = viewer_tcp.encode("stop", "test stop".into()).unwrap();
+            assert_eq!(
+                host_tcp.accept(tcp_frame).unwrap(),
+                ("stop".into(), "test stop".into())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn wss_bootstrap_rejects_mode_relay_address_port_and_key_mismatches() {
+        let (host, pin_viewer, viewer, pin_host) = pins();
+        let (host_scope, viewer_scope) = scopes();
+        let relay = "192.168.23.4:48620".parse().unwrap();
+        for (host_mode, viewer_mode, same_key, expected) in [
+            (Some(relay), None, true, "LAN_DEVICE_HELLO_REQUIRED"),
+            (None, Some(relay), true, "LAN_DEVICE_HELLO_REQUIRED"),
+            (
+                Some(relay),
+                Some("192.168.23.5:48620".parse().unwrap()),
+                true,
+                "LAN_DEVICE_HELLO_REQUIRED",
+            ),
+            (
+                Some(relay),
+                Some("192.168.23.4:48621".parse().unwrap()),
+                true,
+                "LAN_DEVICE_HELLO_REQUIRED",
+            ),
+            (Some(relay), Some(relay), false, "AUTH_REJECTED"),
+        ] {
+            let (mut host_io, mut viewer_io) = duplex(4096);
+            let key = Arc::new(Key::generate());
+            let their_key = if same_key {
+                key.clone()
+            } else {
+                Arc::new(Key::generate())
+            };
+            let (host_result, viewer_result) = tokio::join!(
+                async {
+                    let result = if let Some(route) = host_mode {
+                        authenticate_host_wss(
+                            &mut host_io,
+                            key,
+                            &host,
+                            &pin_viewer,
+                            host_scope,
+                            PORT,
+                            route,
+                        )
+                        .await
+                        .map(|_| ())
+                    } else {
+                        authenticate_host(&mut host_io, key, &host, &pin_viewer, host_scope, PORT)
+                            .await
+                            .map(|_| ())
+                    };
+                    drop(host_io);
+                    result
+                },
+                async {
+                    let result = if let Some(route) = viewer_mode {
+                        authenticate_viewer_wss(
+                            &mut viewer_io,
+                            their_key,
+                            &viewer,
+                            &pin_host,
+                            viewer_scope,
+                            PORT,
+                            route,
+                        )
+                        .await
+                        .map(|_| ())
+                    } else {
+                        authenticate_viewer(
+                            &mut viewer_io,
+                            their_key,
+                            &viewer,
+                            &pin_host,
+                            viewer_scope,
+                            PORT,
+                        )
+                        .await
+                        .map(|_| ())
+                    };
+                    drop(viewer_io);
+                    result
+                },
+            );
+            assert_eq!(host_result.unwrap_err(), expected);
+            assert!(viewer_result.is_err());
+        }
+    }
+
+    #[test]
+    fn relay_ip_and_port_change_the_signed_context_not_only_the_hello() {
+        let (host, pin_viewer, viewer, pin_host) = pins();
+        let (host_scope, viewer_scope) = scopes();
+        let host_endpoint = Endpoint::new(host_scope, PORT, SessionRole::Host).unwrap();
+        let viewer_endpoint = Endpoint::new(viewer_scope, PORT, SessionRole::Viewer).unwrap();
+        let viewer_nonce = Uuid::new_v4();
+        let host_nonce = Uuid::new_v4();
+        let mode = Mode::wss("192.168.23.4:48620".parse().unwrap()).unwrap();
+        let local = Context::new(
+            host_endpoint,
+            viewer_nonce,
+            host_nonce,
+            &host,
+            &pin_viewer,
+            SessionRole::Host,
+            mode,
+        )
+        .unwrap();
+        let remote = Context::new(
+            viewer_endpoint,
+            viewer_nonce,
+            host_nonce,
+            &viewer,
+            &pin_host,
+            SessionRole::Viewer,
+            mode,
+        )
+        .unwrap();
+        assert_eq!(local.context_hash, remote.context_hash);
+        for mode in [
+            Mode::TcpVideo,
+            Mode::wss("192.168.23.4:48621".parse().unwrap()).unwrap(),
+            Mode::wss("192.168.23.5:48620".parse().unwrap()).unwrap(),
+        ] {
+            let other = Context::new(
+                viewer_endpoint,
+                viewer_nonce,
+                host_nonce,
+                &viewer,
+                &pin_host,
+                SessionRole::Viewer,
+                mode,
+            )
+            .unwrap();
+            assert_ne!(local.context_hash, other.context_hash);
+        }
+        for bad in [
+            "127.0.0.1:48620",
+            "0.0.0.0:48620",
+            "192.0.2.1:48620",
+            "192.168.23.4:0",
+        ] {
+            assert!(Mode::wss(bad.parse().unwrap()).is_err());
+        }
     }
 }
