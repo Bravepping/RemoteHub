@@ -12,6 +12,7 @@ import './desktop.css';
 import './p103.css';
 import './p105.css';
 import ReadFeedback from './ReadFeedback.vue';
+import RemoteWorkspace from './RemoteWorkspace.vue';
 import type { ReadStatus } from '../../state/desktop';
 
 defineProps<{
@@ -25,6 +26,17 @@ const active = ref<PageId>(pageFromHash(window.location.hash));
 const current = computed(() => pages.find((p) => p.id === active.value)!);
 const heading = ref<HTMLElement>();
 const originalTitle = document.title;
+const remoteState = ref('idle');
+const remoteBusy = computed(() =>
+  [
+    'waiting',
+    'negotiating',
+    'connected',
+    'playing',
+    'finishing',
+    'stopping',
+  ].includes(remoteState.value),
+);
 function applyPage(page: PageId) {
   if (active.value === page) return;
   active.value = page;
@@ -77,11 +89,15 @@ onUnmounted(() => {
         <span class="status-dot" />{{
           loading
             ? '正在读取本机信息'
-            : runtime
-              ? runtime.remote_access_enabled
-                ? '远程状态尚未接入'
-                : '远程访问关闭'
-              : '本机能力未连接'
+            : runtime?.p3_enabled
+              ? remoteBusy
+                ? '本次短会话进行中'
+                : '尚未开启本次远控'
+              : runtime
+                ? runtime.remote_access_enabled
+                  ? '远程状态尚未接入'
+                  : '远程访问关闭'
+                : '本机能力未连接'
         }}
         <p>仅在双方同意后连接</p>
       </div>
@@ -101,6 +117,10 @@ onUnmounted(() => {
         @cancel="$emit('cancelRead')"
         @retry="$emit('refresh')"
       />
+      <RemoteWorkspace
+        v-if="runtime?.p3_enabled"
+        @session-state="remoteState = $event"
+      />
       <HomePage
         v-if="active === 'home'"
         :runtime="runtime"
@@ -115,8 +135,23 @@ onUnmounted(() => {
         @refresh="$emit('refresh')"
         @navigate="navigate"
       />
-      <ConnectPage v-else-if="active === 'connect'" @navigate="navigate" />
-      <SessionsPage v-else-if="active === 'sessions'" @navigate="navigate" />
+      <template v-else-if="active === 'connect'">
+        <p v-if="runtime?.p3_enabled" class="product-card">
+          本轮指定局域网连接使用上方会话面板。不会自动连接、重连或授予持久信任。
+        </p>
+        <ConnectPage v-else @navigate="navigate" />
+      </template>
+      <template v-else-if="active === 'sessions'">
+        <p v-if="runtime?.p3_enabled" class="product-card">
+          {{
+            remoteBusy
+              ? '当前会话状态、停止入口和实时统计显示在上方。'
+              : '当前没有正在运行的本次会话。'
+          }}
+          本轮不提供持久会话历史。
+        </p>
+        <SessionsPage v-else @navigate="navigate" />
+      </template>
       <SettingsPage
         v-else
         :runtime="runtime"

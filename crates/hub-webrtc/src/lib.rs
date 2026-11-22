@@ -11,6 +11,8 @@ pub mod direct_probe;
 pub mod direct_runtime;
 #[cfg(feature = "p006-turn-probe")]
 pub mod ice_policy;
+#[cfg(feature = "p3-lan")]
+pub mod input_pair;
 #[cfg(windows)]
 pub mod lan;
 pub mod lan_wire;
@@ -21,6 +23,8 @@ pub mod receiver_evidence;
 pub mod relay_client;
 #[cfg(feature = "p006-turn-probe")]
 pub mod relay_runtime;
+#[cfg(feature = "p3-lan")]
+pub mod remote_input;
 #[cfg(feature = "p006-turn-probe")]
 pub mod rendezvous_probe;
 pub mod scope;

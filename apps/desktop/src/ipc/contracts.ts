@@ -16,6 +16,7 @@ export type DeviceIdentity = Readonly<
 >;
 export interface RuntimeInfo {
   identity?: DeviceIdentity;
+  p3_enabled?: boolean;
   app_version: string;
   os: string;
   arch: string;
@@ -63,6 +64,7 @@ const stringLimits = {
   capture_backend: 192,
 } as const;
 const flags = [
+  'p3_enabled',
   'p004_enabled',
   'p004_lan_enabled',
   'p005_enabled',

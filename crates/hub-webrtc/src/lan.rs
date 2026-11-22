@@ -34,6 +34,8 @@ pub struct LanStatus {
     pub error: Option<String>,
 }
 pub struct LanSession {
+    #[cfg(feature = "p3-lan")]
+    input_enabled: AtomicBool,
     control_enabled: bool,
     control_session: Mutex<Option<String>>,
     scope: LanScope,
@@ -72,6 +74,8 @@ impl LanSession {
             return Err("INVALID_LAN_CONFIG".into());
         }
         Ok(Arc::new(Self {
+            #[cfg(feature = "p3-lan")]
+            input_enabled: AtomicBool::new(false),
             control_enabled,
             control_session: Mutex::new(if control_enabled && role == "receiver" {
                 Some(uuid::Uuid::new_v4().to_string())
@@ -109,24 +113,48 @@ impl LanSession {
         seconds: u32,
         port: u16,
     ) -> Result<(Arc<Self>, String), String> {
-        Self::host_mode(scope, seconds, port, false).await
+        Self::host_mode(scope, seconds, port, false, false).await
     }
     pub async fn host_control(
         scope: LanScope,
         seconds: u32,
         port: u16,
     ) -> Result<(Arc<Self>, String), String> {
-        Self::host_mode(scope, seconds, port, true).await
+        Self::host_mode(scope, seconds, port, true, false).await
+    }
+    #[cfg(feature = "p3-lan")]
+    pub async fn host_input(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+    ) -> Result<(Arc<Self>, String), String> {
+        Self::host_mode(scope, seconds, port, true, true).await
+    }
+    #[cfg(feature = "p3-lan")]
+    pub fn receiver_input(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        code: &str,
+    ) -> Result<Arc<Self>, String> {
+        let this = Self::receiver_control(scope, seconds, port, code)?;
+        this.input_enabled.store(true, Ordering::Release);
+        Ok(this)
     }
     async fn host_mode(
         scope: LanScope,
         seconds: u32,
         port: u16,
         enabled: bool,
+        input: bool,
     ) -> Result<(Arc<Self>, String), String> {
         let key = Key::generate();
         let display = key.display();
         let this = Self::new_mode(scope, seconds, port, "sender", key, enabled)?;
+        #[cfg(feature = "p3-lan")]
+        this.input_enabled.store(input, Ordering::Release);
+        #[cfg(not(feature = "p3-lan"))]
+        let _ = input;
         let listener = TcpListener::bind((scope.local, port))
             .await
             .map_err(|_| "LAN_LISTEN_FAILED")?;
@@ -154,6 +182,12 @@ impl LanSession {
         code: &str,
     ) -> Result<Arc<Self>, String> {
         Self::new_mode(scope, seconds, port, "receiver", Key::parse(code)?, true)
+    }
+    fn input_mode(&self) -> bool {
+        #[cfg(feature = "p3-lan")]
+        return self.input_enabled.load(Ordering::Acquire);
+        #[cfg(not(feature = "p3-lan"))]
+        false
     }
     pub fn control_session(&self) -> Option<String> {
         self.control_session
@@ -312,6 +346,9 @@ impl LanSession {
             let offer = if self.control_enabled {
                 let envelope: ControlSignal =
                     serde_json::from_str(&offer).map_err(|_| "CONTROL_SIGNAL_SCHEMA")?;
+                if envelope.input_enabled != self.input_mode() {
+                    return Err("INPUT_MODE_MISMATCH".into());
+                }
                 uuid::Uuid::parse_str(&envelope.control_session)
                     .map_err(|_| "CONTROL_SESSION_INVALID")?;
                 *self
@@ -335,7 +372,21 @@ impl LanSession {
             s.state = "negotiating".into();
             s.authenticated = true;
         });
-        let source = if self.control_enabled {
+        #[cfg(feature = "p3-lan")]
+        let input_source = if self.input_enabled.load(Ordering::Acquire) {
+            Some(Session::new_lan_input(
+                self.seconds,
+                self.scope,
+                self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?,
+            )?)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "p3-lan"))]
+        let input_source: Option<Arc<Session>> = None;
+        let source = if let Some(source) = input_source {
+            source
+        } else if self.control_enabled {
             Session::new_lan_control(
                 self.seconds,
                 self.scope,
@@ -352,6 +403,7 @@ impl LanSession {
                 serde_json::to_string(&ControlSignal {
                     sdp: answer,
                     control_session: self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?,
+                    input_enabled: self.input_mode(),
                 })
                 .map_err(|_| "CONTROL_SIGNAL_SCHEMA")?,
             )
@@ -415,6 +467,7 @@ impl LanSession {
                 serde_json::to_string(&ControlSignal {
                     sdp: offer,
                     control_session: self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?,
+                    input_enabled: self.input_mode(),
                 })
                 .map_err(|_| "CONTROL_SIGNAL_SCHEMA")?,
             )
@@ -436,6 +489,9 @@ impl LanSession {
         let answer = if self.control_enabled {
             let envelope: ControlSignal =
                 serde_json::from_str(&answer).map_err(|_| "CONTROL_SIGNAL_SCHEMA")?;
+            if envelope.input_enabled != self.input_mode() {
+                return Err("INPUT_MODE_MISMATCH".into());
+            }
             if Some(envelope.control_session) != self.control_session() {
                 return Err("CONTROL_SESSION_MISMATCH".into());
             }
@@ -531,11 +587,16 @@ impl LanSession {
     }
 }
 
+fn input_disabled(value: &bool) -> bool {
+    !*value
+}
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct ControlSignal {
     sdp: String,
     control_session: String,
+    #[serde(default, skip_serializing_if = "input_disabled")]
+    input_enabled: bool,
 }
 
 pub fn validate_metrics(data: &Value) -> Result<(), String> {

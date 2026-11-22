@@ -1,0 +1,15 @@
+{
+    "recordedAt":  "2026-11-22T20:31:09.0550031+08:00",
+    "stage":  "normal-user-readonly-instance-check",
+    "matchingInstances":  [
+                              {
+                                  "processId":  26072,
+                                  "processName":  "RemoteHub-P3-LAN",
+                                  "startedUtc":  "2026-11-22T12:30:56.8287946Z",
+                                  "programSha256":  "93f64e21caa27e44fbcb0121d19ab227be9a7b988605481c8c57a3524caf3ba2",
+                                  "responding":  true
+                              }
+                          ],
+    "agentStartedOrStoppedApp":  false,
+    "earlierLimitedInventoryHadNoInstance":  true
+}

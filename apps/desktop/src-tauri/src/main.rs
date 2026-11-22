@@ -1,7 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod experiment_origin;
-#[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+#[cfg(any(
+    feature = "p3-lan",
+    not(any(feature = "p004-probe", feature = "p006-turn-probe"))
+))]
 mod identity;
 #[cfg(not(feature = "p004-probe"))]
 mod lifecycle;
@@ -53,13 +56,17 @@ mod lease_tests {
 
 #[derive(Serialize)]
 struct RuntimeInfo {
-    #[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+    #[cfg(any(
+        feature = "p3-lan",
+        not(any(feature = "p004-probe", feature = "p006-turn-probe"))
+    ))]
     identity: identity::IdentityView,
     app_version: &'static str,
     os: &'static str,
     arch: &'static str,
     capture_backend: &'static str,
     remote_access_enabled: bool,
+    p3_enabled: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
@@ -77,7 +84,10 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
     #[cfg(feature = "p004-probe")]
     let _ = window;
     Ok(RuntimeInfo {
-        #[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+        #[cfg(any(
+            feature = "p3-lan",
+            not(any(feature = "p004-probe", feature = "p006-turn-probe"))
+        ))]
         identity: {
             use tauri::Manager;
             window.state::<identity::DesktopIdentity>().view()
@@ -91,6 +101,7 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
             "DXGI Desktop Duplication (probe on demand)"
         },
         remote_access_enabled: false,
+        p3_enabled: cfg!(all(feature = "p3-lan", not(feature = "p006-relay"))),
         p004_enabled: cfg!(feature = "p004-probe"),
         p004_lan_enabled: cfg!(feature = "p004-lan"),
         p005_enabled: cfg!(feature = "p005-control"),
@@ -107,6 +118,9 @@ async fn run_capture_probe(
     consent: bool,
     state: tauri::State<'_, std::sync::Arc<ProbeState>>,
 ) -> Result<ProbeReport, String> {
+    if cfg!(feature = "p3-lan") {
+        return Err("PRODUCT_CAPTURE_ENTRY_DISABLED".into());
+    }
     if !consent {
         return Err("CONSENT_REQUIRED: 需要同意本次本机采集".into());
     }
@@ -158,7 +172,10 @@ fn main() {
         return;
     }
     let builder = tauri::Builder::default();
-    #[cfg(not(any(feature = "p004-probe", feature = "p006-turn-probe")))]
+    #[cfg(any(
+        feature = "p3-lan",
+        not(any(feature = "p004-probe", feature = "p006-turn-probe"))
+    ))]
     let builder = builder.manage(identity::DesktopIdentity::initialize());
     #[cfg(not(feature = "p006-relay"))]
     let probe = std::sync::Arc::new(ProbeState::default());
@@ -199,7 +216,11 @@ fn main() {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
                 window.set_title(if cfg!(feature = "p005-control") {
-                    "RemoteHub · P0-05 视频与模拟控制实验 v1"
+                    if cfg!(feature = "p3-lan") {
+                        "RemoteHub · 局域网远控"
+                    } else {
+                        "RemoteHub · P0-05 视频与模拟控制实验 v1"
+                    }
                 } else {
                     "RemoteHub · P0-04b 双机视频实验 v2"
                 })?;

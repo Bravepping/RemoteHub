@@ -33,6 +33,8 @@ export interface HostControlStats {
   last_error: string | null;
 }
 export class ControlClient {
+  private inputReady = false;
+  private inputEnabled = false;
   private dc: RTCDataChannel;
   private stopped = false;
   private batchStarted = false;
@@ -59,10 +61,12 @@ export class ControlClient {
     pc: RTCPeerConnection,
     private session: string,
     private failed: (code: string) => void,
+    private manual = false,
   ) {
-    this.dc = pc.createDataChannel('control.v1', {
+    const label = manual ? 'remote-input.v1' : 'control.v1';
+    this.dc = pc.createDataChannel(label, {
       ordered: true,
-      protocol: 'control.v1',
+      protocol: label,
     });
     this.dc.onopen = () => {
       if (this.stopped) {
@@ -98,7 +102,7 @@ export class ControlClient {
   }
   private send(
     kind: 'mouse_move_sim' | 'ping',
-    extra: Record<string, number> = {},
+    extra: Record<string, unknown> = {},
   ) {
     if (this.stopped || this.dc.readyState !== 'open') return false;
     if (
@@ -110,13 +114,17 @@ export class ControlClient {
       return false;
     }
     const seq = this.stats.lastTxSeq + 1;
-    const message = JSON.stringify({
-      v: 1,
-      kind,
-      seq,
-      session_id: this.session,
-      ...extra,
-    });
+    const message = JSON.stringify(
+      this.manual
+        ? { v: 1, seq, session_id: this.session, event: extra }
+        : {
+            v: 1,
+            kind,
+            seq,
+            session_id: this.session,
+            ...extra,
+          },
+    );
     try {
       this.dc.send(message);
     } catch {
@@ -130,6 +138,11 @@ export class ControlClient {
     return true;
   }
   beginBatch(videoPlaying: boolean) {
+    if (this.manual) {
+      if (this.inputReady && !videoPlaying) this.enableInput(false);
+      this.inputReady = videoPlaying;
+      return;
+    }
     if (
       !videoPlaying ||
       this.batchStarted ||
@@ -150,6 +163,21 @@ export class ControlClient {
         y_norm: Math.floor(index / 20) / 4,
       });
     }, 50);
+  }
+  enableInput(value: boolean) {
+    if (
+      this.manual &&
+      !value &&
+      this.inputEnabled &&
+      this.dc.readyState === 'open'
+    )
+      this.send('mouse_move_sim', { kind: 'release_all' });
+    this.inputEnabled = value && this.inputReady;
+    return this.inputEnabled;
+  }
+  input(event: Record<string, unknown>) {
+    if (!this.manual || !this.inputReady || !this.inputEnabled) return false;
+    return this.send('mouse_move_sim', event);
   }
   private receive(data: unknown) {
     this.stats.messageEvents++;

@@ -6,14 +6,16 @@
 
 | 增量 | 可运行目标 | 当前状态 |
 |---|---|---|
-| P1 | Axum WebSocket 信令 + 两端握手 | 初版源码和测试已提交，**尚无编译/运行日志** |
-| P2 | DXGI → MF H.264 → WebRTC → WebView2 正式 UI 画面 | 待实施 |
-| P3 | 经被控端同意的 DataChannel + SendInput | 待实施；原版只做模拟鼠标 |
-| P4 | 配对码、身份校验、撤销及会话授权 | 待实施；P1 临时 Bearer + 随机房间不是正式配对 |
-| P5 | STUN/ICE 直连 + TURN 回退 | 待实施；原版 R06 历史问题仍开放 |
-| P6 | Windows 安装包 + 两台真实电脑验收 | 待实施 |
+| P1 | Axum WebSocket 信令 + 两端握手 | **独立服务初版代码已提交，未编译实测**；现有 LAN 产品已用临时 TCP 完成认证握手 |
+| P2 | DXGI → MF H.264 → WebRTC → WebView2 正式 UI 画面 | **已同步主线真实双机 LAN 验证**：853/900/900 帧解码呈现 |
+| P3 | 经被控端同意的 DataChannel + SendInput | **最小 LAN 英文输入已实测**；三轮共 242 发送 / 242 ACK，后两轮关闭时通道错误未闭环 |
+| P4 | 配对码、身份校验、撤销及会话授权 | **局域网临时一次性配对码可用**；长期身份绑定/撤销/正式信令认证待开发 |
+| P5 | STUN/ICE 直连 + TURN 回退 | 原版有独立实验成功记录，**尚未接入 V2 产品会话**；R06 仍 OPEN |
+| P6 | Windows 安装包 + 两台真实电脑验收 | 待实施；LAN 测试 EXE 和私有 ZIP 不是正式安装器 |
 
-P1 当前只有信令服务初版，不能宣称产品已经能远控或已经部署服务器。
+**最新同步自原版 main `d7dbc9b`（2026-11-22）**：普通产品 UI 已通过专用 `p3-lan` feature 连接真实 Windows 双机视频和有界 SendInput；三轮真实接收 final 为 853/900/900 帧、29/81/132 消息均获 ACK，用户确认英文输入同步。后两轮会话收尾 `CONTROL_CHANNEL_ERROR` 已登记为 `P3-END-01 OPEN`，独立短轮停止证据尚不完整，不能宣称 Phase 3 全部完成。原始核对依据在 `docs/PHASE3_MINIMAL_REMOTE_CONTROL_REPORT.md`。
+
+**优先顺序已调整**：先修复 P3-END-01、补齐真实断开回收与键鼠常用操作，再将独立 Axum 信令服务接入产品端，之后推进公网 ICE/TURN、配对和安装器。V2 不重复实现已验证的 LAN 视频或英文输入；目前未部署服务器，独立 Axum 服务代码尚未在目标环境编译/实际运行。
 
 ## P1：独立信令服务
 
@@ -76,7 +78,7 @@ WS Upgrade 头带 `Authorization: Bearer <临时令牌>`。host 先进入随机 
 {"type":"signal","seq":1,"signal":"offer","data":"SDP_TEST_ONLY"}
 ```
 
-后续 P2 才接入真实 SDP/ICE；当前只是消息转发，**不是 WebRTC 会话验收**。任意一方可发送 `{"type":"leave"}`。
+本独立信令程序目前只转发消息，**尚未接入真实产品会话**；主线已验证的 LAN 视频和键鼠使用现有临时 TCP 握手。后续应适配真实 SDP/ICE，不能用这段占位信令替代原生验证。任意一方可发送 `{"type":"leave"}`。
 
 ## V2 敏捷规则
 
@@ -91,9 +93,9 @@ WS Upgrade 头带 `Authorization: Bearer <临时令牌>`。host 先进入随机 
 
 - `crates/hub-capture-win`：DXGI Desktop Duplication。
 - `crates/hub-encode-win`：Media Foundation H.264。
-- `crates/hub-webrtc`：WebRTC/ICE/视频/DataChannel 实验能力。
+- `crates/hub-webrtc`：已包含产品级 LAN 视频/DataChannel、`remote_input.rs` 及严格候选校验；公网方案仍待接线。
 - `crates/hub-identity`：Ed25519 + DPAPI 本地身份。
-- `apps/desktop`：Tauri v2 / Vue 3 客户端。
+- `apps/desktop`：Tauri v2 / Vue 3，`RemoteWorkspace.vue` 已有真实 LAN 会话 UI；产品需 `p3-lan` 显式 feature。
 - `crates/hub-rendezvous-probe`：现成 Axum/WebSocket 依赖；V2 新增独立二进制入口。
 
 Sunshine、Moonlight V+ PC、EasyTier 不是 V2 启动的必要依赖，后续如有需要再实现可选兼容。

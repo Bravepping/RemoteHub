@@ -1,0 +1,24 @@
+
+running 1 test
+test video::tests::constrained_baseline_level31_is_a_baseline_decoder_subset_without_sps_rewrite ... FAILED
+
+failures:
+
+---- video::tests::constrained_baseline_level31_is_a_baseline_decoder_subset_without_sps_rewrite stdout ----
+
+thread 'video::tests::constrained_baseline_level31_is_a_baseline_decoder_subset_without_sps_rewrite' (25840) panicked at crates\hub-webrtc\src\video.rs:147:43:
+Baseline-family constraints require no extra decoder tools: "SPS_PROFILE_INCOMPATIBLE_42801f"
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    video::tests::constrained_baseline_level31_is_a_baseline_decoder_subset_without_sps_rewrite
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 30 filtered out; finished in 0.00s
+
+   Compiling hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
+    Finished `test` profile [unoptimized] target(s) in 2.77s
+     Running unittests src\lib.rs (target\debug\build\hub-webrtc/50749a5b7ba6b570\out\hub_webrtc-50749a5b7ba6b570.exe)
+error: test failed, to rerun pass `-p hub-webrtc --lib`
+
+EXIT=101

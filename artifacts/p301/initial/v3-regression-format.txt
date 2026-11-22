@@ -1,0 +1,13 @@
+build-matrix-unit: PASS
+build-matrix-resolved: PASS
+frontend-typecheck: PASS
+frontend-unit: PASS
+frontend-build: PASS
+frontend-lint: PASS
+browser: PASS
+fmt: FAIL
+P101_CHECKS_FAILED_SEE_LOCAL_RESULTS
+(node:25988) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+EXIT=1

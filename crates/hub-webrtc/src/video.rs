@@ -43,9 +43,12 @@ impl Packetizer {
                 .and_then(|i| normalized.get(i + 5..i + 8))
                 .ok_or("TRUNCATED_SPS")?;
             // H.264 7.4.2.1.1 requires decoders to ignore constraint_set5 for profile_idc=66.
-            // AMD emits 42041f on this driver. Keep the original SPS unchanged and disclose it.
-            // This is decoder compatibility, not a claim that the encoder's reserved flag conforms.
-            if profile[0] != 0x42 || profile[1] & !0x04 != 0 || profile[2] != 0x1f {
+            // RFC 6184 section 8.1, Table 5: 42/x0xx0000 is Baseline and
+            // 42/x1xx0000 is Constrained Baseline, a subset of Baseline decoder tools.
+            // Keep the fixed level 3.1, reject other profile_idc / low reserved bits,
+            // and retain the existing documented AMD constraint_set5 compatibility.
+            // Never rewrite the source SPS or alter the negotiated SDP profile.
+            if profile[0] != 0x42 || profile[1] & !0xf4 != 0 || profile[2] != 0x1f {
                 return Err(format!(
                     "SPS_PROFILE_INCOMPATIBLE_{:02x}{:02x}{:02x}",
                     profile[0], profile[1], profile[2]
@@ -138,6 +141,38 @@ mod tests {
             p.packets(frame(333333), 102).unwrap()[0].header.timestamp,
             3000
         );
+    }
+    #[test]
+    fn constrained_baseline_level31_is_a_baseline_decoder_subset_without_sps_rewrite() {
+        for constraints in [0x00, 0x80, 0x40, 0xc0, 0xe0, 0xf0, 0x04, 0xc4] {
+            let mut au = frame(0);
+            au.annex_b[6] = constraints;
+            let mut p = Packetizer::default();
+            let packets = p
+                .packets(au, 102)
+                .expect("Baseline-family constraints require no extra decoder tools");
+            assert_eq!(
+                p.source_sps_profile_level_id,
+                Some(format!("42{constraints:02x}1f"))
+            );
+            assert!(packets.iter().any(|packet| packet
+                .payload
+                .windows(4)
+                .any(|b| b == [0x67, 0x42, constraints, 0x1f])));
+            assert_eq!(p.ignored_constraint_set5, constraints & 4 != 0);
+        }
+        for (idc, constraints, level) in [
+            (0x4d, 0xc0, 0x1f),
+            (0x64, 0, 0x1f),
+            (0x42, 0xc0, 0x20),
+            (0x42, 0xc1, 0x1f),
+            (0x42, 0xc2, 0x1f),
+            (0x42, 0xc8, 0x1f),
+        ] {
+            let mut au = frame(0);
+            au.annex_b[5..8].copy_from_slice(&[idc, constraints, level]);
+            assert!(Packetizer::default().packets(au, 102).is_err());
+        }
     }
     #[test]
     fn amd_reserved_constraint5_is_disclosed_and_never_rewrites_the_sps() {

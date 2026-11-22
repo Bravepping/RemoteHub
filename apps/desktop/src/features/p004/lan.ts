@@ -1,4 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
+import { publishInputOffer } from './inputOffer';
 import {
   ControlClient,
   type BrowserControlStats,
@@ -29,6 +30,7 @@ export interface LanStatus {
   error: string | null;
 }
 export interface LanConfig {
+  realControl?: boolean;
   controlSim?: boolean;
   role: 'sender' | 'receiver';
   consent: boolean;
@@ -74,6 +76,13 @@ export function selectedPeer(
 export class LanProbe {
   private control?: ControlClient;
   private controlSession?: string;
+  private finalReceiver?: LanReceiver;
+  private candidateSummary?: {
+    before: number;
+    mdns: number;
+    published: number;
+    mdnsPublished: number;
+  };
   private id?: string;
   private pc?: RTCPeerConnection;
   private timer?: ReturnType<typeof setTimeout>;
@@ -127,12 +136,17 @@ export class LanProbe {
       bundlePolicy: 'max-bundle',
     });
     this.pc = pc;
-    if (config.controlSim) {
+    if (config.controlSim || config.realControl) {
       if (!this.controlSession) throw new Error('CONTROL_CONTEXT_MISSING');
-      this.control = new ControlClient(pc, this.controlSession, (code) => {
-        this.failed(code);
-        void this.stop();
-      });
+      this.control = new ControlClient(
+        pc,
+        this.controlSession,
+        (code) => {
+          this.failed(code);
+          void this.stop();
+        },
+        config.realControl ?? false,
+      );
     }
     pc.ontrack = (event) => {
       if (this.stopped) return;
@@ -171,9 +185,16 @@ export class LanProbe {
       };
     });
     if (this.stopped) return;
+    const publication = config.realControl
+      ? publishInputOffer(pc.localDescription!.sdp, config.localIp)
+      : undefined;
+    this.candidateSummary = publication?.summary;
+    if (publication && publication.summary.published === 0)
+      throw new Error('INPUT_NO_PUBLISHED_HOST_CANDIDATE');
     const answer = await invoke<string>('p004_lan_signal', {
       sessionId: this.id,
-      offer: lanOffer(pc.localDescription!.sdp, config.localIp),
+      offer:
+        publication?.sdp ?? lanOffer(pc.localDescription!.sdp, config.localIp),
     });
     if (this.stopped) return;
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
@@ -261,6 +282,7 @@ export class LanProbe {
     }
   }
   stop(): Promise<void> {
+    this.control?.enableInput(false);
     if (this.stopping) return this.stopping;
     this.stopped = true;
     clearTimeout(this.timer);
@@ -268,9 +290,22 @@ export class LanProbe {
     this.stopping = this.finish();
     return this.stopping;
   }
+  enableInput(value: boolean) {
+    return this.control?.enableInput(value) ?? false;
+  }
+  input(event: Record<string, unknown>) {
+    return this.control?.input(event) ?? false;
+  }
   private async finish() {
     this.update('stopping');
     try {
+      if (this.config?.realControl && this.pc) {
+        try {
+          this.finalReceiver = await this.receiverSnapshot();
+        } catch {
+          this.finalReceiver = undefined;
+        }
+      }
       await this.control?.close();
       if (this.id) await invoke('p004_lan_stop', { sessionId: this.id });
       const tracks = this.pc?.getReceivers().map((r) => r.track) ?? [];
@@ -289,12 +324,18 @@ export class LanProbe {
           sessionId: this.id,
           browserClosed: closed,
           ...(this.control ? { control: this.control.snapshot() } : {}),
+          ...(this.config?.realControl
+            ? {
+                receiverFinal: this.finalReceiver ?? null,
+                candidateSummary: this.candidateSummary ?? null,
+              }
+            : {}),
         });
         this.saved(path);
         this.update(
           status.error ? 'failed' : 'stopped',
           status,
-          status.receiver_samples.at(-1),
+          this.finalReceiver ?? status.receiver_samples.at(-1),
         );
       } else this.update('stopped');
     } catch (error) {

@@ -49,6 +49,8 @@ impl LanState {
 pub struct Config {
     #[serde(default)]
     control_sim: bool,
+    #[serde(default)]
+    real_control: bool,
     role: String,
     consent: bool,
     local_ip: String,
@@ -61,6 +63,9 @@ impl Config {
     fn validate(&self) -> Result<LanScope, String> {
         if self.control_sim && !cfg!(feature = "p005-control") {
             return Err("CONTROL_FEATURE_DISABLED".into());
+        }
+        if self.real_control && (!cfg!(feature = "p3-lan") || self.control_sim) {
+            return Err("INPUT_FEATURE_OR_MODE_DENIED".into());
         }
         if !self.consent {
             return Err("CONSENT_REQUIRED".into());
@@ -151,7 +156,13 @@ pub async fn p004_lan_start(
     } else {
         "接收并播放来自"
     };
-    let control_text = if config.control_sim {
+    let control_text = if config.real_control {
+        if config.role == "sender" {
+            "\n允许指定对端在本次短会话通过 DataChannel 实际操作本机主屏鼠标和基本键盘。可随时点停止、关窗或在本机按 Ctrl+Alt+F12 紧急结束。不会授予无人值守或管理员权限。"
+        } else {
+            "\n本机将接收另一台主屏画面；只有你主动启用本次键鼠控制后，操作才经 DataChannel 发送给被控电脑。本机不会接收输入注入。Esc或画面失焦会暂停控制。"
+        }
+    } else if config.control_sim {
         "\n同时允许 control.v1 通道传输模拟鼠标坐标与确认，仅记录统计，不执行实际键盘鼠标输入。"
     } else {
         ""
@@ -161,7 +172,11 @@ pub async fn p004_lan_start(
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
             &HSTRING::from(message),
-            &HSTRING::from("RemoteHub · 本次双机视频实验"),
+            &HSTRING::from(if cfg!(feature = "p3-lan") {
+                "RemoteHub · 本次局域网远控授权"
+            } else {
+                "RemoteHub · 本次双机视频实验"
+            }),
             MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION,
         ) == IDYES
     })
@@ -174,7 +189,17 @@ pub async fn p004_lan_start(
         return Err("WINDOW_CLOSING".into());
     }
     let (session, code) = if config.role == "sender" {
-        let (s, c) = if config.control_sim {
+        #[cfg(feature = "p3-lan")]
+        let input = if config.real_control {
+            Some(LanSession::host_input(scope, config.seconds, config.port).await?)
+        } else {
+            None
+        };
+        #[cfg(not(feature = "p3-lan"))]
+        let input: Option<(Arc<LanSession>, String)> = None;
+        let (s, c) = if let Some(input) = input {
+            input
+        } else if config.control_sim {
             LanSession::host_control(scope, config.seconds, config.port).await?
         } else {
             LanSession::host(scope, config.seconds, config.port).await?
@@ -182,7 +207,21 @@ pub async fn p004_lan_start(
         (s, Some(c))
     } else {
         (
-            if config.control_sim {
+            if config.real_control {
+                #[cfg(feature = "p3-lan")]
+                {
+                    LanSession::receiver_input(
+                        scope,
+                        config.seconds,
+                        config.port,
+                        config.pairing_code.as_deref().unwrap_or_default(),
+                    )?
+                }
+                #[cfg(not(feature = "p3-lan"))]
+                {
+                    return Err("INPUT_FEATURE_DISABLED".into());
+                }
+            } else if config.control_sim {
                 LanSession::receiver_control(
                     scope,
                     config.seconds,
@@ -208,8 +247,15 @@ pub async fn p004_lan_start(
     let control_session = session.control_session();
     let report_id = id.clone();
     let receiver = config.role == "receiver";
+    #[cfg(feature = "p3-lan")]
+    let input_host = config.real_control && config.role == "sender";
     tauri::async_runtime::spawn(async move {
         for tick in 0..320 {
+            #[cfg(feature = "p3-lan")]
+            if input_host && hub_webrtc::remote_input::Injector::emergency_pressed() {
+                session.cancel();
+                let _ = session.stop().await;
+            }
             let snapshot = session.stats();
             let _ = write_report(&report_id, "progress", &snapshot, None);
             if snapshot.resources_released {
@@ -280,6 +326,8 @@ pub fn p004_lan_save(
     session_id: String,
     browser_closed: bool,
     control: Option<hub_webrtc::control::BrowserStats>,
+    receiver_final: Option<serde_json::Value>,
+    candidate_summary: Option<CandidateSummary>,
 ) -> Result<String, String> {
     crate::p004::origin(&window)?;
     let session = find(&state, &session_id)?;
@@ -290,7 +338,26 @@ pub fn p004_lan_save(
     if !status.resources_released {
         return Err("LAN_CLEANUP_PENDING".into());
     }
-    write_report(&session_id, "final", &status, Some(browser_closed))
+    if let Some(value) = &receiver_final {
+        if status.role != "receiver" {
+            return Err("RECEIVER_FINAL_ROLE_DENIED".into());
+        }
+        hub_webrtc::lan::validate_metrics(value)?;
+    }
+    if let Some(value) = &candidate_summary {
+        if !cfg!(feature = "p3-lan") || status.role != "receiver" {
+            return Err("CANDIDATE_SUMMARY_ROLE_DENIED".into());
+        }
+        value.validate()?;
+    }
+    write_report_with_final(
+        &session_id,
+        "final",
+        &status,
+        Some(browser_closed),
+        receiver_final.as_ref(),
+        candidate_summary.as_ref(),
+    )
 }
 fn write_report(
     id: &str,
@@ -298,23 +365,58 @@ fn write_report(
     status: &LanStatus,
     browser_closed: Option<bool>,
 ) -> Result<String, String> {
+    write_report_with_final(id, event, status, browser_closed, None, None)
+}
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CandidateSummary {
+    before: u16,
+    mdns: u16,
+    published: u16,
+    mdns_published: u16,
+}
+impl CandidateSummary {
+    fn validate(&self) -> Result<(), String> {
+        if self.before > 128
+            || self.mdns > self.before
+            || self.published > self.before
+            || self.mdns_published > self.mdns
+            || self.mdns_published > self.published
+        {
+            return Err("CANDIDATE_SUMMARY_INVALID".into());
+        }
+        Ok(())
+    }
+}
+fn write_report_with_final(
+    id: &str,
+    event: &str,
+    status: &LanStatus,
+    browser_closed: Option<bool>,
+    receiver_final: Option<&serde_json::Value>,
+    candidate_summary: Option<&CandidateSummary>,
+) -> Result<String, String> {
     let dir = std::env::current_exe()
         .map_err(|_| "REPORT_DIRECTORY_UNAVAILABLE")?
         .parent()
         .ok_or("REPORT_DIRECTORY_UNAVAILABLE")?
-        .join(if cfg!(feature = "p005-control") {
+        .join(if cfg!(feature = "p3-lan") {
+            "artifacts/private/p3"
+        } else if cfg!(feature = "p005-control") {
             "artifacts/private/p005"
         } else {
             "artifacts/private/p004b"
         });
     std::fs::create_dir_all(&dir).map_err(|_| "REPORT_DIRECTORY_FAILED")?;
     let name = format!("{id}-{event}.json");
-    let tag = if cfg!(feature = "p005-control") {
+    let tag = if cfg!(feature = "p3-lan") {
+        "p3-lan-v3"
+    } else if cfg!(feature = "p005-control") {
         "p005-v1"
     } else {
         "p004b-v2"
     };
-    let data=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":tag,"appVersion":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_SERIALIZATION_FAILED")?;
+    let data=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":tag,"appVersion":env!("CARGO_PKG_VERSION"),"os":std::env::consts::OS,"arch":std::env::consts::ARCH,"native":status,"browserClosed":browser_closed,"receiverFinal":receiver_final,"browserCandidateSummary":candidate_summary})).map_err(|_|"REPORT_SERIALIZATION_FAILED")?;
     if data.len() > 128 * 1024 {
         return Err("REPORT_TOO_LARGE".into());
     }
@@ -329,7 +431,9 @@ fn write_report(
     file.write_all(&data).map_err(|_| "REPORT_WRITE_FAILED")?;
     Ok(format!(
         "artifacts/private/{}/{name}",
-        if cfg!(feature = "p005-control") {
+        if cfg!(feature = "p3-lan") {
+            "p3"
+        } else if cfg!(feature = "p005-control") {
             "p005"
         } else {
             "p004b"
@@ -379,8 +483,28 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
 mod tests {
     use super::*;
     #[test]
+    fn candidate_summary_is_bounded_counts_only() {
+        let valid = serde_json::json!({"before":2,"mdns":1,"published":1,"mdnsPublished":1});
+        assert!(serde_json::from_value::<CandidateSummary>(valid.clone())
+            .unwrap()
+            .validate()
+            .is_ok());
+        for (key, value) in [("before", 129), ("published", 3), ("mdnsPublished", 2)] {
+            let mut invalid = valid.clone();
+            invalid[key] = value.into();
+            assert!(serde_json::from_value::<CandidateSummary>(invalid)
+                .unwrap()
+                .validate()
+                .is_err());
+        }
+        let mut invalid = valid;
+        invalid["address"] = "excluded".into();
+        assert!(serde_json::from_value::<CandidateSummary>(invalid).is_err());
+    }
+    #[test]
     fn native_lan_config_rejects_absent_consent_public_peer_and_unbounded_duration() {
         let mut config = Config {
+            real_control: false,
             control_sim: false,
             role: "sender".into(),
             consent: false,
@@ -397,6 +521,11 @@ mod tests {
         assert!(config.validate().is_err());
         config.peer_ip = "192.168.10.3".into();
         config.seconds = 31;
+        assert!(config.validate().is_err());
+        config.seconds = 30;
+        config.real_control = true;
+        assert_eq!(config.validate().is_ok(), cfg!(feature = "p3-lan"));
+        config.control_sim = true;
         assert!(config.validate().is_err());
     }
 }

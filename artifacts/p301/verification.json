@@ -1,0 +1,39 @@
+{
+  "recordedAt": "2026-11-22T21:25:13.169877+08:00",
+  "limitedGoalEvidenceConsistent": true,
+  "applicationSourceMatchesPackage": true,
+  "privateArchiveCheckedLocally": true,
+  "independentReceiverSessions": 3,
+  "observedFrames": [
+    853,
+    900,
+    900
+  ],
+  "observedSentAck": [
+    [
+      29,
+      29
+    ],
+    [
+      81,
+      81
+    ],
+    [
+      132,
+      132
+    ]
+  ],
+  "receiverResourcesReleasedAll": true,
+  "userConfirmedRealEnglishInput": true,
+  "userConfirmedFourCleanupScenarios": true,
+  "independentPerScenarioCleanupCoverage": "LIMITED_NOT_FOUR_MAPPED_SHORT_ROUNDS",
+  "shutdownChannelErrorSessions": 2,
+  "shutdownChannelErrorRisk": "OPEN",
+  "hostIndependentFullReports": "NOT_COLLECTED",
+  "fullPhase3Exit": "NOT_CLAIMED",
+  "multiDpiPhysicalMatrix": "NOT_RUN",
+  "historicalR06": "OPEN",
+  "privacyEvidenceFilesChecked": 98,
+  "privacyToolSourcesChecked": 4,
+  "cloudStarted": false
+}

@@ -1,0 +1,16 @@
+{
+  "observedAt": "2026-11-22T21:11:03.317986+08:00",
+  "buildTag": "p3-lan-v3",
+  "method": "CIM_READ_ONLY",
+  "matchingInstances": [
+    {
+      "processId": 19320,
+      "programSha256": "82249657a33cb1856a09795ad7bb082f372c6160f5613492df08750f4a37d968"
+    }
+  ],
+  "otherHashInstances": 0,
+  "windowVisibleSource": "USER_RESPONSE",
+  "initialGetProcessQueries": "NOT_OBSERVED_NOT_LAUNCH_FAILURE",
+  "agentStartedProgram": false,
+  "agentStartedCaptureOrInput": false
+}

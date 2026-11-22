@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
+p3-lan = ["p005-control", "hub-webrtc/p3-lan"]
 custom-protocol = ["tauri/custom-protocol"]
 p004-probe = ["dep:hub-webrtc", "dep:tokio", "dep:uuid", "dep:windows", "dep:serde_json"]
 p004-lan = ["p004-probe"]

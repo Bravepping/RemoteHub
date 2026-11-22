@@ -1,0 +1,6 @@
+src/features/desktop/remoteInput.test.ts(31,29): error TS2352: Conversion of type 'ArrayBufferView<ArrayBuffer>' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+src/features/desktop/remoteInput.test.ts(37,16): error TS2352: Conversion of type 'ArrayBufferView<ArrayBuffer>' to type 'string' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+[ELIFECYCLE] Command failed with exit code 2.
+$ vue-tsc --noEmit
+
+EXIT=2

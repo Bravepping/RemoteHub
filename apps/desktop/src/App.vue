@@ -9,9 +9,10 @@ const desktop = useDesktopStore();
 const { runtime, loading, status, feedback } = storeToRefs(desktop);
 const experiment = computed(() =>
   Boolean(
-    runtime.value?.p004_enabled ||
-    runtime.value?.p004_lan_enabled ||
-    runtime.value?.p006_enabled,
+    !runtime.value?.p3_enabled &&
+    (runtime.value?.p004_enabled ||
+      runtime.value?.p004_lan_enabled ||
+      runtime.value?.p006_enabled),
   ),
 );
 const refresh = () => desktop.refresh();
