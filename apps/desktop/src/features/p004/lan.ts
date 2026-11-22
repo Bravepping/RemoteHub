@@ -40,6 +40,17 @@ export interface LanConfig {
   port: number;
   pairingCode?: string;
 }
+
+// The Rust LAN path authenticates the peer's finish/stop messages. Do not
+// infer graceful shutdown solely from the browser's DataChannel error event.
+function authenticatedClosing(status: LanStatus): boolean {
+  return (
+    status.authenticated &&
+    !status.error &&
+    (status.state === 'finishing' ||
+      (status.state === 'stopped' && status.resources_released))
+  );
+}
 export function lanOffer(sdp: string, localIp: string): string {
   return sdp
     .split(/\r?\n/)
@@ -91,6 +102,7 @@ export class LanProbe {
   private started = performance.now();
   private firstFrame: number | null = null;
   private lastMetric = 0;
+  private controlErrorDeadline?: number;
   private config?: LanConfig;
   constructor(
     private video: HTMLVideoElement,
@@ -142,10 +154,19 @@ export class LanProbe {
         pc,
         this.controlSession,
         (code) => {
-          this.failed(code);
-          void this.stop();
+          if (!this.stopped) {
+            this.failed(code);
+            void this.stop();
+          }
         },
         config.realControl ?? false,
+        config.realControl
+          ? () => {
+              // Local input is already revoked. Give authenticated teardown a
+              // short, bounded opportunity to explain this transport event.
+              this.controlErrorDeadline = performance.now() + 1000;
+            }
+          : undefined,
       );
     }
     pc.ontrack = (event) => {
@@ -239,33 +260,73 @@ export class LanProbe {
   private async poll() {
     if (this.stopped || !this.id) return;
     try {
-      const status = await invoke<LanStatus>('p004_lan_stats', {
+      let status = await invoke<LanStatus>('p004_lan_stats', {
         sessionId: this.id,
       });
       if (this.stopped) return;
+      if (this.config?.realControl && authenticatedClosing(status)) {
+        this.control?.revoke();
+        this.controlErrorDeadline = undefined;
+      } else if (
+        this.controlErrorDeadline !== undefined &&
+        performance.now() >= this.controlErrorDeadline &&
+        !status.error
+      ) {
+        this.control?.confirmChannelError();
+        return;
+      }
       let receiver: LanReceiver | undefined;
       if (this.pc) {
-        receiver = await this.receiverSnapshot();
+        try {
+          receiver = await this.receiverSnapshot();
+        } catch (error) {
+          if (
+            !this.config?.realControl ||
+            !authenticatedClosing(status) ||
+            String(error).includes('BROWSER_SELECTED_OFF_PEER')
+          )
+            throw error;
+        }
         if (this.stopped) return;
         if (
+          receiver &&
           !status.resources_released &&
           performance.now() - this.lastMetric >= 450
         ) {
-          await invoke('p004_lan_metrics', {
-            sessionId: this.id,
-            data: receiver,
-          });
+          try {
+            await invoke('p004_lan_metrics', {
+              sessionId: this.id,
+              data: receiver,
+            });
+          } catch (error) {
+            if (
+              !this.config?.realControl ||
+              !String(error).includes('RECEIVER_STOPPED')
+            )
+              throw error;
+            // Stop can land between the status sample and the metrics IPC.
+            status = await invoke<LanStatus>('p004_lan_stats', {
+              sessionId: this.id,
+            });
+            if (!authenticatedClosing(status)) throw error;
+            this.control?.revoke();
+          }
+          if (this.stopped) return;
           this.lastMetric = performance.now();
         }
       } else receiver = status.receiver_samples.at(-1);
       const playing =
         (receiver?.framesDecoded ?? 0) > 0 && (receiver?.videoWidth ?? 0) > 0;
-      if (!status.resources_released)
+      const finishing =
+        !!this.config?.realControl && authenticatedClosing(status);
+      if (!status.resources_released && !finishing)
         this.control?.beginBatch(
           playing && receiver?.peerMatches === true && !this.video.paused,
         );
       this.update(
-        playing && !status.resources_released ? 'playing' : status.state,
+        playing && !status.resources_released && !finishing
+          ? 'playing'
+          : status.state,
         status,
         receiver,
       );
@@ -282,9 +343,10 @@ export class LanProbe {
     }
   }
   stop(): Promise<void> {
-    this.control?.enableInput(false);
     if (this.stopping) return this.stopping;
     this.stopped = true;
+    this.control?.enableInput(false);
+    this.control?.revoke();
     clearTimeout(this.timer);
     this.code('');
     this.stopping = this.finish();
@@ -296,18 +358,35 @@ export class LanProbe {
   input(event: Record<string, unknown>) {
     return this.control?.input(event) ?? false;
   }
+  private async readFinalReceiver(): Promise<LanReceiver | undefined> {
+    if (!this.config?.realControl || !this.pc) return undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      return await Promise.race([
+        this.receiverSnapshot(),
+        new Promise<undefined>((resolve) => {
+          timer = setTimeout(resolve, 750);
+        }),
+      ]);
+    } catch {
+      return undefined;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   private async finish() {
     this.update('stopping');
     try {
-      if (this.config?.realControl && this.pc) {
-        try {
-          this.finalReceiver = await this.receiverSnapshot();
-        } catch {
-          this.finalReceiver = undefined;
-        }
-      }
+      // Send an authenticated LAN stop before closing the browser channel. Take
+      // the final browser reading while the PC is still available.
+      const stopNative = this.id
+        ? invoke('p004_lan_stop', { sessionId: this.id })
+        : Promise.resolve();
+      [, this.finalReceiver] = await Promise.all([
+        stopNative,
+        this.readFinalReceiver(),
+      ]);
       await this.control?.close();
-      if (this.id) await invoke('p004_lan_stop', { sessionId: this.id });
       const tracks = this.pc?.getReceivers().map((r) => r.track) ?? [];
       tracks.forEach((t) => t.stop());
       this.pc?.close();

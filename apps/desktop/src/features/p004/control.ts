@@ -62,6 +62,7 @@ export class ControlClient {
     private session: string,
     private failed: (code: string) => void,
     private manual = false,
+    private classifyChannelError?: () => void,
   ) {
     const label = manual ? 'remote-input.v1' : 'control.v1';
     this.dc = pc.createDataChannel(label, {
@@ -81,12 +82,16 @@ export class ControlClient {
     };
     this.dc.onerror = () => {
       this.stats.errorEvents++;
-      if (!this.stopped) this.fail('CONTROL_CHANNEL_ERROR');
+      if (this.stopped) return;
+      if (this.classifyChannelError) {
+        this.revoke();
+        this.classifyChannelError();
+      } else this.confirmChannelError();
     };
     this.dc.onclose = () => {
       this.stats.closeEvents++;
       this.stats.state = this.stats.lastError ? 'failed' : 'closed';
-      clearInterval(this.timer);
+      this.revoke();
     };
   }
   snapshot(): BrowserControlStats {
@@ -97,8 +102,11 @@ export class ControlClient {
     this.stats.lastError = code;
     this.stats.anomalies++;
     this.stats.state = 'failed';
-    clearInterval(this.timer);
+    this.revoke();
     this.failed(code);
+  }
+  confirmChannelError() {
+    this.fail('CONTROL_CHANNEL_ERROR');
   }
   private send(
     kind: 'mouse_move_sim' | 'ping',
@@ -165,14 +173,18 @@ export class ControlClient {
     }, 50);
   }
   enableInput(value: boolean) {
-    if (
+    const release =
       this.manual &&
       !value &&
       this.inputEnabled &&
-      this.dc.readyState === 'open'
-    )
-      this.send('mouse_move_sim', { kind: 'release_all' });
-    this.inputEnabled = value && this.inputReady;
+      this.dc.readyState === 'open';
+    this.inputEnabled =
+      this.manual &&
+      value &&
+      this.inputReady &&
+      !this.stopped &&
+      this.dc.readyState === 'open';
+    if (release) this.send('mouse_move_sim', { kind: 'release_all' });
     return this.inputEnabled;
   }
   input(event: Record<string, unknown>) {
@@ -214,6 +226,8 @@ export class ControlClient {
   }
   revoke() {
     this.stopped = true;
+    this.inputReady = false;
+    this.inputEnabled = false;
     clearInterval(this.timer);
     this.stats.sendClosed = true;
   }

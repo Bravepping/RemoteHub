@@ -1,6 +1,7 @@
 use crate::control::{ControlStats, Protocol, LABEL};
 use hub_encode_win::lifecycle::StopToken;
 use std::{
+    future::Future,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex,
@@ -42,10 +43,29 @@ mod input_tests {
         assert_eq!(endpoint.stats().accepted_moves, 1);
         assert!(endpoint.cleanup_complete());
     }
+
+    #[test]
+    fn draining_never_reopens_input_and_releases_empty_injector() {
+        let id = uuid::Uuid::new_v4().to_string();
+        let stop = StopToken::default();
+        let endpoint = Endpoint::new_input(id.clone(), stop.clone(), 30).unwrap();
+        endpoint.approve_verified_path();
+        endpoint.begin_input_drain();
+        endpoint.approve_verified_path();
+        let release = serde_json::json!({
+            "v":1,"seq":1,"session_id":id,"event":{"kind":"release_all"},
+        })
+        .to_string();
+        assert!(endpoint.process(release.as_bytes(), true).is_err());
+        assert!(!stop.is_stopped());
+        assert!(endpoint.cleanup_complete());
+    }
 }
 pub struct Endpoint {
     #[cfg(feature = "p3-lan")]
     input_release_failed: AtomicBool,
+    #[cfg(feature = "p3-lan")]
+    input_quiesced: AtomicBool,
     #[cfg(feature = "p3-lan")]
     input: Mutex<Option<InputLane>>,
     close_grace: Duration,
@@ -91,6 +111,23 @@ impl Endpoint {
             }
         }
     }
+    #[cfg(feature = "p3-lan")]
+    pub(crate) fn begin_input_drain(&self) {
+        self.input_quiesced.store(true, Ordering::Release);
+        self.revoke_input();
+    }
+
+    fn input_quiesced(&self) -> bool {
+        #[cfg(feature = "p3-lan")]
+        {
+            self.input_quiesced.load(Ordering::Acquire)
+        }
+        #[cfg(not(feature = "p3-lan"))]
+        {
+            false
+        }
+    }
+
     fn label(&self) -> &'static str {
         #[cfg(feature = "p3-lan")]
         if self.is_input() {
@@ -114,7 +151,9 @@ impl Endpoint {
             let mut lane = self.input.lock().map_err(|_| "INPUT_STATE_FAILED")?;
             if let Some(lane) = lane.as_mut() {
                 // Read revocation after acquiring the same lock used by release/stop.
-                let permitted = !self.stop.is_stopped() && self.permitted.load(Ordering::Acquire);
+                let permitted = !self.stop.is_stopped()
+                    && !self.input_quiesced()
+                    && self.permitted.load(Ordering::Acquire);
                 let result = lane.protocol.process(
                     bytes,
                     text,
@@ -176,7 +215,7 @@ impl Endpoint {
     }
     #[cfg(any(feature = "p006-relay", feature = "p3-lan"))]
     pub(crate) fn approve_verified_path(&self) {
-        if !self.stop.is_stopped() {
+        if !self.stop.is_stopped() && !self.input_quiesced() {
             self.permitted.store(true, Ordering::Release);
         }
     }
@@ -190,6 +229,8 @@ impl Endpoint {
         Ok(Arc::new(Self {
             #[cfg(feature = "p3-lan")]
             input_release_failed: AtomicBool::new(false),
+            #[cfg(feature = "p3-lan")]
+            input_quiesced: AtomicBool::new(false),
             #[cfg(feature = "p3-lan")]
             input: Mutex::new(None),
             close_grace: Duration::ZERO,
@@ -226,9 +267,13 @@ impl Endpoint {
         self.update(|s| s.task_joined = true);
     }
     pub fn accept(&self, channel: Arc<dyn DataChannel>) {
-        if self.stop.is_stopped()
-            || self.claimed.swap(true, Ordering::AcqRel)
-            || self.incoming.try_send(channel).is_err()
+        // The authenticated peer can finish DCEP at the same moment as local
+        // teardown. No worker may claim permission after the stop token is set.
+        if self.stop.is_stopped() {
+            return;
+        }
+        if (self.claimed.swap(true, Ordering::AcqRel) || self.incoming.try_send(channel).is_err())
+            && !self.stop.is_stopped()
         {
             self.fail("CONTROL_CHANNEL_NOT_ALLOWED");
         }
@@ -265,8 +310,10 @@ impl Endpoint {
         let _ = timeout(Duration::from_secs(1), channel.close()).await;
         let close = timeout(Duration::from_millis(800), async {
             while let Some(event) = channel.poll().await {
-                if matches!(event, DataChannelEvent::OnClose) {
-                    return true;
+                match event {
+                    DataChannelEvent::OnClose => return true,
+                    DataChannelEvent::OnError => self.update(|s| s.error_events += 1),
+                    _ => (),
                 }
             }
             false
@@ -282,6 +329,9 @@ impl Endpoint {
         });
     }
     async fn events(&self, channel: &Arc<dyn DataChannel>) -> Result<(), String> {
+        if self.stop.is_stopped() {
+            return Ok(());
+        }
         let valid = timeout(Duration::from_secs(1), async {
             Ok::<bool, webrtc::error::Error>(
                 channel.label().await? == self.label()
@@ -293,9 +343,36 @@ impl Endpoint {
             )
         })
         .await;
+        if self.stop.is_stopped() {
+            return Ok(());
+        }
         if !matches!(valid, Ok(Ok(true))) {
             return Err("CONTROL_CHANNEL_PROPERTIES".into());
         }
+        self.event_loop(
+            || channel.poll(),
+            |text| async move {
+                timeout(Duration::from_millis(500), channel.try_send_text(&text))
+                    .await
+                    .map_err(|_| "CONTROL_SEND_TIMEOUT")?
+                    .map_err(|_| "CONTROL_SEND_FAILED")
+                    .map(|_| ())
+            },
+        )
+        .await
+    }
+
+    async fn event_loop<Poll, Send, Event, Sent>(
+        &self,
+        mut poll: Poll,
+        mut send: Send,
+    ) -> Result<(), String>
+    where
+        Poll: FnMut() -> Event,
+        Event: Future<Output = Option<DataChannelEvent>>,
+        Send: FnMut(String) -> Sent,
+        Sent: Future<Output = Result<(), &'static str>>,
+    {
         loop {
             #[cfg(feature = "p3-lan")]
             if self.is_input() && crate::remote_input::Injector::emergency_pressed() {
@@ -304,24 +381,184 @@ impl Endpoint {
             if self.stop.is_stopped() {
                 return Ok(());
             }
-            tokio::select! {
-             event=channel.poll()=>match event{
-              Some(DataChannelEvent::OnOpen)=>self.update(|s|{s.open_events+=1;s.state="open".into();}),
-              Some(DataChannelEvent::OnMessage(message))=>{
-               self.update(|s|s.message_events+=1);
-               let response=self.process(&message.data,message.is_string)?;
-               let text=serde_json::to_string(&response).map_err(|_|"CONTROL_SERIALIZE")?;
-               if self.stop.is_stopped() || !self.permitted.load(Ordering::Acquire){return Err("CONTROL_NOT_AUTHORIZED".into());}
-               timeout(Duration::from_millis(500),channel.try_send_text(&text)).await.map_err(|_|"CONTROL_SEND_TIMEOUT")?.map_err(|_|"CONTROL_SEND_FAILED")?;
-               self.protocol.lock().unwrap_or_else(|p|p.into_inner()).sent(&response);
-              },
-              Some(DataChannelEvent::OnError)=>{self.update(|s|s.error_events+=1);return Err("CONTROL_CHANNEL_ERROR".into());},
-              Some(DataChannelEvent::OnClose)=>{self.update(|s|s.close_events+=1);self.stop.stop();return Ok(());},
-              None=>{self.stop.stop();return Ok(());},
-              _=>(),
-             },
-             _=sleep(Duration::from_millis(25))=>(),
+            let event = tokio::select! {
+                event = poll() => event,
+                _ = sleep(Duration::from_millis(25)) => continue,
+            };
+            // In particular, an error event already queued when the owner
+            // stopped should remain diagnostic, not turn teardown into failure.
+            if matches!(&event, Some(DataChannelEvent::OnError)) {
+                self.update(|s| s.error_events += 1);
+                if self.stop.is_stopped() {
+                    return Ok(());
+                }
+                return Err("CONTROL_CHANNEL_ERROR".into());
             }
+            if matches!(&event, Some(DataChannelEvent::OnClose)) {
+                self.update(|s| s.close_events += 1);
+                self.stop.stop();
+                return Ok(());
+            }
+            if self.stop.is_stopped() {
+                return Ok(());
+            }
+            match event {
+                Some(DataChannelEvent::OnOpen) => self.update(|s| {
+                    s.open_events += 1;
+                    s.state = "open".into();
+                }),
+                Some(DataChannelEvent::OnClosing) => {
+                    // A peer-initiated SCTP stream reset revokes input at the
+                    // start of closing, not after the final close notification.
+                    self.stop.stop();
+                    self.update(|s| s.state = "closing".into());
+                    return Ok(());
+                }
+                Some(DataChannelEvent::OnMessage(message)) => {
+                    self.update(|s| s.message_events += 1);
+                    if self.input_quiesced() {
+                        continue;
+                    }
+                    let response = self.process(&message.data, message.is_string);
+                    if self.stop.is_stopped() {
+                        return Ok(());
+                    }
+                    if self.input_quiesced() {
+                        continue;
+                    }
+                    let response = response?;
+                    let text = serde_json::to_string(&response).map_err(|_| "CONTROL_SERIALIZE")?;
+                    if self.stop.is_stopped() {
+                        return Ok(());
+                    }
+                    if self.input_quiesced() {
+                        continue;
+                    }
+                    if !self.permitted.load(Ordering::Acquire) {
+                        return Err("CONTROL_NOT_AUTHORIZED".into());
+                    }
+                    let result = send(text).await;
+                    if result.is_err() && self.stop.is_stopped() {
+                        return Ok(());
+                    }
+                    result?;
+                    self.protocol
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .sent(&response);
+                }
+                // A terminated event stream without trusted local stop or
+                // ordered OnClosing/OnClose is an unexpected disconnect.
+                None => return Err("CONTROL_CHANNEL_ERROR".into()),
+                _ => (),
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod shutdown_tests {
+    use super::*;
+    use std::collections::VecDeque;
+    use std::future::ready;
+    use webrtc::data_channel::RTCDataChannelMessage;
+
+    #[tokio::test]
+    async fn local_stop_wins_over_queued_transport_error() {
+        let stop = StopToken::default();
+        let endpoint = Endpoint::new(uuid::Uuid::new_v4().to_string(), stop.clone(), 10).unwrap();
+        endpoint
+            .event_loop(
+                || {
+                    stop.stop();
+                    ready(Some(DataChannelEvent::OnError))
+                },
+                |_| ready(Err("unexpected send")),
+            )
+            .await
+            .unwrap();
+        assert!(stop.is_stopped());
+        assert_eq!(endpoint.stats().error_events, 1);
+        assert!(endpoint.stats().last_error.is_none());
+    }
+
+    #[tokio::test]
+    async fn clean_peer_close_halts_before_buffered_messages() {
+        for closing in [DataChannelEvent::OnClosing, DataChannelEvent::OnClose] {
+            let stop = StopToken::default();
+            let endpoint =
+                Endpoint::new(uuid::Uuid::new_v4().to_string(), stop.clone(), 10).unwrap();
+            let mut events = VecDeque::from([
+                closing,
+                DataChannelEvent::OnMessage(RTCDataChannelMessage::default()),
+            ]);
+            endpoint
+                .event_loop(
+                    || ready(events.pop_front()),
+                    |_| ready(Err("unexpected send")),
+                )
+                .await
+                .unwrap();
+            assert!(stop.is_stopped());
+            assert_eq!(events.len(), 1);
+            assert_eq!(endpoint.stats().message_events, 0);
+        }
+    }
+
+    #[tokio::test]
+    async fn active_channel_error_and_unannounced_eof_are_failures() {
+        for first in [Some(DataChannelEvent::OnError), None] {
+            let stop = StopToken::default();
+            let endpoint =
+                Endpoint::new(uuid::Uuid::new_v4().to_string(), stop.clone(), 10).unwrap();
+            let mut events = VecDeque::from([first.clone(), Some(DataChannelEvent::OnClose)]);
+            let error = endpoint
+                .event_loop(
+                    || ready(events.pop_front().flatten()),
+                    |_| ready(Err("unexpected send")),
+                )
+                .await
+                .unwrap_err();
+            assert_eq!(error, "CONTROL_CHANNEL_ERROR");
+            assert_eq!(endpoint.stats().error_events, u32::from(first.is_some()));
+            assert_eq!(events.len(), 1);
+        }
+    }
+
+    #[tokio::test]
+    async fn ack_failure_is_only_suppressed_when_owner_is_already_stopping() {
+        for stopping in [false, true] {
+            let stop = StopToken::default();
+            let id = uuid::Uuid::new_v4().to_string();
+            let endpoint = Endpoint::new(id.clone(), stop.clone(), 10).unwrap();
+            let request = serde_json::to_vec(&crate::control::Message::Ping {
+                v: 1,
+                seq: 1,
+                session_id: id,
+            })
+            .unwrap();
+            let mut event = Some(DataChannelEvent::OnMessage(RTCDataChannelMessage {
+                is_string: true,
+                data: request.as_slice().into(),
+            }));
+            let result = endpoint
+                .event_loop(
+                    || ready(event.take()),
+                    |_| {
+                        if stopping {
+                            stop.stop();
+                        }
+                        ready(Err("CONTROL_SEND_TIMEOUT"))
+                    },
+                )
+                .await;
+            if stopping {
+                assert!(result.is_ok());
+            } else {
+                assert_eq!(result.unwrap_err(), "CONTROL_SEND_TIMEOUT");
+            }
+            assert_eq!(endpoint.stats().pings_received, 1);
+            assert_eq!(endpoint.stats().pongs_sent, 0);
         }
     }
 }

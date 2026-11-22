@@ -11,8 +11,8 @@
 | 局域网双机 720p H.264 视频 | 来源分支已真实验证：三轮 853 / 900 / 900 帧解码呈现 |
 | DataChannel + SendInput | 来源分支实测英文输入；29 / 81 / 132 条消息分别全部收到 ACK |
 | 原生授权、停止和临时配对码 | 已有产品 `p3-lan` 代码与历史人工操作确认 |
-| 会话结束错误 | **P3-END-01 OPEN**：后两轮 `CONTROL_CHANNEL_ERROR`；尽管资源正常回收，根因未确定 |
-| Axum WebSocket 信令 | `v2_signaling.rs` 已存在；**本分支尚未编译、执行或接入产品验证** |
+| 会话结束错误 | **P3-END-01 已修改，待 Windows 双机回归**：先撤销输入、通知原生停止，再关闭浏览器 DataChannel；正常结束提前发已认证的收尾信号，活动期通道故障仍报错。历史后两轮曾报 `CONTROL_CHANNEL_ERROR` |
+| Axum WebSocket 信令 | `v2_signaling.rs` 编译和本机真实 WebSocket 测试通过（合成信令）；当前仅允许回环监听，未接入产品会话 |
 | STUN/ICE + TURN | 历史研究/实验曾通过，V2 正式产品路径尚未集成；**R06 仍 OPEN** |
 | Windows 安装包 | 未交付 |
 
@@ -36,21 +36,32 @@
 
 ## Windows 上快速编译
 
-在已安装 Rust 1.90、MSVC/Windows SDK、Node/pnpm 11、WebView2 的 Windows PC：
+在已安装项目锁定的 Rust 1.100.0、MSVC/Windows SDK、Node 24、pnpm 11.25.0 和 WebView2 的 Windows PC：
 
 ```powershell
+git fetch origin
 git switch v2/clean-core
+git pull --ff-only
 pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test
 cargo test -p hub-webrtc --features p3-lan --locked
+cargo test -p remotehub-desktop --features p3-lan --locked
 cargo test -p hub-rendezvous-probe --bin v2_signaling --locked
+pnpm build
 cargo build -p remotehub-desktop --profile probe --features p3-lan,custom-protocol --locked
 ```
 
 构建输出由 Cargo profile 决定，通常在 `target/probe/remotehub-desktop.exe`。**最后的 build 仅编译，不会启动或采集桌面。** 实际打开两台电脑的产品程序、测试真实画面/输入/停止前，先明确用户批准并记录 EXE SHA256。
 
-WebSocket 本地信令独立程序采用 `REMOTEHUB_V2_TOKEN`（临时随机 64 位十六进制）、`REMOTEHUB_V2_BIND`（默认 `127.0.0.1:48620`），对外监听必须配置 `REMOTEHUB_V2_TLS_CERT` 和 `REMOTEHUB_V2_TLS_KEY`。当前**尚未接入真实远控会话，也没有部署你的阿里云服务器**。
+WebSocket 本地信令独立程序采用 `REMOTEHUB_V2_TOKEN`（临时随机 64 位十六进制）、`REMOTEHUB_V2_BIND`（默认 `127.0.0.1:48620`），此二进制只允许回环，TLS 证书/私钥须成对配置。握手使用 Rust 客户端的 Bearer 请求头；共享 token 不等同于设备身份。当前**尚未接入实际远控会话，也未部署云端**。
+
+## 本分支已执行验证
+
+- Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（109 项）、`pnpm lint`、`pnpm build` 通过。
+- Linux：`cargo test -p hub-webrtc --features p3-lan --locked` 18 项通过、1 项忽略；包含关闭时序模拟，未采集真实桌面或注入输入。
+- Linux：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked` 6 项通过（含 2 项真实回环 WebSocket 测试，使用合成 offer/answer/ICE）；`cargo fmt --all -- --check` 通过。
+- Windows x64 MSVC 目标：桌面 `p3-lan` 交叉检查和 WebRTC 目标测试代码检查通过。该结果不是 Windows 真机执行证据。下一步需在双方同意后复测自然结束、手动停止及原有视频/英文输入。
 
 ## 敏捷开发约定
 

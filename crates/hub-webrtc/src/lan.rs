@@ -33,6 +33,18 @@ pub struct LanStatus {
     pub resources_released: bool,
     pub error: Option<String>,
 }
+// Finish is a graceful notice, not proof of resources released or permission to
+// hide errors. Only verified LAN input gets advance notice during media drain.
+fn should_announce_finish(stats: &Stats, input_mode: bool) -> bool {
+    stats.error.is_none()
+        && stats
+            .control
+            .as_ref()
+            .is_none_or(|control| control.last_error.is_none())
+        && (stats.resources_released
+            || (input_mode && stats.state == "draining" && stats.frames_sent > 0))
+}
+
 pub struct LanSession {
     #[cfg(feature = "p3-lan")]
     input_enabled: AtomicBool,
@@ -549,18 +561,53 @@ impl LanSession {
             }
         });
         let result=async {
-   let mut beat=tokio::time::interval(Duration::from_secs(1));let end=Instant::now()+Duration::from_secs(self.seconds as u64+15);let mut finishing=None;
-   loop{
-    if self.cancelled.load(Ordering::Acquire){let _=timeout(Duration::from_millis(300),lan_wire::write(&mut write,codec.encode("stop",String::new())?)).await;return Ok(());}
-    if Instant::now()>end{return Err("LAN_SESSION_DEADLINE".into());}
-    let source=self.source.lock().unwrap_or_else(|p|p.into_inner()).clone();
-    if let Some(source)=source{let stats=source.stats();if stats.resources_released {
-     if finishing.is_none(){lan_wire::write(&mut write,codec.encode("finish",String::new())?).await?;finishing=Some(Instant::now());}
-     let decoded=self.stats().receiver_samples.last().and_then(|data|data["framesDecoded"].as_u64()).unwrap_or(0);
-     if decoded>=stats.frames_sent as u64||finishing.is_some_and(|start:Instant|start.elapsed()>Duration::from_secs(2))||stats.error.is_some(){
-      lan_wire::write(&mut write,codec.encode("stop",String::new())?).await?;return if let Some(e)=stats.error{Err(e)}else{Ok(())};
-     }
-    }}
+            let mut beat = tokio::time::interval(Duration::from_secs(1));
+            let end = Instant::now() + Duration::from_secs(self.seconds as u64 + 15);
+            let mut announced_finish = false;
+            let mut released_at = None;
+            loop {
+                if self.cancelled.load(Ordering::Acquire) {
+                    let _ = timeout(
+                        Duration::from_millis(300),
+                        lan_wire::write(&mut write, codec.encode("stop", String::new())?),
+                    ).await;
+                    return Ok(());
+                }
+                if Instant::now() > end {
+                    return Err("LAN_SESSION_DEADLINE".into());
+                }
+                let source = self.source.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                if let Some(source) = source {
+                    let stats = source.stats();
+                    if !announced_finish && should_announce_finish(&stats, self.input_mode()) {
+                        timeout(
+                            Duration::from_secs(2),
+                            lan_wire::write(&mut write, codec.encode("finish", String::new())?),
+                        ).await.map_err(|_| "CONTROL_WRITE_TIMEOUT")??;
+                        announced_finish = true;
+                    }
+                    if stats.resources_released {
+                        let released = *released_at.get_or_insert_with(Instant::now);
+                        let decoded = self.stats().receiver_samples.last()
+                            .and_then(|data| data["framesDecoded"].as_u64()).unwrap_or(0);
+                        if decoded >= u64::from(stats.frames_sent)
+                            || released.elapsed() > Duration::from_secs(2)
+                            || stats.error.is_some()
+                        {
+                            let signal = timeout(
+                                Duration::from_secs(2),
+                                lan_wire::write(&mut write, codec.encode("stop", String::new())?),
+                            ).await.map_err(|_| "CONTROL_WRITE_TIMEOUT".to_owned()).and_then(|value| value);
+                            // An early notice or a follow-up write failure may
+                            // not replace the real source failure.
+                            if let Some(error) = stats.error {
+                                return Err(error);
+                            }
+                            signal?;
+                            return Ok(());
+                        }
+                    }
+                }
     tokio::select!{
      frame=rx.recv()=>{
       let frame=frame.ok_or("SIGNAL_DISCONNECTED")??;let(kind,payload)=codec.accept(frame)?;
@@ -672,6 +719,33 @@ pub fn validate_metrics(data: &Value) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn finish_is_only_sent_during_successful_input_drain_or_release() {
+        let mut stats = Stats {
+            state: "draining".into(),
+            frames_sent: 10,
+            ..Default::default()
+        };
+        assert!(should_announce_finish(&stats, true));
+        assert!(!should_announce_finish(&stats, false));
+        stats.frames_sent = 0;
+        assert!(!should_announce_finish(&stats, true));
+        stats.frames_sent = 10;
+        stats.control = Some(crate::control::ControlStats {
+            last_error: Some("CONTROL_CHANNEL_ERROR".into()),
+            ..Default::default()
+        });
+        assert!(!should_announce_finish(&stats, true));
+        stats.control = None;
+        stats.state = "stopped".into();
+        assert!(!should_announce_finish(&stats, true));
+        stats.resources_released = true;
+        assert!(should_announce_finish(&stats, true));
+        assert!(should_announce_finish(&stats, false));
+        stats.error = Some("PEER_CONNECTION_FAILED".into());
+        assert!(!should_announce_finish(&stats, true));
+    }
     #[tokio::test]
     async fn receiver_returns_the_actual_authenticated_answer_validation_error() {
         let listener = TcpListener::bind("127.0.0.2:0").await.unwrap();

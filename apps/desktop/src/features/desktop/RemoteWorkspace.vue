@@ -61,9 +61,9 @@ async function start() {
       emit('sessionState', next);
       if (n) native.value = n;
       if (r) receiver.value = r;
+      if (next !== 'playing' || r?.control?.sendClosed) pause();
       if (next === 'stopped' || next === 'failed') {
         busy.value = false;
-        pause();
       }
     },
     (e) => {
@@ -231,7 +231,9 @@ onBeforeUnmount(() => {
     <p v-if="busy && role === 'receiver'">
       <button
         class="outline-button"
-        :disabled="state !== 'playing'"
+        :disabled="
+          state !== 'playing' || receiver?.control?.sendClosed === true
+        "
         @click="input ? pause() : activate()"
       >
         {{ input ? '暂停键鼠控制' : '启用本次键鼠控制' }}

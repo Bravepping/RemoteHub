@@ -1,6 +1,9 @@
 pub mod control;
 #[cfg(windows)]
 pub mod control_channel;
+#[cfg(all(test, not(windows), not(feature = "p3-lan")))]
+#[allow(dead_code)]
+mod control_channel;
 #[cfg(feature = "p006-direct-probe")]
 pub mod direct_diagnostics;
 #[cfg(feature = "p006-direct-probe")]

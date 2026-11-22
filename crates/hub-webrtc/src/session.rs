@@ -871,7 +871,19 @@ impl Session {
         }
         drop(rx);
         if !self.shared.stop.is_stopped() {
-            if self.is_direct() {
+            #[cfg(feature = "p3-lan")]
+            let lan_input_draining =
+                if let Some(input) = self.control.as_ref().filter(|control| control.is_input()) {
+                    // The last AU was handed off. Keep SCTP alive for the authenticated
+                    // finishing notification, but never accept new keyboard/mouse input.
+                    input.begin_input_drain();
+                    true
+                } else {
+                    false
+                };
+            #[cfg(not(feature = "p3-lan"))]
+            let lan_input_draining = false;
+            if self.is_direct() || lan_input_draining {
                 self.shared.update(|s| s.state = "draining".into());
             }
             sleep(Duration::from_millis(if self.is_direct() {
