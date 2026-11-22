@@ -1,0 +1,17 @@
+[package]
+name = "hub-signal-v2"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+futures-util = { version = "=0.3.34", features = ["sink"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "=1.54.1", features = ["net", "time"] }
+tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }
+uuid = { version = "=1.29.3", features = ["v4"] }
+zeroize = "=1.9.2"

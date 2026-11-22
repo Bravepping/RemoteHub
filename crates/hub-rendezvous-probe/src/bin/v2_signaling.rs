@@ -10,7 +10,10 @@ use axum::{
     Router,
 };
 use futures_util::{SinkExt, StreamExt};
-use serde::{Deserialize, Serialize};
+use hub_signal_v2::wire::{
+    self as signal_wire, ClientFrame, Flow, Role, ServerFrame, SignalKind, WireError, MAX_WIRE,
+    PATH, ROOM_LIFETIME, VERSION,
+};
 use std::{
     collections::HashMap,
     net::SocketAddr,
@@ -25,63 +28,16 @@ use tokio::{sync::mpsc, time::Instant};
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-const MAX_WIRE: usize = 64 * 1024;
-const MAX_SIGNAL: usize = 32 * 1024;
 const MAX_ROOMS: usize = 4;
 const MAX_CONNECTIONS: usize = 8;
-const ROOM_LIFETIME: Duration = Duration::from_secs(600);
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum Role {
-    Host,
-    Viewer,
-}
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-enum SignalKind {
-    Offer,
-    Answer,
-    Ice,
-}
-
-#[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum ClientFrame {
-    Hello {
-        version: u8,
-        room: String,
-        role: Role,
-    },
-    Signal {
-        seq: u64,
-        signal: SignalKind,
-        data: String,
-    },
-    Leave,
-}
-#[derive(Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum ServerFrame {
-    Waiting,
-    Paired,
-    Signal {
-        from: Role,
-        seq: u64,
-        signal: SignalKind,
-        data: String,
-    },
-    PeerLeft,
-    Error {
-        code: &'static str,
-    },
-}
 fn wire(frame: &ServerFrame) -> Result<Message, &'static str> {
-    let text = serde_json::to_string(frame).map_err(|_| "ENCODE_FAILED")?;
-    if text.len() > MAX_WIRE {
-        return Err("SIGNAL_SIZE");
-    }
-    Ok(Message::Text(text.into()))
+    signal_wire::encode(frame)
+        .map(|text| Message::Text(text.into()))
+        .map_err(|error| match error {
+            WireError::Invalid => "ENCODE_FAILED",
+            WireError::Size => "SIGNAL_SIZE",
+        })
 }
 
 struct Peer {
@@ -117,27 +73,9 @@ impl Peer {
         Ok(())
     }
 }
-#[derive(Default)]
-enum Negotiation {
-    #[default]
-    WaitingForOffer,
-    WaitingForAnswer,
-    Established,
-}
-impl Negotiation {
-    fn after(&self, signal: SignalKind) -> Result<Self, &'static str> {
-        match (self, signal) {
-            (Self::WaitingForOffer, SignalKind::Offer) => Ok(Self::WaitingForAnswer),
-            (Self::WaitingForAnswer, SignalKind::Answer) => Ok(Self::Established),
-            (Self::WaitingForAnswer, SignalKind::Ice) => Ok(Self::WaitingForAnswer),
-            (Self::Established, SignalKind::Ice) => Ok(Self::Established),
-            _ => Err("SIGNAL_ORDER"),
-        }
-    }
-}
 struct Room {
     deadline: Instant,
-    negotiation: Negotiation,
+    negotiation: Flow,
     host: Option<Peer>,
     viewer: Option<Peer>,
 }
@@ -169,11 +107,7 @@ impl App {
         id: Uuid,
         tx: mpsc::Sender<Message>,
     ) -> Result<Instant, &'static str> {
-        if key.len() != 32
-            || !key
-                .bytes()
-                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-        {
+        if !signal_wire::valid_room(key) {
             return Err("ROOM_FORMAT");
         }
         let mut rooms = self.rooms.lock().map_err(|_| "STATE_UNAVAILABLE")?;
@@ -188,7 +122,7 @@ impl App {
                 key.to_owned(),
                 Room {
                     deadline: Instant::now() + ROOM_LIFETIME,
-                    negotiation: Negotiation::default(),
+                    negotiation: Flow::default(),
                     host: None,
                     viewer: None,
                 },
@@ -211,7 +145,7 @@ impl App {
             Role::Viewer => room.viewer = Some(new_peer),
         }
         if room.host.is_some() && room.viewer.is_some() {
-            let msg = wire(&ServerFrame::Paired)?;
+            let msg = wire(&ServerFrame::Paired {})?;
             for peer in [room.host.as_ref(), room.viewer.as_ref()]
                 .into_iter()
                 .flatten()
@@ -227,7 +161,7 @@ impl App {
             };
             peer.ok_or("ROLE_MISSING")?
                 .tx
-                .try_send(wire(&ServerFrame::Waiting)?)
+                .try_send(wire(&ServerFrame::Waiting {})?)
                 .map_err(|_| "CLIENT_BACKPRESSURE")?;
         }
         Ok(room.deadline)
@@ -241,13 +175,10 @@ impl App {
         seq: u64,
         data: String,
     ) -> Result<(), &'static str> {
-        if data.is_empty() || data.len() > MAX_SIGNAL || data.contains('\0') {
+        if !signal_wire::valid_signal(&data) {
             return Err("SIGNAL_SIZE");
         }
-        if matches!(
-            (role, signal),
-            (Role::Host, SignalKind::Offer) | (Role::Viewer, SignalKind::Answer)
-        ) {
+        if !signal.allows_sender(role) {
             return Err("SIGNAL_ROLE_DENIED");
         }
         let mut rooms = self.rooms.lock().map_err(|_| "STATE_UNAVAILABLE")?;
@@ -264,7 +195,7 @@ impl App {
             return Err("PEER_MISMATCH");
         }
         let to = target.as_ref().ok_or("PEER_NOT_JOINED")?;
-        let negotiation = room.negotiation.after(signal)?;
+        let negotiation = room.negotiation.after(signal).ok_or("SIGNAL_ORDER")?;
         from.accept_seq(seq)?;
         to.tx
             .try_send(wire(&ServerFrame::Signal {
@@ -287,7 +218,7 @@ impl App {
         });
         if owned {
             if let Some(room) = rooms.remove(key) {
-                if let Ok(msg) = wire(&ServerFrame::PeerLeft) {
+                if let Ok(msg) = wire(&ServerFrame::PeerLeft {}) {
                     for peer in [room.host, room.viewer].into_iter().flatten() {
                         if peer.id != id {
                             let _ = peer.tx.try_send(msg.clone());
@@ -305,7 +236,7 @@ impl Drop for Lease {
     }
 }
 fn token_matches(expected: &str, given: &str) -> bool {
-    if given.len() != 64 || !given.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+    if !signal_wire::valid_token(given) {
         return false;
     }
     let message = b"RemoteHub.v2.SignalRelayToken";
@@ -353,7 +284,7 @@ async fn upgrade(
         .into_response()
 }
 async fn send_error(socket: &mut WebSocket, code: &'static str) {
-    if let Ok(message) = wire(&ServerFrame::Error { code }) {
+    if let Ok(message) = wire(&ServerFrame::Error { code: code.into() }) {
         let _ = tokio::time::timeout(Duration::from_secs(1), socket.send(message)).await;
     }
 }
@@ -364,10 +295,10 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
         return;
     };
     let Ok(ClientFrame::Hello {
-        version: 2,
+        version: VERSION,
         room,
         role,
-    }) = serde_json::from_str::<ClientFrame>(&first)
+    }) = signal_wire::decode(&first)
     else {
         send_error(&mut socket, "HELLO_INVALID").await;
         return;
@@ -396,7 +327,7 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
             incoming = socket.next() => {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
-                        let frame = serde_json::from_str::<ClientFrame>(&text);
+                        let frame = signal_wire::decode(&text);
                         match frame {
                             Ok(ClientFrame::Signal { seq, signal, data }) => {
                                 if let Err(code) = app.relay(&room, role, id, signal, seq, data) {
@@ -404,7 +335,7 @@ async fn connection(mut socket: WebSocket, app: Arc<App>) {
                                     break;
                                 }
                             }
-                            Ok(ClientFrame::Leave) => break,
+                            Ok(ClientFrame::Leave {}) => break,
                             _ => { send_error(&mut socket, "FRAME_INVALID").await; break; }
                         }
                     }
@@ -435,13 +366,13 @@ fn validate_bind(
 fn router(app: Arc<App>) -> Router {
     Router::new()
         .route("/healthz", get(|| async { "ok" }))
-        .route("/v2/ws", get(upgrade))
+        .route(PATH, get(upgrade))
         .with_state(app)
 }
 async fn run() -> Result<(), &'static str> {
     let token =
         Zeroizing::new(std::env::var("REMOTEHUB_V2_TOKEN").map_err(|_| "V2_TOKEN_REQUIRED")?);
-    if token.len() != 64 || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !signal_wire::valid_token(&token) {
         return Err("V2_TOKEN_MUST_BE_64_HEX");
     }
     let addr: SocketAddr = match std::env::var("REMOTEHUB_V2_BIND") {
@@ -483,8 +414,15 @@ async fn main() {
     }
 }
 #[cfg(test)]
+#[path = "v2_signaling/data_smoke.rs"]
+mod data_smoke;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use hub_signal_v2::{
+        wire::MAX_SIGNAL, ClientError, LoopbackRelay, RelayEvent, RelayToken, RoomId,
+    };
     use serde_json::{json, Value};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_tungstenite::{
@@ -497,7 +435,8 @@ mod tests {
     };
 
     const ROOM: &str = "0123456789abcdef0123456789abcdef";
-    const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    pub(super) const TOKEN: &str =
+        "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const WRONG_TOKEN: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     type Client = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -650,7 +589,7 @@ mod tests {
         serde_json::from_str(&text).unwrap()
     }
 
-    async fn start_server() -> (SocketAddr, Arc<App>, tokio::task::JoinHandle<()>) {
+    pub(super) async fn start_server() -> (SocketAddr, Arc<App>, tokio::task::JoinHandle<()>) {
         let app = app();
         let router = router(app.clone());
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -662,7 +601,7 @@ mod tests {
     }
 
     fn request(address: SocketAddr, token: Option<&str>) -> Request {
-        let mut request = format!("ws://{address}/v2/ws")
+        let mut request = format!("ws://{address}{PATH}")
             .into_client_request()
             .unwrap();
         if let Some(token) = token {
@@ -782,6 +721,131 @@ mod tests {
         );
         assert_eq!(receive(&mut host).await, json!({"type":"peer_left"}));
         assert!(app.rooms.lock().unwrap().is_empty());
+        task.abort();
+    }
+    #[tokio::test]
+    async fn native_clients_exchange_typed_loopback_signals_and_leave() {
+        let (address, app, task) = start_server().await;
+        let token = RelayToken::new(TOKEN.to_owned()).unwrap();
+        let room = || RoomId::new(ROOM.to_owned()).unwrap();
+        let wait = Duration::from_secs(3);
+        let mut host = LoopbackRelay::connect(address, &token, room(), Role::Host)
+            .await
+            .unwrap();
+        assert!(matches!(
+            host.next_event(wait).await,
+            Ok(RelayEvent::Waiting)
+        ));
+        assert_eq!(
+            host.send_signal(SignalKind::Answer, "TEST_BEFORE_PAIR".into())
+                .await,
+            Err(ClientError::Protocol)
+        );
+        let mut viewer = LoopbackRelay::connect(address, &token, room(), Role::Viewer)
+            .await
+            .unwrap();
+        for client in [&mut host, &mut viewer] {
+            assert!(matches!(
+                client.next_event(wait).await,
+                Ok(RelayEvent::Paired)
+            ));
+        }
+        assert_eq!(
+            viewer
+                .send_signal(SignalKind::Ice, "TEST_PREMATURE_ICE".into())
+                .await,
+            Err(ClientError::Protocol)
+        );
+        viewer
+            .send_signal(SignalKind::Offer, "TEST_NATIVE_OFFER".into())
+            .await
+            .unwrap();
+        assert!(matches!(host.next_event(wait).await,
+            Ok(RelayEvent::Signal { kind: SignalKind::Offer, data }) if data == "TEST_NATIVE_OFFER"));
+        viewer
+            .send_signal(SignalKind::Ice, "TEST_VIEWER_ICE".into())
+            .await
+            .unwrap();
+        assert!(matches!(host.next_event(wait).await,
+            Ok(RelayEvent::Signal { kind: SignalKind::Ice, data }) if data == "TEST_VIEWER_ICE"));
+        host.send_signal(SignalKind::Answer, "TEST_NATIVE_ANSWER".into())
+            .await
+            .unwrap();
+        assert!(matches!(viewer.next_event(wait).await,
+            Ok(RelayEvent::Signal { kind: SignalKind::Answer, data }) if data == "TEST_NATIVE_ANSWER"));
+        host.send_signal(SignalKind::Ice, "TEST_HOST_ICE".into())
+            .await
+            .unwrap();
+        assert!(matches!(viewer.next_event(wait).await,
+            Ok(RelayEvent::Signal { kind: SignalKind::Ice, data }) if data == "TEST_HOST_ICE"));
+        viewer.leave().await.unwrap();
+        assert!(matches!(
+            host.next_event(wait).await,
+            Ok(RelayEvent::PeerLeft)
+        ));
+        assert!(matches!(
+            host.next_event(wait).await,
+            Err(ClientError::Closed)
+        ));
+        assert!(app.rooms.lock().unwrap().is_empty());
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn native_client_blocks_off_host_and_redacts_relay_errors() {
+        let (address, app, task) = start_server().await;
+        let token = RelayToken::new(TOKEN.to_owned()).unwrap();
+        let wrong = RelayToken::new(WRONG_TOKEN.to_owned()).unwrap();
+        let room = || RoomId::new(ROOM.to_owned()).unwrap();
+        assert!(matches!(
+            LoopbackRelay::connect(
+                "192.0.2.1:48620".parse().unwrap(),
+                &token,
+                room(),
+                Role::Host
+            )
+            .await,
+            Err(ClientError::Endpoint)
+        ));
+        assert!(matches!(
+            LoopbackRelay::connect(address, &wrong, room(), Role::Host).await,
+            Err(ClientError::Unauthorized)
+        ));
+        let mut viewer = LoopbackRelay::connect(address, &token, room(), Role::Viewer)
+            .await
+            .unwrap();
+        let rejected = viewer.next_event(Duration::from_secs(3)).await;
+        assert!(matches!(rejected, Err(ClientError::Rejected)));
+        assert!(app.rooms.lock().unwrap().is_empty());
+        task.abort();
+
+        // A test relay sends a fake sensitive value in its protocol error.
+        // The client must expose only its generic local diagnostic.
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let fake = Router::new().route(
+            PATH,
+            get(|ws: WebSocketUpgrade| async {
+                ws.on_upgrade(|mut socket| async move {
+                    let _ = socket.next().await;
+                    let frame = ServerFrame::Error {
+                        code: "TEST_SECRET_DO_NOT_ECHO".into(),
+                    };
+                    socket.send(wire(&frame).unwrap()).await.unwrap();
+                })
+            }),
+        );
+        let task = tokio::spawn(async move {
+            axum::serve(listener, fake).await.unwrap();
+        });
+        let mut client = LoopbackRelay::connect(address, &token, room(), Role::Host)
+            .await
+            .unwrap();
+        let Err(error) = client.next_event(Duration::from_secs(3)).await else {
+            panic!("expected generic relay rejection");
+        };
+        assert_eq!(error, ClientError::Rejected);
+        assert!(!format!("{error:?} {error}").contains("TEST_SECRET_DO_NOT_ECHO"));
         task.abort();
     }
 }

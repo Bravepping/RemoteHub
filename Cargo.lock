@@ -1915,16 +1915,35 @@ dependencies = [
 name = "hub-rendezvous-probe"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "axum",
  "axum-server",
  "futures-util",
  "hub-probe-wire",
+ "hub-signal-v2",
  "hub-turn-credentials",
+ "hub-webrtc",
  "rcgen",
  "ring",
+ "rtc",
  "rustls",
  "serde",
  "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "uuid",
+ "webrtc",
+ "zeroize",
+]
+
+[[package]]
+name = "hub-signal-v2"
+version = "0.1.0"
+dependencies = [
+ "futures-util",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
  "tokio",
  "tokio-tungstenite",
  "uuid",

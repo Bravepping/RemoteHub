@@ -5,6 +5,8 @@ use sha2::Sha256;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const MAX_FRAME: usize = 96 * 1024;
+/// Size of the serialized authenticated string inside a V2 relay signal.
+pub const MAX_RELAY_FRAME: usize = 32 * 1024;
 pub struct Key([u8; 16]);
 impl Key {
     pub fn generate() -> Self {
@@ -40,8 +42,35 @@ pub struct Frame {
     pub payload: String,
     tag: String,
 }
+enum Domain {
+    LanV1,
+    RelayV2 { room: String },
+}
+
+impl Domain {
+    fn version(&self) -> u8 {
+        match self {
+            Self::LanV1 => 1,
+            Self::RelayV2 { .. } => 2,
+        }
+    }
+
+    fn check_relay_size(&self, frame: &Frame) -> Result<(), String> {
+        if matches!(self, Self::RelayV2 { .. })
+            && serde_json::to_vec(frame)
+                .map_err(|_| "WIRE_SERIALIZE")?
+                .len()
+                > MAX_RELAY_FRAME
+        {
+            return Err("WIRE_TOO_LARGE".into());
+        }
+        Ok(())
+    }
+}
+
 pub struct Codec {
     key: std::sync::Arc<Key>,
+    domain: Domain,
     pub nonce: String,
     tx: u64,
     rx: u64,
@@ -49,9 +78,38 @@ pub struct Codec {
 }
 impl Codec {
     pub fn new(key: std::sync::Arc<Key>, nonce: String, host: bool) -> Result<Self, String> {
+        Self::with_domain(key, nonce, host, Domain::LanV1)
+    }
+
+    /// Bind the authenticated payload to a locally chosen V2 room and session
+    /// nonce. Use a fresh pairing key separate from the room and relay bearer.
+    /// This authenticates payloads, but does not encrypt them or grant access.
+    pub fn new_v2(
+        key: std::sync::Arc<Key>,
+        nonce: String,
+        room: &str,
+        host: bool,
+    ) -> Result<Self, String> {
+        if room.len() != 32
+            || !room
+                .bytes()
+                .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+        {
+            return Err("ROOM_FORMAT".into());
+        }
+        Self::with_domain(key, nonce, host, Domain::RelayV2 { room: room.into() })
+    }
+
+    fn with_domain(
+        key: std::sync::Arc<Key>,
+        nonce: String,
+        host: bool,
+        domain: Domain,
+    ) -> Result<Self, String> {
         uuid::Uuid::parse_str(&nonce).map_err(|_| "INVALID_NONCE")?;
         Ok(Self {
             key,
+            domain,
             nonce,
             tx: 0,
             rx: 0,
@@ -59,15 +117,28 @@ impl Codec {
         })
     }
     fn tag(&self, frame: &Frame) -> Result<Hmac<Sha256>, String> {
-        let bytes = serde_json::to_vec(&(
-            "RemoteHub.LAN.v1",
-            frame.version,
-            &frame.direction,
-            &frame.nonce,
-            frame.seq,
-            &frame.kind,
-            &frame.payload,
-        ))
+        let bytes = match &self.domain {
+            // Preserve the LAN v1 authenticated bytes for older builds.
+            Domain::LanV1 => serde_json::to_vec(&(
+                "RemoteHub.LAN.v1",
+                frame.version,
+                &frame.direction,
+                &frame.nonce,
+                frame.seq,
+                &frame.kind,
+                &frame.payload,
+            )),
+            Domain::RelayV2 { room } => serde_json::to_vec(&(
+                "RemoteHub.Signaling.v2",
+                room,
+                frame.version,
+                &frame.direction,
+                &frame.nonce,
+                frame.seq,
+                &frame.kind,
+                &frame.payload,
+            )),
+        }
         .map_err(|_| "WIRE_SERIALIZE")?;
         let mut mac = Hmac::<Sha256>::new_from_slice(&self.key.0).map_err(|_| "WIRE_KEY")?;
         mac.update(&bytes);
@@ -78,7 +149,7 @@ impl Codec {
             return Err("WIRE_TOO_LARGE".into());
         }
         let mut frame = Frame {
-            version: 1,
+            version: self.domain.version(),
             direction: if self.host { "A-to-B" } else { "B-to-A" }.into(),
             nonce: self.nonce.clone(),
             seq: self.tx,
@@ -93,11 +164,12 @@ impl Codec {
             .iter()
             .map(|b| format!("{b:02x}"))
             .collect();
+        self.domain.check_relay_size(&frame)?;
         self.tx += 1;
         Ok(frame)
     }
     pub fn accept(&mut self, frame: Frame) -> Result<(String, String), String> {
-        if frame.version != 1
+        if frame.version != self.domain.version()
             || frame.nonce != self.nonce
             || frame.seq != self.rx
             || frame.direction != if self.host { "B-to-A" } else { "A-to-B" }
@@ -107,6 +179,7 @@ impl Codec {
         {
             return Err("AUTH_OR_REPLAY_REJECTED".into());
         }
+        self.domain.check_relay_size(&frame)?;
         let mut tag = [0u8; 32];
         for (i, item) in tag.iter_mut().enumerate() {
             *item = u8::from_str_radix(&frame.tag[i * 2..i * 2 + 2], 16)
@@ -149,6 +222,135 @@ pub async fn write<W: AsyncWrite + Unpin>(writer: &mut W, frame: Frame) -> Resul
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
+
+    const TEST_ROOM: &str = "00112233445566778899aabbccddeeff";
+    const OTHER_ROOM: &str = "00112233445566778899aabbccddeefe";
+    const TEST_NONCE: &str = "12345678-1234-4234-8234-123456789abc";
+
+    #[test]
+    fn lan_v1_frame_remains_byte_for_byte_compatible() {
+        const GOLDEN: &str = concat!(
+            r#"{"version":1,"direction":"B-to-A","nonce":"12345678-1234-4234-8234-123456789abc","#,
+            r#""seq":0,"kind":"offer","payload":"test-sdp","tag":"#,
+            r#""eaed2e25be1f88bf8145864de6e2488acf72415baa5ba72b4000ebb593a22eed"}"#,
+        );
+        let key = Arc::new(Key::parse(TEST_ROOM).unwrap());
+        let mut client = Codec::new(key.clone(), TEST_NONCE.into(), false).unwrap();
+        let encoded = client.encode("offer", "test-sdp".into()).unwrap();
+        assert_eq!(serde_json::to_string(&encoded).unwrap(), GOLDEN);
+        let mut host = Codec::new(key, TEST_NONCE.into(), true).unwrap();
+        assert_eq!(
+            host.accept(serde_json::from_str(GOLDEN).unwrap()).unwrap(),
+            ("offer".into(), "test-sdp".into())
+        );
+    }
+
+    #[test]
+    fn relay_rejects_other_rooms_sessions_and_transport_domains() {
+        let key = Arc::new(Key::generate());
+        let mut client = Codec::new_v2(key.clone(), TEST_NONCE.into(), TEST_ROOM, false).unwrap();
+        let mut host = Codec::new_v2(key.clone(), TEST_NONCE.into(), TEST_ROOM, true).unwrap();
+        let mut other_room =
+            Codec::new_v2(key.clone(), TEST_NONCE.into(), OTHER_ROOM, true).unwrap();
+        let mut other_nonce = Codec::new_v2(
+            key.clone(),
+            uuid::Uuid::new_v4().to_string(),
+            TEST_ROOM,
+            true,
+        )
+        .unwrap();
+        let mut lan_client = Codec::new(key.clone(), TEST_NONCE.into(), false).unwrap();
+        let mut lan_host = Codec::new(key, TEST_NONCE.into(), true).unwrap();
+        let relay =
+            serde_json::to_string(&client.encode("offer", "test-sdp".into()).unwrap()).unwrap();
+
+        let decode = || serde_json::from_str::<Frame>(&relay).unwrap();
+        assert_eq!(other_room.accept(decode()).unwrap_err(), "AUTH_REJECTED");
+        assert!(other_nonce.accept(decode()).is_err());
+        assert!(lan_host.accept(decode()).is_err());
+        let mut downgrade = decode();
+        downgrade.version = 1;
+        assert_eq!(lan_host.accept(downgrade).unwrap_err(), "AUTH_REJECTED");
+
+        let mut upgrade = lan_client.encode("offer", "test-sdp".into()).unwrap();
+        upgrade.version = 2;
+        assert_eq!(host.accept(upgrade).unwrap_err(), "AUTH_REJECTED");
+        assert_eq!(
+            host.accept(decode()).unwrap(),
+            ("offer".into(), "test-sdp".into())
+        );
+    }
+
+    #[test]
+    fn relay_authenticates_kind_payload_direction_and_sequence_before_advancing() {
+        let key = Arc::new(Key::generate());
+        let mut client = Codec::new_v2(key.clone(), TEST_NONCE.into(), TEST_ROOM, false).unwrap();
+        let mut host = Codec::new_v2(key, TEST_NONCE.into(), TEST_ROOM, true).unwrap();
+        let offer = serde_json::to_string(&client.encode("offer", "sdp".into()).unwrap()).unwrap();
+        let ice =
+            serde_json::to_string(&client.encode("ice", "candidate".into()).unwrap()).unwrap();
+        let make_offer = || serde_json::from_str::<Frame>(&offer).unwrap();
+        let make_ice = || serde_json::from_str::<Frame>(&ice).unwrap();
+        let mut kind = make_offer();
+        kind.kind = "ice".into();
+        let mut payload = make_offer();
+        payload.payload.push('!');
+        assert!(client.accept(make_offer()).is_err());
+        assert!(host.accept(make_ice()).is_err());
+        assert!(host.accept(kind).is_err());
+        assert!(host.accept(payload).is_err());
+        assert_eq!(
+            host.accept(make_offer()).unwrap(),
+            ("offer".into(), "sdp".into())
+        );
+        assert!(host.accept(make_offer()).is_err());
+        assert_eq!(
+            host.accept(make_ice()).unwrap(),
+            ("ice".into(), "candidate".into())
+        );
+        let answer = host.encode("answer", "reply".into()).unwrap();
+        assert_eq!(
+            client.accept(answer).unwrap(),
+            ("answer".into(), "reply".into())
+        );
+    }
+
+    #[test]
+    fn relay_rejects_invalid_rooms_and_oversized_serialized_payloads() {
+        let key = Arc::new(Key::generate());
+        for room in [
+            "",
+            &TEST_ROOM[1..],
+            "00112233445566778899AABBCCDDEEFF",
+            "00112233445566778899aabbccddeefg",
+        ] {
+            assert_eq!(
+                Codec::new_v2(key.clone(), TEST_NONCE.into(), room, false)
+                    .err()
+                    .as_deref(),
+                Some("ROOM_FORMAT")
+            );
+        }
+
+        let mut client = Codec::new_v2(key.clone(), TEST_NONCE.into(), TEST_ROOM, false).unwrap();
+        let mut host = Codec::new_v2(key, TEST_NONCE.into(), TEST_ROOM, true).unwrap();
+        assert_eq!(
+            client
+                .encode("offer", "\"".repeat(MAX_RELAY_FRAME / 2))
+                .err()
+                .as_deref(),
+            Some("WIRE_TOO_LARGE")
+        );
+        let small = client.encode("offer", "fixture".into()).unwrap();
+        assert_eq!(small.seq, 0);
+        let mut oversized: Frame =
+            serde_json::from_slice(&serde_json::to_vec(&small).unwrap()).unwrap();
+        oversized.payload = "\"".repeat(MAX_RELAY_FRAME / 2);
+        assert_eq!(host.accept(oversized).unwrap_err(), "WIRE_TOO_LARGE");
+        assert!(host.accept(small).is_ok());
+    }
+
     #[test]
     fn mac_rejects_tamper_replay_reflection_and_wrong_code() {
         let key = std::sync::Arc::new(Key::generate());
