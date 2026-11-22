@@ -17,24 +17,30 @@ defineEmits<{ refresh: [] }>();
       </button>
     </div>
     <p class="card-description">
-      以下信息来自本机核心。无法读取时保留未知状态。
+      {{
+        loading
+          ? '正在读取本次信息，尚无可展示的结果。'
+          : '以下信息来自本机核心。无法读取时保留未知状态。'
+      }}
     </p>
     <dl class="settings-list">
       <div>
         <dt>应用版本</dt>
-        <dd>{{ runtime?.app_version ?? '未读取' }}</dd>
+        <dd>{{ loading ? '读取中…' : (runtime?.app_version ?? '未读取') }}</dd>
       </div>
       <div>
         <dt>操作系统</dt>
-        <dd>{{ runtime?.os ?? '未读取' }}</dd>
+        <dd>{{ loading ? '读取中…' : (runtime?.os ?? '未读取') }}</dd>
       </div>
       <div>
         <dt>系统架构</dt>
-        <dd>{{ runtime?.arch ?? '未读取' }}</dd>
+        <dd>{{ loading ? '读取中…' : (runtime?.arch ?? '未读取') }}</dd>
       </div>
       <div>
         <dt>采集后端</dt>
-        <dd>{{ runtime?.capture_backend ?? '未读取' }}</dd>
+        <dd>
+          {{ loading ? '读取中…' : (runtime?.capture_backend ?? '未读取') }}
+        </dd>
       </div>
     </dl>
   </section>
@@ -48,11 +54,13 @@ defineEmits<{ refresh: [] }>();
         <dt>远程访问</dt>
         <dd>
           {{
-            runtime
-              ? runtime.remote_access_enabled
-                ? '状态展示尚未接入'
-                : '关闭'
-              : '未读取'
+            loading
+              ? '读取中…'
+              : runtime
+                ? runtime.remote_access_enabled
+                  ? '状态展示尚未接入'
+                  : '关闭'
+                : '未读取'
           }}
         </dd>
       </div>

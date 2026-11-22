@@ -20,7 +20,8 @@ export type DesktopIpcCode =
 const messages: Record<DesktopIpcCode, string> = {
   BROWSER_UNAVAILABLE:
     '暂时无法读取本机能力。请在桌面客户端中重新检测；浏览器预览无法连接本机核心。',
-  IPC_FAILED: '暂时无法读取本机能力，请重新检测。浏览器预览无法连接本机核心。',
+  IPC_FAILED:
+    '暂时无法读取本机能力。请重新检测；若仍失败，请关闭并重新打开客户端。',
   IPC_RESPONSE_INVALID:
     '本机核心返回的信息无法识别，请检查客户端版本后重新检测。',
   IPC_TIMEOUT: '读取本机能力超时，请重新检测。',

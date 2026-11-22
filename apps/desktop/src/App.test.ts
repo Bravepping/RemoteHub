@@ -82,7 +82,8 @@ describe('desktop navigation with real capability boundaries', () => {
     );
     await open();
     await visit('设置');
-    expect(wrapper.get('[role="alert"]').text()).toContain('浏览器预览');
+    expect(wrapper.get('[role="alert"]').text()).toContain('请重新检测');
+    expect(wrapper.get('[role="alert"]').text()).not.toContain('浏览器');
     expect(wrapper.text()).not.toContain('private-error-fixture');
     expect(wrapper.text()).not.toContain('fixture-backend');
     expect(wrapper.text()).toContain('未读取');
@@ -142,12 +143,20 @@ describe('desktop navigation with real capability boundaries', () => {
     );
     wrapper = mount(App, { global: { plugins: [testState()] } });
     await flushPromises();
-    expect(wrapper.get('button').attributes('disabled')).toBeDefined();
-    await wrapper.get('button').trigger('click');
+    const readButton = wrapper
+      .findAll('button')
+      .find((b) => b.text() === '读取中…')!;
+    expect(readButton.attributes('disabled')).toBeDefined();
+    await readButton.trigger('click');
     expect(getRuntimeInfo).toHaveBeenCalledTimes(1);
     done(info);
     await flushPromises();
-    expect(wrapper.get('button').attributes('disabled')).toBeUndefined();
+    expect(
+      wrapper
+        .findAll('button')
+        .find((b) => b.text().includes('重新检测'))!
+        .attributes('disabled'),
+    ).toBeUndefined();
   });
   it('honors a known deep link, and ignores executable-looking hash input', async () => {
     window.history.replaceState(null, '', '/#/sessions');

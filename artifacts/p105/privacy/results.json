@@ -1,0 +1,19 @@
+{
+  "recordedAt": "2026-11-22T17:36:18.714906+08:00",
+  "results": [
+    {
+      "name": "privacy",
+      "exitCode": 0,
+      "expectedTests": 12,
+      "passed": true
+    },
+    {
+      "name": "delivery",
+      "exitCode": 0,
+      "expectedTests": 9,
+      "passed": true
+    }
+  ],
+  "passed": true,
+  "scope": "Offline generated fixtures only; no desktop, cloud or credentials"
+}

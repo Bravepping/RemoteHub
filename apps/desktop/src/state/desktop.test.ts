@@ -87,7 +87,7 @@ describe('actual Pinia with explicitly injected test API', () => {
     store.cancelRead();
     await task;
     expect(api.readRuntime).not.toHaveBeenCalled();
-    expect(store.status).toBe('idle');
+    expect(store.status).toBe('cancelled');
   });
   it('ignores old success after cancel and a new generation even if a test API ignores abort', async () => {
     const old = deferred();

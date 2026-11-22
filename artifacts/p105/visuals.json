@@ -1,0 +1,15 @@
+{
+  "recordedAt": "2026-11-22T17:30:50.732435+08:00",
+  "screenshots": {
+    "home.png": "0c676e6f71e3eb7c85e9e5388e3bd35cf87c2b4b1d6bdf3e36c414ddcf3c8ad1",
+    "settings.png": "d1336c3aa5e4bfe108662ab656a452532dd3cb7a3f8de7cf4c60011667fb5062",
+    "refreshing-sdk-fixture.png": "95b4e93b87d56177f8b44c1f4286fa0e143363626f3d61869e4c3a4229a6ebc7",
+    "native-error-sdk-fixture.png": "90b17ab7739075173f3d6b08d28915c709309f814eb8053dc20ec412a8e5b1d7",
+    "timeout-sdk-fixture.png": "97d23b81c25c66d783cc174eb89e4426a4889fde554e6a8e981fea8ba32bf112",
+    "recovered-sdk-fixture.png": "f774ef6e967c7c312d8f926b8e3670d0fbae7aaf8c152360fd0a935adf5bdc91"
+  },
+  "source": "Actual local Edge screenshots; four SDK fault fixture images visibly marked",
+  "defaultBrowserState": "Actual unavailable capability, no mocked success",
+  "nativeScreenshots": false,
+  "desktopCaptured": false
+}

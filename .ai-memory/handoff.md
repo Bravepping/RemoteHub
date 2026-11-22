@@ -1,3 +1,12 @@
+# P1-05 + C0-DRAFT交接（2026-11-22，实现/离线回归完成，原生补验未完成）
+
+- 已完成带证据：9418db2开工干净/origin一致，用户只批准P1-05和C0-DRAFT。计划/ADR0020先行；原生IPC失败文案不提浏览器；全页读取/刷新/超时/取消/恢复固定反馈、取消与重试入口，新请求清旧字段，Pinia代次/合并和严格响应校验保持。cancelRead用于用户取消，reset用于卸载静默清理。
+- 验证：pnpm verify:p105实际47/47；88前端/18Edge、全feature82/默认56 Rust各1ignored、12生命周期Python、8真实Cargo配置/9隔离测试、默认Windows编译；另12隐私/9交付回归。SDK故障图醒目标记，实际5秒超时/取消迟到/错误脱敏不代表native实测；源码/权限/锁/旧证据不变核对见scripts/p105-evidence.py。
+- 原生限制：最终默认程序两次由窗口工具启动，但工具库存始终无目标，五页均NOT_COMPLETED；无截图/点击/键盘动作，不以P104或Edge补PASS。只读普通/提升检查句柄可见性不一致，原因未定。默认清理权限不足/无窗口前置拒绝后，仅按本轮路径+精确UTC启动时间+两ID提升结束自有测试实例；立即复查短暂仍见，后续独立确认0。未停止用户其他应用，不再试图绕过窗口保护；native/result完整披露。
+- C0：指定C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT已补，原生Foundation↔V+ PC互操作、统一安装器/UI、托管/窗口例外、EasyTier承载、来源/许可/C1/D1–D6待决清单。公开repo/LICENSE文本只读观察commit与hash归档；Android qiin2333/moonlight-vplus不是PC qiin2333/moonlight-qt。观察commit未绑定旧安装器、未签署C0/完成C1、未安装启动三件套。
+- 相关文件：state/desktop、ipc/contracts、App/DesktopShell/ReadFeedback/LocalDeviceCard/Settings/p105.css与测试，scripts/p105*；docs/P105_PLAN/TEST_REPORT、ADR0020/C0草案及当前指引。新证据artifacts/p105。剩余最终证据/隐私、正常GitHub提交后停止；SHA以Git记录/回复为准，P1-06/兼容原型未开始。
+- 边界：无云/双机/桌面采集/实际远控输入、新权限/依赖或三件套运行；R06继续OPEN_NOT_REPRODUCED/根因未知。原生五页未验收为显式剩余限制，旧报告/统计不改。以下历史不覆盖本段。
+
 # P1-04交接（2026-11-22，实现与验证完成，待Git交付）
 
 - 已完成带证据：481e17e开工干净/origin一致，用户仅批准P1-04；P104计划/ADR0019及合同先行。Pinia3.0.4实际安装/锁定，每应用独立store和DesktopApi；只读真实get_runtime_info、严格响应校验、固定错误、5秒/取消/代次/并发合并/卸载清理。App/main接入，bridge兼容导出，旧实验与采集函数保留。

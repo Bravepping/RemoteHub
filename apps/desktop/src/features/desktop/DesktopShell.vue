@@ -10,9 +10,17 @@ import SettingsPage from './pages/SettingsPage.vue';
 import { pages, pageFromHash, pageLink, type PageId } from './navigation';
 import './desktop.css';
 import './p103.css';
+import './p105.css';
+import ReadFeedback from './ReadFeedback.vue';
+import type { ReadStatus } from '../../state/desktop';
 
-defineProps<{ runtime?: RuntimeInfo; loading: boolean; error: string }>();
-defineEmits<{ refresh: [] }>();
+defineProps<{
+  runtime?: RuntimeInfo;
+  loading: boolean;
+  readStatus: ReadStatus;
+  feedback: string;
+}>();
+defineEmits<{ refresh: []; cancelRead: [] }>();
 const active = ref<PageId>(pageFromHash(window.location.hash));
 const current = computed(() => pages.find((p) => p.id === active.value)!);
 const heading = ref<HTMLElement>();
@@ -67,11 +75,13 @@ onUnmounted(() => {
       </nav>
       <div class="sidebar-footer">
         <span class="status-dot" />{{
-          runtime
-            ? runtime.remote_access_enabled
-              ? '远程状态尚未接入'
-              : '远程访问关闭'
-            : '本机能力未连接'
+          loading
+            ? '正在读取本机信息'
+            : runtime
+              ? runtime.remote_access_enabled
+                ? '远程状态尚未接入'
+                : '远程访问关闭'
+              : '本机能力未连接'
         }}
         <p>仅在双方同意后连接</p>
       </div>
@@ -85,10 +95,12 @@ onUnmounted(() => {
         </div>
         <span class="local-badge"><AppIcon name="shield" />本机工作区</span>
       </header>
-      <div v-if="error" class="capability-notice" role="alert">
-        <AppIcon name="info" />
-        <p>{{ error }}</p>
-      </div>
+      <ReadFeedback
+        :status="readStatus"
+        :message="feedback"
+        @cancel="$emit('cancelRead')"
+        @retry="$emit('refresh')"
+      />
       <HomePage
         v-if="active === 'home'"
         :runtime="runtime"

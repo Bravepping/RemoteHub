@@ -1,0 +1,40 @@
+.product-shell .read-feedback {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px 15px;
+  margin-bottom: 20px;
+  background: #eef5fd;
+  border: 1px solid #d6e5f5;
+  border-radius: 9px;
+  color: #456a94;
+}
+.product-shell .read-feedback-message {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+.product-shell .read-feedback-message p {
+  font-size: 12px;
+  line-height: 1.7;
+  color: inherit;
+}
+.product-shell .read-feedback-message svg {
+  width: 18px;
+  height: 18px;
+}
+.product-shell .read-feedback.read-failed {
+  color: #85672c;
+  background: #fffaf0;
+  border-color: #f2dfb5;
+}
+.product-shell .read-feedback button {
+  flex-shrink: 0;
+}
+@media (max-width: 760px) {
+  .product-shell .read-feedback {
+    flex-wrap: wrap;
+  }
+}

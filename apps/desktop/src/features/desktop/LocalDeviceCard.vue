@@ -23,19 +23,23 @@ defineEmits<{ refresh: [] }>();
       </h2>
       <p role="status">
         {{
-          runtime
-            ? '仅表示本机核心可响应，不代表设备在线或已获远控授权。'
-            : '启动桌面客户端后，可在这里查看真实本机信息。'
+          loading
+            ? '正在等待本机核心回应；读取信息不会开启远程访问。'
+            : runtime
+              ? '仅表示本机核心可响应，不代表设备在线或已获远控授权。'
+              : '启动桌面客户端后，可在这里查看真实本机信息。'
         }}
       </p>
       <div class="local-card-tags">
-        <span v-if="runtime" class="muted-chip"
+        <span v-if="runtime && !loading" class="muted-chip"
           >{{ runtime.os }} · {{ runtime.arch }}</span
         >
         <span class="muted-chip">{{
-          runtime?.remote_access_enabled === false
-            ? '远程访问关闭'
-            : '远程服务尚未接入'
+          loading
+            ? '等待本次读取'
+            : runtime?.remote_access_enabled === false
+              ? '远程访问关闭'
+              : '远程服务尚未接入'
         }}</span>
       </div>
     </div>

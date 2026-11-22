@@ -6,7 +6,7 @@ import DesktopShell from './features/desktop/DesktopShell.vue';
 import ExperimentWorkspace from './features/experiments/ExperimentWorkspace.vue';
 
 const desktop = useDesktopStore();
-const { runtime, loading, errorMessage: error } = storeToRefs(desktop);
+const { runtime, loading, status, feedback } = storeToRefs(desktop);
 const experiment = computed(() =>
   Boolean(
     runtime.value?.p004_enabled ||
@@ -16,7 +16,7 @@ const experiment = computed(() =>
 );
 const refresh = () => desktop.refresh();
 onMounted(refresh);
-onUnmounted(() => desktop.cancelRead());
+onUnmounted(() => desktop.reset());
 </script>
 <template>
   <ExperimentWorkspace
@@ -27,7 +27,9 @@ onUnmounted(() => desktop.cancelRead());
     v-else
     :runtime="runtime"
     :loading="loading"
-    :error="error"
+    :read-status="status"
+    :feedback="feedback"
     @refresh="refresh"
+    @cancel-read="desktop.cancelRead()"
   />
 </template>

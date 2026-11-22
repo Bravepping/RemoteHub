@@ -1,13 +1,13 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P1-04）
-Phase0限定退出已批准、父项7/7，P004例外已接受；R06技术OPEN_NOT_REPRODUCED/历史根因未定，风险接受不等于修复。P1-01至03已审查，最新481e17e后只授权P1-04，提交后等审查，不进入P1-05/06。
-当前入口：docs/P104_PLAN.md、P104_IPC_CONTRACT.md、P104_TEST_REPORT.md、ADR0019、DEVELOPMENT_GUIDE和handoff。pnpm verify:p104独立artifacts/p104：47检查、79前端/15Edge、全feature82/默认56 Rust各1ignored、12Python、8真实Cargo配置/9隔离测试及默认Windows编译；依赖审计当时0已知漏洞。
-Pinia精确3.0.4（MIT，现有Vue3.5匹配），新增12包，无新安装脚本；传递speakingurl为BSD-3-Clause，后续二进制分发须保留相应版权许可。本轮无安装包发布。Cargo/权限/原生媒体/旧实验及历史证据不改，Node锁只增加Pinia相关项。
-App通过真实Pinia拥有本机读取状态；DesktopApi固定get_runtime_info、运行时响应校验/冻结、固定错误、5秒/取消。每应用独立服务注入，测试替身不进入默认路径；取消代次防迟到成功/错误/finally覆盖新状态，卸载清timer/监听。取消只停止等待只读IPC，不能声称取消native任务/会话；无事件源就不伪造订阅。设备/正式会话仍空态，不造设备/统计。
-实际原生只读首页观察确认IPC→Pinia→UI，本轮无截图/键鼠动作；只验证首页，不扩成原生刷新/取消/超时、双机或新媒体。Edge新增SDK替身带醒目标记，不作原生证据。默认窗口仍留给用户查看，后续编译可能有占用；不得在旧实验窗操作。无阿里云/采集/注入，历史云授权已结束，兼容运行尚未实现。
+# 当前决议与恢复入口（2026-11-22，P1-05 + C0-DRAFT）
+Phase0限定退出/父项7/7及P004例外已批准；R06技术OPEN_NOT_REPRODUCED/根因未定，风险接受不等于修复。P1-01至04已交付，9418db2之后仅批准P1-05中文反馈和C0草案，提交后等审查，不进入P1-06或兼容原型。
+当前入口docs/P105_PLAN.md、P105_TEST_REPORT.md、C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md、ADR0020、DEVELOPMENT_GUIDE和handoff。pnpm verify:p105独立artifacts/p105：47检查、88前端/18Edge、全feature82/默认56 Rust各1ignored、12生命周期Python、8真实Cargo配置/9隔离测试及默认Windows编译；另12隐私/9交付工具。无新依赖/锁、Rust/原生权限/CSP/媒体变更。
+新请求立即清runtime，loading/refreshing/ready/error/cancelled/idle有固定中文反馈；用户cancelRead取消当前等待，卸载reset静默失效。只读invoke不可撤销，代次隔离防旧成功/错误/finally覆盖新读取。只有BROWSER_UNAVAILABLE提浏览器；未知原生异常只按固定码重建，不显示端点/凭据/SDP。设备/会话未接入保持空态，Pinia不是权限边界。
+本轮默认Tauri两次启动后窗口工具无法返回目标，原生五页均NOT_COMPLETED，无原生文本/点击/键盘/截图，不用旧结果或Edge替代。普通/提升读取窗口句柄可见性不一致，原因未定；两个自有测试实例按路径/ID/精确启动时间清理，后续检查0，不动用户其他程序。避免继续盲目重启/绕过工具保护，需可靠观察入口后才原生补验。
+C0仅DRAFT未签署：Foundation Sunshine↔Moonlight V+ PC原生互操作和统一安装器/UI为目标；受管理进程/独立播放窗/EasyTier驱动权限均待用户决策及C1来源/许可。公开候选AlkaidLab/foundation-sunshine、qiin2333/moonlight-qt、EasyTier/EasyTier已只读观察repo/LICENSE头/commit/hash；qiin2333/moonlight-vplus为Android，不可混用。未绑定旧安装器、未实现/安装/启动第三方、未完成C1。旧报告/哈希清单保留，无云/双机/桌面/输入，旧云授权不复活。
 
-以下历史记忆不覆盖本段和最新用户授权。
+以下历史不覆盖本段及最新授权。
 
 2026-11-21 首次工程。Windows / Tauri v2 / Vue 3 / Rust，遵循原交付设计；Phase 0 真实媒体优先。不可用时报告失败，不显示假设备/RTT/FPS。不实现未授权后台监控、权限提升、凭据采集。
 

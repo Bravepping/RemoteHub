@@ -1,0 +1,52 @@
+{
+  "recordedAt": "2026-11-22T17:27:14.290891+08:00",
+  "scope": "Unauthenticated public repository metadata and LICENSE text only; no binary download, third-party execution or cloud service access",
+  "sources": [
+    {
+      "repository": "https://github.com/AlkaidLab/foundation-sunshine",
+      "branchObserved": "master",
+      "sourceCommitObserved": "1dec6ff33d746d6c68164809af967a8f93aee971",
+      "commitDate": "2026-11-22T09:17:03Z",
+      "licenseUrl": "https://raw.githubusercontent.com/AlkaidLab/foundation-sunshine/1dec6ff33d746d6c68164809af967a8f93aee971/LICENSE",
+      "licenseHeaderObserved": "GPL-v3-text",
+      "licenseBytes": 35149,
+      "licenseTextSha256": "3972dc9744f6499f0f9b2dbf76696f2ae7ad8af9b23dde66d6af86c9dfb36986",
+      "localInstallerCorrespondence": "NOT_VERIFIED",
+      "distributionLicenseReview": "PENDING_EXACT_RELEASE_AND_DEPENDENCIES",
+      "interoperability": "NOT_RUN"
+    },
+    {
+      "repository": "https://github.com/qiin2333/moonlight-qt",
+      "branchObserved": "master",
+      "sourceCommitObserved": "17a5e20e8f3259fdba905fdea690b5bc4ecacffe",
+      "commitDate": "2026-11-21T14:08:00Z",
+      "licenseUrl": "https://raw.githubusercontent.com/qiin2333/moonlight-qt/17a5e20e8f3259fdba905fdea690b5bc4ecacffe/LICENSE",
+      "licenseHeaderObserved": "GPL-v3-text",
+      "licenseBytes": 35141,
+      "licenseTextSha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",
+      "localInstallerCorrespondence": "NOT_VERIFIED",
+      "distributionLicenseReview": "PENDING_EXACT_RELEASE_AND_DEPENDENCIES",
+      "interoperability": "NOT_RUN"
+    },
+    {
+      "repository": "https://github.com/EasyTier/EasyTier",
+      "branchObserved": "main",
+      "sourceCommitObserved": "45a6b6f1769f95590a396f4962e58d654b6e0380",
+      "commitDate": "2026-11-20T14:41:11Z",
+      "licenseUrl": "https://raw.githubusercontent.com/EasyTier/EasyTier/45a6b6f1769f95590a396f4962e58d654b6e0380/LICENSE",
+      "licenseHeaderObserved": "LGPL-v3-text",
+      "licenseBytes": 7652,
+      "licenseTextSha256": "e3a994d82e644b03a792a930f574002658412f62407f5fee083f2555c5f23118",
+      "localInstallerCorrespondence": "NOT_VERIFIED",
+      "distributionLicenseReview": "PENDING_EXACT_RELEASE_AND_DEPENDENCIES",
+      "interoperability": "NOT_RUN"
+    }
+  ],
+  "allPublicLicenseHeadersVerified": true,
+  "androidDisambiguation": {
+    "excludedRepository": "https://github.com/qiin2333/moonlight-vplus",
+    "basis": "Public repository describes Android client; not the desktop candidate"
+  },
+  "targetVersionsApproved": false,
+  "localInstallersRehashedThisRound": false
+}
