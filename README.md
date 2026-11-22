@@ -26,7 +26,7 @@
 | `crates/hub-capture-win` | DXGI Desktop Duplication |
 | `crates/hub-encode-win` | Media Foundation H.264 |
 | `crates/hub-webrtc` | WebRTC、H.264、LAN、ICE、DataChannel、`remote_input.rs`、SendInput |
-| `crates/hub-identity` | Ed25519 / 当前 Windows 用户 DPAPI |
+| `crates/hub-identity` | Ed25519 / 当前 Windows 用户 DPAPI、一次性会话签名验证 |
 | `crates/hub-rendezvous-probe` | Axum 服务端 `src/bin/v2_signaling.rs` 与 V2 回环集成测试 |
 | `crates/hub-signal-v2` | 原生回环 WebSocket 客户端与共享信令协议 |
 | `crates/hub-turn-credentials`、`hub-probe-wire` | TURN / 信令协议现有基础 |
@@ -58,13 +58,14 @@ cargo build -p remotehub-desktop --profile probe --features p3-lan,custom-protoc
 
 WebSocket 本地信令独立程序采用 `REMOTEHUB_V2_TOKEN`（临时随机 64 位十六进制）、`REMOTEHUB_V2_BIND`（默认 `127.0.0.1:48620`），此二进制只允许回环，TLS 证书/私钥须成对配置。握手使用 Rust 客户端的 Bearer 请求头；共享 token 只用于访问本地中继，不是设备身份。端到端信令复用配对密钥和 HMAC，将消息的房间、会话、方向及顺序绑定；这不加密信令。桌面诊断默认不编入：仅 `v2-loopback-diagnostic,custom-protocol` 构建显示入口，原生确认后连接固定的 `127.0.0.1:48620` 并验证四条内置消息及退出；需先单独启动本机中继，两个进程使用同一临时令牌。不会连接其他设备、采集屏幕或操作键鼠；不替代真实 LAN TCP 路径。
 
-原生库也提供显式回环 WSS，使用独立配发的 CA 验证服务端证书链与 IP SAN，不修改系统信任，握手失败不回退到明文。桌面本机诊断目前只用回环 WS。对外开放前还须接通生产会话的设备身份、来源授权和加密；未部署云端。
+原生库的回环 WSS 使用独立配发的 CA 验证服务端证书链与 IP SAN，不修改系统信任，握手失败不回退到明文。回环测试另用两枚临时 Ed25519 身份签名，通过预先信任的完整公钥校验房间、会话、角色、一次性挑战、有效期及信令内容，再使用 SDP/ICE 建立 DataChannel。该测试的公钥和挑战由测试夹具预先提供；真实跨机公钥配对、授权界面和生产会话接入仍未实现。桌面产品继续使用 LAN TCP，桌面本机诊断仍只使用回环 WS；未部署云端。
 
 ## 本分支已执行验证
 
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（118 项）、`pnpm lint`、`pnpm build` 通过。
 - Linux：`cargo test -p hub-webrtc --features p3-lan,v2-loopback-signaling --locked` 22 项通过、1 项忽略；覆盖 V2 信令鉴权以及旧 LAN v1 帧逐字节兼容。
-- Linux：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked` 13 项通过，覆盖回环 WebRTC 合成数据、认证失败/取消时清理、WSS 证书和 IP 校验以及禁止降级；没有屏幕采集或键鼠注入。`cargo test -p hub-signal-v2 --locked` 2 项、`cargo fmt --all -- --check` 通过。
+- Linux：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked` 14 项通过，覆盖 WS/WSS 的原生 WebRTC 回环链路、设备签名后应用 SDP/ICE、认证失败/取消清理、TLS 证书和 IP 校验与禁止降级；未采集屏幕或注入键鼠。`cargo test -p hub-signal-v2 --locked` 2 项、`cargo fmt --all -- --check` 通过。
+- Linux：`cargo test -p hub-identity --features ephemeral-test --locked` 7 项通过，覆盖设备角色、错误公钥/会话、篡改、过期与重放。
 - Windows x64 MSVC 目标：桌面常规 `p3-lan` 与可选 `v2-loopback-diagnostic` 交叉检查、诊断版严格 Clippy 和 WebRTC 目标测试代码检查通过；未在 Windows 真机运行诊断版。交叉检查本身不是真机证据。
 - Windows 实机（用户报告，2026-11-22）：两台电脑在同一局域网使用同一份 `77479f2` Windows x64 包，按约定回归场景测试均正常（画面、自然结束及英文键入后手动停止）。这不覆盖公网、TURN、安装器或 R06 的全量可靠性验证。
 

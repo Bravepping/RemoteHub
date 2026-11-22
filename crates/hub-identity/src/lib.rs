@@ -2,8 +2,10 @@
 use ed25519_dalek::{Signature, Signer, SigningKey, VerifyingKey};
 use sha2::{Digest, Sha256};
 use std::{fmt, path::Path};
-#[cfg(any(windows, test))]
+#[cfg(any(windows, test, feature = "ephemeral-test"))]
 use zeroize::Zeroizing;
+
+pub mod session;
 
 #[cfg(windows)]
 mod windows;
@@ -58,6 +60,16 @@ const PAYLOAD_MAGIC: &[u8; 8] = b"RHIDKEY1";
 const PROOF_DOMAIN: &[u8] = b"RemoteHub.identity.local-proof.v1\0";
 
 impl Identity {
+    /// For isolated protocol tests only. Never reads or writes the local store.
+    #[cfg(any(test, feature = "ephemeral-test"))]
+    pub fn generate_ephemeral() -> Result<Self, Error> {
+        let mut seed = Zeroizing::new([0u8; 32]);
+        getrandom::fill(&mut *seed).map_err(|_| Error::Random)?;
+        Ok(Self {
+            key: SigningKey::from_bytes(&seed),
+        })
+    }
+
     pub fn public(&self) -> PublicIdentity {
         let public_key = self.key.verifying_key().to_bytes();
         let fingerprint: String = Sha256::digest(public_key)

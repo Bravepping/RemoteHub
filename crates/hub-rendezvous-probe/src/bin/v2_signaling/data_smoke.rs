@@ -1,15 +1,26 @@
 // Real ICE/DTLS/SCTP over localhost, with synthetic text only.
-use super::tests::{start_server, TOKEN};
+use super::{
+    tests::{start_server, TOKEN},
+    tls_smoke::{fixture, make_ca, start_tls},
+};
+use hub_identity::{
+    session::{PendingSessionProof, SessionBinding, SessionRole},
+    Identity,
+};
 use hub_webrtc::{
     authenticated_relay::{
-        AuthenticatedLoopbackRelay, AuthenticatedRelayEvent, ClientError, RelayToken, Role, RoomId,
-        SignalKind,
+        AuthenticatedLoopbackRelay, AuthenticatedRelayEvent, ClientError, LoopbackTlsTrust,
+        RelayToken, Role, RoomId, SignalKind,
     },
     lan_wire::Key,
     pinned_runtime::PinnedRuntime,
 };
 use rtc::ice::{mdns::MulticastDnsMode, network_type::NetworkType};
-use std::{net::Ipv4Addr, sync::Arc, time::Duration};
+use std::{
+    net::{Ipv4Addr, SocketAddr},
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use tokio::{sync::mpsc, time::timeout};
 use webrtc::{
     data_channel::{DataChannel, DataChannelEvent},
@@ -76,21 +87,98 @@ impl Peer {
     }
 }
 
+struct TestDevices {
+    binding: SessionBinding,
+    host: Identity,
+    viewer: Identity,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SignedSignal {
+    payload: String,
+    signature: Vec<u8>,
+}
+
+fn signal_bytes(kind: SignalKind, payload: &str) -> Vec<u8> {
+    let label = match kind {
+        SignalKind::Offer => b'O',
+        SignalKind::Answer => b'A',
+        SignalKind::Ice => b'I',
+    };
+    let mut bytes = Vec::with_capacity(1 + payload.len());
+    bytes.push(label);
+    bytes.extend_from_slice(payload.as_bytes());
+    bytes
+}
+
+fn wall_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
 // The relay forwards these inner authenticated frames without the pairing key.
+// For the WSS fixture, the devices know each other's public key and convey
+// the verifier's fresh challenge out of band; no public bootstrap is implied.
 async fn exchange(
     from: &mut AuthenticatedLoopbackRelay,
     to: &mut AuthenticatedLoopbackRelay,
     kind: SignalKind,
     payload: String,
+    proof: Option<(&TestDevices, SessionRole)>,
 ) -> String {
-    from.send_signal(kind, payload).await.unwrap();
+    let (outbound, pending) = match proof {
+        Some((d, role)) => {
+            let identity = match role {
+                SessionRole::Host => &d.host,
+                SessionRole::Viewer => &d.viewer,
+            };
+            let pending = PendingSessionProof::issue(
+                &d.binding,
+                role,
+                wall_seconds(),
+                Duration::from_secs(15),
+            )
+            .unwrap();
+            let signature = identity
+                .sign_session_proof(
+                    &d.binding,
+                    role,
+                    pending.challenge(),
+                    &signal_bytes(kind, &payload),
+                    wall_seconds(),
+                )
+                .unwrap();
+            let signed = SignedSignal {
+                payload,
+                signature: signature.to_vec(),
+            };
+            (serde_json::to_string(&signed).unwrap(), Some(pending))
+        }
+        None => (payload, None),
+    };
+    from.send_signal(kind, outbound).await.unwrap();
     let AuthenticatedRelayEvent::Signal { kind: signal, data } =
         to.next_event(Duration::from_secs(3)).await.unwrap()
     else {
         panic!("expected authenticated signaling");
     };
     assert_eq!(signal, kind);
-    data
+    let Some(mut pending) = pending else {
+        return data;
+    };
+    let received: SignedSignal = serde_json::from_str(&data).unwrap();
+    let signature: [u8; 64] = received.signature.try_into().unwrap();
+    pending
+        .verify(
+            &signature,
+            &signal_bytes(kind, &received.payload),
+            wall_seconds(),
+        )
+        .unwrap();
+    received.payload
 }
 
 async fn opened(channel: &Arc<dyn DataChannel>) {
@@ -109,6 +197,7 @@ async fn exercise(
     host: &mut Peer,
     viewer_relay: &mut AuthenticatedLoopbackRelay,
     host_relay: &mut AuthenticatedLoopbackRelay,
+    devices: Option<&TestDevices>,
 ) {
     let channel = viewer
         .pc
@@ -122,7 +211,14 @@ async fn exercise(
         .set_local_description(offer.clone())
         .await
         .unwrap();
-    let offer = exchange(viewer_relay, host_relay, SignalKind::Offer, offer.sdp).await;
+    let offer = exchange(
+        viewer_relay,
+        host_relay,
+        SignalKind::Offer,
+        offer.sdp,
+        devices.map(|d| (d, SessionRole::Viewer)),
+    )
+    .await;
     host.pc
         .set_remote_description(RTCSessionDescription::offer(offer).unwrap())
         .await
@@ -130,7 +226,14 @@ async fn exercise(
 
     let answer = host.pc.create_answer(None).await.unwrap();
     host.pc.set_local_description(answer.clone()).await.unwrap();
-    let answer = exchange(host_relay, viewer_relay, SignalKind::Answer, answer.sdp).await;
+    let answer = exchange(
+        host_relay,
+        viewer_relay,
+        SignalKind::Answer,
+        answer.sdp,
+        devices.map(|d| (d, SessionRole::Host)),
+    )
+    .await;
     viewer
         .pc
         .set_remote_description(RTCSessionDescription::answer(answer).unwrap())
@@ -138,13 +241,27 @@ async fn exercise(
         .unwrap();
 
     let viewer_ice = serde_json::to_string(&viewer.ice.recv().await.unwrap()).unwrap();
-    let viewer_ice = exchange(viewer_relay, host_relay, SignalKind::Ice, viewer_ice).await;
+    let viewer_ice = exchange(
+        viewer_relay,
+        host_relay,
+        SignalKind::Ice,
+        viewer_ice,
+        devices.map(|d| (d, SessionRole::Viewer)),
+    )
+    .await;
     host.pc
         .add_ice_candidate(serde_json::from_str(&viewer_ice).unwrap())
         .await
         .unwrap();
     let host_ice = serde_json::to_string(&host.ice.recv().await.unwrap()).unwrap();
-    let host_ice = exchange(host_relay, viewer_relay, SignalKind::Ice, host_ice).await;
+    let host_ice = exchange(
+        host_relay,
+        viewer_relay,
+        SignalKind::Ice,
+        host_ice,
+        devices.map(|d| (d, SessionRole::Host)),
+    )
+    .await;
     viewer
         .pc
         .add_ice_candidate(serde_json::from_str(&host_ice).unwrap())
@@ -175,33 +292,87 @@ async fn exercise(
 async fn native_webrtc_connects_with_authenticated_sdp_and_trickle_ice_over_v2_signal() {
     let (addr, _, server) = start_server().await;
     let token = RelayToken::new(TOKEN.to_owned()).unwrap();
+    native_peers_round_trip(addr, &token, None).await;
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn native_webrtc_connects_over_wss_with_verified_device_signatures() {
+    let (app, token) = fixture();
+    let ca = make_ca();
+    let trust = LoopbackTlsTrust::from_ca_der(ca.der().as_ref()).unwrap();
+    let (addr, server) = start_tls(&ca, "127.0.0.1", app.clone()).await;
+    native_peers_round_trip(addr, &token, Some(&trust)).await;
+    assert!(app.rooms.lock().unwrap().is_empty());
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+}
+
+async fn native_peers_round_trip(
+    addr: SocketAddr,
+    token: &RelayToken,
+    trust: Option<&LoopbackTlsTrust>,
+) {
     let room = RoomId::random();
     let key = Arc::new(Key::generate());
-    let nonce = uuid::Uuid::new_v4().to_string();
-    let mut host_relay = AuthenticatedLoopbackRelay::connect(
-        addr,
-        &token,
-        RoomId::new(room.as_str().to_owned()).unwrap(),
-        Role::Host,
-        key.clone(),
-        nonce.clone(),
-    )
-    .await
-    .unwrap();
+    let first_nonce = uuid::Uuid::new_v4();
+    let nonce = first_nonce.to_string();
+    let devices = trust.map(|_| {
+        let host = Identity::generate_ephemeral().unwrap();
+        let viewer = Identity::generate_ephemeral().unwrap();
+        let room = uuid::Uuid::parse_str(room.as_str()).unwrap();
+        let mut session_nonce = [0; 32];
+        session_nonce[..16].copy_from_slice(first_nonce.as_bytes());
+        session_nonce[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
+        let binding = SessionBinding::new(
+            *room.as_bytes(),
+            session_nonce,
+            host.public().public_key,
+            viewer.public().public_key,
+        )
+        .unwrap();
+        TestDevices {
+            binding,
+            host,
+            viewer,
+        }
+    });
+    let connect = async |role| {
+        let room = RoomId::new(room.as_str().to_owned()).unwrap();
+        match trust {
+            Some(trust) => {
+                AuthenticatedLoopbackRelay::connect_wss(
+                    addr,
+                    token,
+                    room,
+                    role,
+                    key.clone(),
+                    nonce.clone(),
+                    trust,
+                )
+                .await
+            }
+            None => {
+                AuthenticatedLoopbackRelay::connect(
+                    addr,
+                    token,
+                    room,
+                    role,
+                    key.clone(),
+                    nonce.clone(),
+                )
+                .await
+            }
+        }
+        .unwrap()
+    };
+    let mut host_relay = connect(Role::Host).await;
     assert!(matches!(
         host_relay.next_event(Duration::from_secs(3)).await.unwrap(),
         AuthenticatedRelayEvent::Waiting
     ));
-    let mut viewer_relay = AuthenticatedLoopbackRelay::connect(
-        addr,
-        &token,
-        RoomId::new(room.as_str().to_owned()).unwrap(),
-        Role::Viewer,
-        key,
-        nonce,
-    )
-    .await
-    .unwrap();
+    let mut viewer_relay = connect(Role::Viewer).await;
     for relay in [&mut host_relay, &mut viewer_relay] {
         assert!(matches!(
             relay.next_event(Duration::from_secs(3)).await.unwrap(),
@@ -212,7 +383,13 @@ async fn native_webrtc_connects_with_authenticated_sdp_and_trickle_ice_over_v2_s
     let mut host = Peer::new().await;
     let result = timeout(
         Duration::from_secs(12),
-        exercise(&mut viewer, &mut host, &mut viewer_relay, &mut host_relay),
+        exercise(
+            &mut viewer,
+            &mut host,
+            &mut viewer_relay,
+            &mut host_relay,
+            devices.as_ref(),
+        ),
     )
     .await;
     viewer.pc.close().await.unwrap();
@@ -230,8 +407,6 @@ async fn native_webrtc_connects_with_authenticated_sdp_and_trickle_ice_over_v2_s
         Err(ClientError::Closed)
     );
     host_relay.leave().await.unwrap();
-    server.abort();
-    assert!(server.await.unwrap_err().is_cancelled());
 }
 
 async fn mixed_pair(

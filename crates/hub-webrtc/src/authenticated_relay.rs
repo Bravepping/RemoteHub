@@ -6,7 +6,7 @@ use crate::lan_wire::{Codec, Key};
 use hub_signal_v2::{wire, LoopbackRelay, RelayEvent};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-pub use hub_signal_v2::{ClientError, RelayToken, Role, RoomId, SignalKind};
+pub use hub_signal_v2::{ClientError, LoopbackTlsTrust, RelayToken, Role, RoomId, SignalKind};
 
 /// Payloads are intentionally not serializable or Debug; do not log raw SDP/ICE
 /// or send it through a diagnostic UI bridge.
@@ -35,9 +35,39 @@ impl AuthenticatedLoopbackRelay {
         key: Arc<Key>,
         nonce: String,
     ) -> Result<Self, ClientError> {
+        Self::connect_with_trust(address, token, room, role, key, nonce, None).await
+    }
+
+    /// Use WSS with independently provisioned trust, checked against the
+    /// literal loopback address. TLS failure is terminal, never a WS fallback.
+    /// The same room-bound HMAC still authenticates every peer signal.
+    pub async fn connect_wss(
+        address: SocketAddr,
+        token: &RelayToken,
+        room: RoomId,
+        role: Role,
+        key: Arc<Key>,
+        nonce: String,
+        trust: &LoopbackTlsTrust,
+    ) -> Result<Self, ClientError> {
+        Self::connect_with_trust(address, token, room, role, key, nonce, Some(trust)).await
+    }
+
+    async fn connect_with_trust(
+        address: SocketAddr,
+        token: &RelayToken,
+        room: RoomId,
+        role: Role,
+        key: Arc<Key>,
+        nonce: String,
+        trust: Option<&LoopbackTlsTrust>,
+    ) -> Result<Self, ClientError> {
         let codec = Codec::new_v2(key, nonce, room.as_str(), role == Role::Host)
             .map_err(|_| ClientError::Protocol)?;
-        let relay = LoopbackRelay::connect(address, token, room, role).await?;
+        let relay = match trust {
+            Some(trust) => LoopbackRelay::connect_wss(address, token, room, role, trust).await?,
+            None => LoopbackRelay::connect(address, token, room, role).await?,
+        };
         Ok(Self {
             relay: Some(relay),
             codec,

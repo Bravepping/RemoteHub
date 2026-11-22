@@ -8,14 +8,14 @@ use rcgen::{
 
 const WAIT: Duration = Duration::from_secs(3);
 
-fn make_ca() -> CertifiedIssuer<'static, KeyPair> {
+pub(super) fn make_ca() -> CertifiedIssuer<'static, KeyPair> {
     let mut params = CertificateParams::default();
     params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     params.key_usages = vec![KeyUsagePurpose::KeyCertSign];
     CertifiedIssuer::self_signed(params, KeyPair::generate().unwrap()).unwrap()
 }
 
-fn fixture() -> (Arc<App>, RelayToken) {
+pub(super) fn fixture() -> (Arc<App>, RelayToken) {
     let token = format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple());
     let native = RelayToken::new(token.clone()).unwrap();
     let app = Arc::new(App {
@@ -26,7 +26,7 @@ fn fixture() -> (Arc<App>, RelayToken) {
     (app, native)
 }
 
-async fn start_tls(
+pub(super) async fn start_tls(
     ca: &CertifiedIssuer<'static, KeyPair>,
     san: &'static str,
     app: Arc<App>,

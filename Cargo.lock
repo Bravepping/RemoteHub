@@ -1893,6 +1893,7 @@ name = "hub-identity"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "getrandom 0.4.3",
  "sha2 0.10.9",
  "windows-sys 0.61.2",
  "zeroize",
@@ -1919,6 +1920,7 @@ dependencies = [
  "axum",
  "axum-server",
  "futures-util",
+ "hub-identity",
  "hub-probe-wire",
  "hub-signal-v2",
  "hub-turn-credentials",
