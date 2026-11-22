@@ -30,6 +30,8 @@
 
 - [x] `P0-07-B-PRIVACY` **prepared（扫描器修复与v2交付；R06仍OPEN）** — 两处疑似现场端点硬编码移除，通用地址/载荷检查+扫描器源码自检+固定错误输出，12隐私/9交付正负例通过。只读核查公开仓库可达Git历史/当前跟踪文件/旧ZIP，当前疑似值匹配0，旧对象仍可达，不重写历史。41项安全兼容及5轮本机合成重新通过；新版ZIP/SHA及GitHub实际下载证据独立归档。无产品/依赖/ICE边界变更，无云启动或双机操作，不进入Phase1；20分钟申请等待另行批准。见docs/PHASE0_P007B_PRIVACY_FIX_REPORT.md。
 
+- [x] `R06-v2-PREFLIGHT` **prepared（只读核对与执行清单；启动授权PENDING）** — 基于最新main01bddac，2026-11-22 13:05:17只读核对专用服务停止/disabled、WSS实际SHA、配置/权限/旧材料清理及端口；10项基线与3辅助文件SHA符合。旧90分钟清理器不可复用，新19分钟guard/固定20分钟截止、8分钟后禁新分配的清单及脚本只在本地准备，云端未安装/执行。coturn全局8/用户名4如实披露，本次4分配依单会话/逐轮归零/监测约束，不改配置。11运维+12隐私+9交付离线回归，未重跑产品完整41项，无新云媒体/物理双机/凭据签发。见docs/P007B_R06_EXECUTION_CHECKLIST.md、docs/P007B_R06_PREFLIGHT_REPORT.md及artifacts/r06-preflight；当前不要求两机操作，等待独立20分钟授权。R06 OPEN、Phase0 HOLD、不进入Phase1。
+
 ## Phase 1 · 工程与 UI
 
 - [ ] `P1-01` Cargo + pnpm monorepo、格式化测试脚本

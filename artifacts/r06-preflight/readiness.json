@@ -1,0 +1,40 @@
+{
+  "recordedAt": "2026-11-22T13:15:42.913889+08:00",
+  "inspectionTimestamp": "2026-11-22T13:05:17.454264+08:00",
+  "checks": {
+    "remotehub-turn-g6.service-stopped-disabled": true,
+    "remotehub-p006b.service-stopped-disabled": true,
+    "new-wss-observer-timer-not-installed": true,
+    "dedicated-ports-free": true,
+    "exact-selected-wss-matches": true,
+    "existing-configuration-within-preserved-policy": true,
+    "prior-temporary-material-absent": true,
+    "host-key-pinned-no-service-or-credential-change": true,
+    "tools-and-non-root-wss-account-present": true,
+    "no-secret-file-world-readable": true
+  },
+  "readOnlyBaselineMatches": true,
+  "observerHelpersMatchLocalSource": {
+    "turn_lifecycle_observer.py": true,
+    "turn_lifecycle_analyze.py": true,
+    "g6_turn_wire.py": true
+  },
+  "selectedWssBinary": "/opt/remotehub-p006c-manual-20261122/hub-rendezvous-probe",
+  "wssSha256": "946ebb86fc60e74d00b3db6107dddb0043132b4afcfc7873d0ca5b96087c2653",
+  "limitations": [
+    "no startup or public TLS/data probe performed",
+    "new expiry/observer guard is staged locally, not installed or tested on server",
+    "coturn total quota is 8, user quota is 4; this experiment adds single-session sequencing and observer cap 4",
+    "old 90-minute cleanup is not reusable for the new run directory; future guard must be verified before startup"
+  ],
+  "proposedLocalFileHashes": {
+    "execution_plan.py": "87bf8e388e879e3c001f09bf2192b740c668aa3495fb70da2628ce3418299cd0",
+    "expiry_cleanup.py": "ab0fd277928d6e6b8346e7f611af73c67335f8a41d7dfafabb81603ebcb509a5",
+    "r06_observer.py": "c6c517f9d4ab0f3a062a8ff2fea55e1931f90c0f77c87bbc9fc8d353c39e2735",
+    "read_only_preflight.py": "0b23c4c65a3bf697128258696a2f8032e145fca9db69e8dcb8d5fb9c302e1cc5"
+  },
+  "cloudStartAuthorization": "PENDING",
+  "cloudServicesStarted": false,
+  "realTwoPcTest": "NOT_RUN",
+  "R06": "OPEN"
+}
