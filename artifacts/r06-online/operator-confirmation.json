@@ -1,0 +1,10 @@
+{
+  "recordedAt": "2026-11-22T13:43:58.502259+08:00",
+  "evidenceSource": "explicit operator replies in this chat",
+  "roundsExecuted": 1,
+  "firstRoundSucceeded": true,
+  "firstRoundReply": "首轮成功，两端已回收，摘要已复制",
+  "otherMachineAndOtherCopiesDeleted": true,
+  "cleanupReply": "本轮配置及带配置ZIP副本均已删除，统计保留",
+  "otherMachineCleanupNotRemotelyInspected": true
+}

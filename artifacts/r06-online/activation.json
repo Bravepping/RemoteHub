@@ -1,0 +1,20 @@
+{
+  "activatedAtNs": 1795325716469774735,
+  "runDirectory": "/run/remotehub-p007b-r06-20261122T053510Z",
+  "authorizationStart": 1795325710,
+  "authorizationDeadline": 1795326910,
+  "guardTarget": 1795326850,
+  "invitationExpiresAt": 1795326190,
+  "guardSmokePassed": true,
+  "guardTimerVerifiedBeforeCredentials": true,
+  "turnPid": 355468,
+  "initialAllocations": 0,
+  "wssBinarySha256": "946ebb86fc60e74d00b3db6107dddb0043132b4afcfc7873d0ca5b96087c2653",
+  "nonRootWss": true,
+  "observerActive": true,
+  "autostart": false,
+  "syntheticOnly": true,
+  "publicTlsVerified": true,
+  "localActivatedPackage": "C:\\Users\\Administrator\\Documents\\ChatGPT\\\u8fdc\u7a0b\u9879\u76ee\\RemoteHub-R06-Diagnostic-v2-20261122",
+  "privateTransferZip": "C:\\Users\\Administrator\\Documents\\ChatGPT\\\u8fdc\u7a0b\u9879\u76ee\\RemoteHub\\artifacts\\private\\r06-online\\RemoteHub-R06-v2-\u672c\u8f6e\u9650\u65f6\u914d\u7f6e.zip"
+}

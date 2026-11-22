@@ -1,0 +1,50 @@
+[
+  {
+    "case": "r06-session-1.allocation-1",
+    "allocationTimeNs": 1795325912602375000,
+    "grantedLifetimeSeconds": 600,
+    "latestLeaseDeadlineNs": 1795326512602375000,
+    "relayPort": 49205,
+    "sameServicePid": true,
+    "firstSocketPresentNs": 1795325912806504860,
+    "firstSocketAbsentNs": 1795325922995194239,
+    "refreshZeroRequestSeen": true,
+    "refreshZeroSuccessSeen": true,
+    "lastObservationNs": 1795325980043432722,
+    "checkpoints": {
+      "baselineTimeNs": 1795325912297164197,
+      "baselineSocketAbsent": true,
+      "nominalLeaseExpiryTimeNs": null,
+      "socketAbsentAtNominalLeaseExpiry": null,
+      "afterGraceTimeNs": null,
+      "socketAbsentAfterGrace": null
+    },
+    "classification": "refresh_zero_immediate",
+    "zeroResponseNs": 1795325921709498000,
+    "socketAbsenceAfterResponseSeconds": 1.285696239
+  },
+  {
+    "case": "r06-session-1.allocation-2",
+    "allocationTimeNs": 1795325912725249000,
+    "grantedLifetimeSeconds": 600,
+    "latestLeaseDeadlineNs": 1795326512725249000,
+    "relayPort": 49198,
+    "sameServicePid": true,
+    "firstSocketPresentNs": 1795325912806504860,
+    "firstSocketAbsentNs": 1795325924522820194,
+    "refreshZeroRequestSeen": true,
+    "refreshZeroSuccessSeen": true,
+    "lastObservationNs": 1795325980043432722,
+    "checkpoints": {
+      "baselineTimeNs": 1795325912297164197,
+      "baselineSocketAbsent": true,
+      "nominalLeaseExpiryTimeNs": null,
+      "socketAbsentAtNominalLeaseExpiry": null,
+      "afterGraceTimeNs": null,
+      "socketAbsentAfterGrace": null
+    },
+    "classification": "refresh_zero_immediate",
+    "zeroResponseNs": 1795325923486090000,
+    "socketAbsenceAfterResponseSeconds": 1.036730194
+  }
+]

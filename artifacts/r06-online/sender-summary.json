@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "programSha256": "7deac839ee2e8fcc0e3ad47433f2431a0ce242bd3a297e90da0ef717effd79c0",
+  "scope": "R06 dedicated synthetic-only local reports; not a complete-stream or historical-root-cause verdict",
+  "role": "sender",
+  "recordedAtMs": 1795325925208,
+  "nativeResourcesReleased": true,
+  "error": null,
+  "source": {
+    "frames_sent": 240,
+    "elapsed_ms": 10802,
+    "sourceKind": "synthetic_nv12",
+    "resourcesReleased": true,
+    "error": null,
+    "control": {
+      "accepted_moves": 100,
+      "acks_sent": 100,
+      "rejected": 0,
+      "last_rx_seq": 101,
+      "last_tx_seq": 101
+    },
+    "directPairDiagnostic": {
+      "version": 1,
+      "approved": true,
+      "privateLocalPublicationApproved": true,
+      "localSetSource": "validated_published_answer",
+      "remoteSetSource": "authenticated_validated_offer",
+      "local": {
+        "approved_count": 3,
+        "same_address_count": 1,
+        "same_port_count": 1,
+        "same_type_count": 1,
+        "same_endpoint_count": 1,
+        "exact_match_count": 1,
+        "reason": "matched",
+        "candidateType": "host",
+        "protocol": "udp",
+        "addressClass": "private"
+      },
+      "remote": {
+        "approved_count": 2,
+        "same_address_count": 1,
+        "same_port_count": 1,
+        "same_type_count": 1,
+        "same_endpoint_count": 1,
+        "exact_match_count": 1,
+        "reason": "matched",
+        "candidateType": "srflx",
+        "protocol": "udp",
+        "addressClass": "public"
+      }
+    }
+  },
+  "receiverPreClose": null,
+  "receiverFinal": null
+}

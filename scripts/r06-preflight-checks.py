@@ -14,7 +14,7 @@ OPS = ROOT/'deploy/rendezvous-probe/r06-ops'
 def main():
     OUT.mkdir(exist_ok=True)
     commands = []
-    for name, pattern, count in [('operations', 'test_r06_preflight.py', 11),
+    for name, pattern, count in [('operations', 'test_r06_preflight.py', 12),
                                  ('privacy', 'test_network_privacy.py', 12),
                                  ('delivery', 'test_p007b_delivery.py', 9)]:
         args = [sys.executable, '-m', 'unittest', 'discover', '-s', 'scripts', '-p', pattern, '-v']
@@ -37,7 +37,7 @@ def main():
     document_count = check_files(documents)
     artifact_count = check_files(p for p in OUT.iterdir() if p.suffix in ['.json','.txt'])
     result = dict(recordedAt=datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=8))).isoformat(),
-                  passed=True, commands=commands, offlineTests=32, syntaxCheckedFiles=source_count,
+                  passed=True, commands=commands, offlineTests=33, syntaxCheckedFiles=source_count,
                   privacyCheckedSourceFiles=source_count, privacyCheckedDocuments=document_count,
                   privacyCheckedEvidenceFiles=artifact_count, cloudStarted=False, credentialsGenerated=False,
                   newPhysicalTwoPcTest='NOT_RUN', cloudCleanupGuardExecution='NOT_RUN',

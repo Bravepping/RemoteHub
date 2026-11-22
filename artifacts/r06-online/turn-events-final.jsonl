@@ -1,0 +1,599 @@
+{"event": "observer_start", "timeNs": 1795325715780064681, "monotonicNs": 252313700654374, "servicePid": 355468}
+{"event": "socket_snapshot", "timeNs": 1795325715790140473, "monotonicNs": 252313710729950, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325716298776196, "monotonicNs": 252314219368938, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325716810915913, "monotonicNs": 252314731508371, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325717319630208, "monotonicNs": 252315240220018, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325717829260340, "monotonicNs": 252315749849726, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325718338328638, "monotonicNs": 252316258921898, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325718847318671, "monotonicNs": 252316767911004, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325719356032303, "monotonicNs": 252317276624627, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325719865597956, "monotonicNs": 252317786191090, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325720375109222, "monotonicNs": 252318295701377, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325720884056485, "monotonicNs": 252318804646070, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325721393133792, "monotonicNs": 252319313723571, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325721902086767, "monotonicNs": 252319822679166, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325722410924065, "monotonicNs": 252320331513617, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325722919897656, "monotonicNs": 252320840487128, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325723429154238, "monotonicNs": 252321349747076, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325723938776716, "monotonicNs": 252321859366171, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325724448050484, "monotonicNs": 252322368639881, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325724957089702, "monotonicNs": 252322877682594, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325725466280524, "monotonicNs": 252323386869953, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325725974923061, "monotonicNs": 252323895512547, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325726483774623, "monotonicNs": 252324404364191, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325726992596419, "monotonicNs": 252324913187238, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325727501895318, "monotonicNs": 252325422484706, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325728010564250, "monotonicNs": 252325931156497, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325728519653797, "monotonicNs": 252326440246432, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325729029224943, "monotonicNs": 252326949817960, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325729537920994, "monotonicNs": 252327458510660, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325730046528807, "monotonicNs": 252327967118490, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325730555582024, "monotonicNs": 252328476174708, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325731064633851, "monotonicNs": 252328985223409, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325731572934605, "monotonicNs": 252329493524152, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325732081213454, "monotonicNs": 252330001802858, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325732590434814, "monotonicNs": 252330511025252, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325733099706964, "monotonicNs": 252331020299359, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325733608442165, "monotonicNs": 252331529031673, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325734116953470, "monotonicNs": 252332037542956, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325734626077047, "monotonicNs": 252332546666538, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325735135020266, "monotonicNs": 252333055610177, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325735644082732, "monotonicNs": 252333564672207, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325736152892665, "monotonicNs": 252334073482199, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325736661901666, "monotonicNs": 252334582491045, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325737171264454, "monotonicNs": 252335091857337, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325737680584402, "monotonicNs": 252335601173755, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325738189061715, "monotonicNs": 252336109651437, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325738697944130, "monotonicNs": 252336618533491, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325739206690094, "monotonicNs": 252337127279498, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325739715780688, "monotonicNs": 252337636374140, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325740224632583, "monotonicNs": 252338145225093, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325740733698915, "monotonicNs": 252338654288414, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325741242708654, "monotonicNs": 252339163298147, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325741752097856, "monotonicNs": 252339672687608, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325742260765791, "monotonicNs": 252340181355238, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325742770106692, "monotonicNs": 252340690696370, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325743280025104, "monotonicNs": 252341200618402, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325743789895941, "monotonicNs": 252341710485308, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325744298628746, "monotonicNs": 252342219218144, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325744807694068, "monotonicNs": 252342728283574, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325745317218964, "monotonicNs": 252343237808534, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325745826133760, "monotonicNs": 252343746724684, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325746335257357, "monotonicNs": 252344255851022, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325746844184589, "monotonicNs": 252344764776913, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325747352919671, "monotonicNs": 252345273509247, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325747862033206, "monotonicNs": 252345782624926, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325748370753633, "monotonicNs": 252346291346299, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325748880003885, "monotonicNs": 252346800596106, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325749389204621, "monotonicNs": 252347309794127, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325749898113024, "monotonicNs": 252347818702481, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325750406672424, "monotonicNs": 252348327262152, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325750916005013, "monotonicNs": 252348836594436, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325751424606633, "monotonicNs": 252349345196333, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325751933239718, "monotonicNs": 252349853829163, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325752441791007, "monotonicNs": 252350362380405, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325752950758660, "monotonicNs": 252350871348384, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325753459938412, "monotonicNs": 252351380527911, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325753969119595, "monotonicNs": 252351889708940, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325754478433816, "monotonicNs": 252352399023992, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325754987281875, "monotonicNs": 252352907871343, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325755496349647, "monotonicNs": 252353416939067, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325756005691651, "monotonicNs": 252353926284512, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325756514708542, "monotonicNs": 252354435298056, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325757023607304, "monotonicNs": 252354944198168, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325757532466533, "monotonicNs": 252355453057182, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325758041210062, "monotonicNs": 252355961799433, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325758550145143, "monotonicNs": 252356470738436, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325759059594626, "monotonicNs": 252356980187607, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325759568595689, "monotonicNs": 252357489187955, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325760079512840, "monotonicNs": 252358000102609, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325760588559861, "monotonicNs": 252358509153241, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325761097762418, "monotonicNs": 252359018355444, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325761607442395, "monotonicNs": 252359528035785, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325762117098149, "monotonicNs": 252360037687709, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325762626056912, "monotonicNs": 252360546646763, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325763135052784, "monotonicNs": 252361055644211, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325763644190300, "monotonicNs": 252361564784301, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325764153185055, "monotonicNs": 252362073774400, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325764661633194, "monotonicNs": 252362582222606, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325765170255401, "monotonicNs": 252363090845030, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325765679346759, "monotonicNs": 252363599936471, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325766187887626, "monotonicNs": 252364108477127, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325766696378652, "monotonicNs": 252364616967992, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325767205624852, "monotonicNs": 252365126217794, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325767714846576, "monotonicNs": 252365635436473, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325768223710488, "monotonicNs": 252366144301233, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325768732722649, "monotonicNs": 252366653312043, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325769241863794, "monotonicNs": 252367162453339, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325769751219674, "monotonicNs": 252367671813130, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325770260253392, "monotonicNs": 252368180842982, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325770769132840, "monotonicNs": 252368689722534, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325771278056157, "monotonicNs": 252369198645609, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325771787518897, "monotonicNs": 252369708111772, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325772296500987, "monotonicNs": 252370217090503, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325772805895757, "monotonicNs": 252370726485934, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325773315367885, "monotonicNs": 252371235960964, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325773824123183, "monotonicNs": 252371744713023, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325774333014882, "monotonicNs": 252372253604313, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325774841665391, "monotonicNs": 252372762254789, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325775350238115, "monotonicNs": 252373270827621, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325775859175963, "monotonicNs": 252373779766129, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325776368011206, "monotonicNs": 252374288600676, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325776876958994, "monotonicNs": 252374797548639, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325777385989437, "monotonicNs": 252375306581901, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325777894985849, "monotonicNs": 252375815578505, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325778404465958, "monotonicNs": 252376325059689, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325778913223020, "monotonicNs": 252376833812586, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325779422161250, "monotonicNs": 252377342754134, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325779930782964, "monotonicNs": 252377851373292, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325780439810660, "monotonicNs": 252378360403517, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325780948619232, "monotonicNs": 252378869208915, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325781457187428, "monotonicNs": 252379377776861, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325781966586518, "monotonicNs": 252379887176315, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325782475838598, "monotonicNs": 252380396431984, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325782985120958, "monotonicNs": 252380905712962, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325783494082725, "monotonicNs": 252381414672246, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325784002646986, "monotonicNs": 252381923236646, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325784512136361, "monotonicNs": 252382432725937, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325785020853422, "monotonicNs": 252382941442787, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325785529975845, "monotonicNs": 252383450565520, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325786038921030, "monotonicNs": 252383959510472, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325786548047115, "monotonicNs": 252384468640551, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325787056821107, "monotonicNs": 252384977410548, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325787566289548, "monotonicNs": 252385486879114, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325788075689832, "monotonicNs": 252385996279228, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325788584421449, "monotonicNs": 252386505011049, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325789093026615, "monotonicNs": 252387013616194, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325789602140794, "monotonicNs": 252387522730526, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325790110666072, "monotonicNs": 252388031255468, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325790620117503, "monotonicNs": 252388540706890, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325791128931984, "monotonicNs": 252389049521556, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325791638625441, "monotonicNs": 252389559215159, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325792147725287, "monotonicNs": 252390068314887, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325792656646197, "monotonicNs": 252390577239215, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325793165555434, "monotonicNs": 252391086144923, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325793674686312, "monotonicNs": 252391595278311, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325794183875444, "monotonicNs": 252392104465023, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325794692549537, "monotonicNs": 252392613139239, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325795201990491, "monotonicNs": 252393122580149, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325795710561260, "monotonicNs": 252393631150895, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325796219436487, "monotonicNs": 252394140026181, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325796728026068, "monotonicNs": 252394648615554, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325797236672087, "monotonicNs": 252395157265151, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325797745592931, "monotonicNs": 252395666182763, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325798254662118, "monotonicNs": 252396175251511, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325798763769040, "monotonicNs": 252396684358742, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325799272317643, "monotonicNs": 252397192909260, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325799781446443, "monotonicNs": 252397702035989, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325800290449911, "monotonicNs": 252398211039375, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325800799792341, "monotonicNs": 252398720385633, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325801309027135, "monotonicNs": 252399229616453, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325801818069853, "monotonicNs": 252399738659740, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325802327995866, "monotonicNs": 252400248585762, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325802837329100, "monotonicNs": 252400757918972, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325803346153732, "monotonicNs": 252401266743502, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325803854928207, "monotonicNs": 252401775517817, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325804364304064, "monotonicNs": 252402284897133, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325804873779834, "monotonicNs": 252402794369367, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325805384827381, "monotonicNs": 252403305416988, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325805894465453, "monotonicNs": 252403815058728, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325806403407486, "monotonicNs": 252404324011691, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325806912236688, "monotonicNs": 252404832826269, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325807421032837, "monotonicNs": 252405341622479, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325807930175249, "monotonicNs": 252405850768129, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325808439952490, "monotonicNs": 252406360545707, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325808948964438, "monotonicNs": 252406869557811, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325809458469235, "monotonicNs": 252407379058666, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325809967348796, "monotonicNs": 252407887941688, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325810476323746, "monotonicNs": 252408396913055, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325810985487076, "monotonicNs": 252408906079883, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325811494899055, "monotonicNs": 252409415488480, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325812004169794, "monotonicNs": 252409924761976, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325812512872484, "monotonicNs": 252410433461914, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325813021385700, "monotonicNs": 252410941975604, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325813530319645, "monotonicNs": 252411450909017, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325814039610314, "monotonicNs": 252411960201953, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325814548442583, "monotonicNs": 252412469032238, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325815057681752, "monotonicNs": 252412978271282, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325815566308441, "monotonicNs": 252413486897965, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325816075068266, "monotonicNs": 252413995657826, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325816584267632, "monotonicNs": 252414504860657, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325817093518458, "monotonicNs": 252415014107866, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325817602299061, "monotonicNs": 252415522888670, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325818111663232, "monotonicNs": 252416032255890, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325818621209051, "monotonicNs": 252416541798614, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325819130207733, "monotonicNs": 252417050800819, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325819639807848, "monotonicNs": 252417560400847, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325820149037974, "monotonicNs": 252418069627592, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325820658091425, "monotonicNs": 252418578680884, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325821166936104, "monotonicNs": 252419087525560, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325821676152736, "monotonicNs": 252419596745558, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325822185301114, "monotonicNs": 252420105890565, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325822694877164, "monotonicNs": 252420615467141, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325823204200033, "monotonicNs": 252421124793285, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325823713424967, "monotonicNs": 252421634014461, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325824223034718, "monotonicNs": 252422143624119, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325824732616775, "monotonicNs": 252422653209263, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325825242116367, "monotonicNs": 252423162706125, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325825750860946, "monotonicNs": 252423671450482, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325826259795511, "monotonicNs": 252424180385018, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325826769901574, "monotonicNs": 252424690492087, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325827279456113, "monotonicNs": 252425200049068, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325827788320879, "monotonicNs": 252425708910312, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325828297170481, "monotonicNs": 252426217760044, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325828805655044, "monotonicNs": 252426726244647, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325829314973408, "monotonicNs": 252427235563082, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325829824503253, "monotonicNs": 252427745096420, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325830333373903, "monotonicNs": 252428253963306, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325830842181674, "monotonicNs": 252428762774451, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325831351330397, "monotonicNs": 252429271920158, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325831860295455, "monotonicNs": 252429780885736, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325832368938549, "monotonicNs": 252430289527949, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325832878063396, "monotonicNs": 252430798656428, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325833387083483, "monotonicNs": 252431307672856, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325833896101584, "monotonicNs": 252431816694036, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325834405204210, "monotonicNs": 252432325793541, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325834914894457, "monotonicNs": 252432835484020, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325835424092543, "monotonicNs": 252433344682179, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325835933102117, "monotonicNs": 252433853691654, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325836442364168, "monotonicNs": 252434362953528, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325836951487095, "monotonicNs": 252434872080325, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325837460642668, "monotonicNs": 252435381235890, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325837969975691, "monotonicNs": 252435890568637, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325838478983637, "monotonicNs": 252436399573174, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325838987523158, "monotonicNs": 252436908113014, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325839495866940, "monotonicNs": 252437416456596, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325840004957335, "monotonicNs": 252437925546786, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325840513690417, "monotonicNs": 252438434281781, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325841022582244, "monotonicNs": 252438943175797, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325841531482735, "monotonicNs": 252439452072171, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325842040594259, "monotonicNs": 252439961183663, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325842550047803, "monotonicNs": 252440470639452, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325843059058704, "monotonicNs": 252440979648055, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325843568152294, "monotonicNs": 252441488744453, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325844077605918, "monotonicNs": 252441998198074, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325844587138063, "monotonicNs": 252442507730639, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325845095659829, "monotonicNs": 252443016249642, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325845604584569, "monotonicNs": 252443525174167, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325846113427547, "monotonicNs": 252444034017119, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325846622222873, "monotonicNs": 252444542815534, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325847130926289, "monotonicNs": 252445051515794, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325847640163343, "monotonicNs": 252445560752784, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325848149042881, "monotonicNs": 252446069636207, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325848657916642, "monotonicNs": 252446578506108, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325849167323572, "monotonicNs": 252447087913153, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325849676167966, "monotonicNs": 252447596761286, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325850185667250, "monotonicNs": 252448106256797, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325850694769109, "monotonicNs": 252448615358589, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325851203553107, "monotonicNs": 252449124142525, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325851712995153, "monotonicNs": 252449633584448, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325852221902464, "monotonicNs": 252450142492074, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325852731179182, "monotonicNs": 252450651768737, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325853240140759, "monotonicNs": 252451160733748, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325853749286985, "monotonicNs": 252451669880340, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325854258228812, "monotonicNs": 252452178821865, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325854767060027, "monotonicNs": 252452687649438, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325855276506128, "monotonicNs": 252453197099410, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325855785643230, "monotonicNs": 252453706236157, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325856295344825, "monotonicNs": 252454215934098, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325856804798793, "monotonicNs": 252454725392006, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325857314153022, "monotonicNs": 252455234745598, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325857823698005, "monotonicNs": 252455744287784, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325858332787185, "monotonicNs": 252456253381640, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325858841893533, "monotonicNs": 252456762483066, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325859351354809, "monotonicNs": 252457271944231, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325859860239163, "monotonicNs": 252457780828495, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325860369081586, "monotonicNs": 252458289671244, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325860877790468, "monotonicNs": 252458798383715, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325861386506861, "monotonicNs": 252459307096249, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325861895401335, "monotonicNs": 252459815990738, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325862404072511, "monotonicNs": 252460324675826, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325862913232777, "monotonicNs": 252460833826586, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325863422550805, "monotonicNs": 252461343142453, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325863931507428, "monotonicNs": 252461852096888, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325864440480053, "monotonicNs": 252462361073079, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325864949640018, "monotonicNs": 252462870233294, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325865459338458, "monotonicNs": 252463379927887, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325865968540263, "monotonicNs": 252463889129703, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325866477475046, "monotonicNs": 252464398069119, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325866987227799, "monotonicNs": 252464907818890, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325867496727085, "monotonicNs": 252465417320295, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325868005437121, "monotonicNs": 252465926026667, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325868513992812, "monotonicNs": 252466434582467, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325869023158964, "monotonicNs": 252466943748406, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325869532449234, "monotonicNs": 252467453041939, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325870041232355, "monotonicNs": 252467961821980, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325870550614076, "monotonicNs": 252468471203718, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325871059984815, "monotonicNs": 252468980574149, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325871569215976, "monotonicNs": 252469489805495, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325872079005607, "monotonicNs": 252469999599624, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325872588078029, "monotonicNs": 252470508671046, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325873096992536, "monotonicNs": 252471017582203, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325873606276540, "monotonicNs": 252471526866834, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325874115166424, "monotonicNs": 252472035755940, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325874624302104, "monotonicNs": 252472544892833, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325875133336753, "monotonicNs": 252473053929628, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325875645260518, "monotonicNs": 252473565852751, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325876154081208, "monotonicNs": 252474074670689, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325876663240427, "monotonicNs": 252474583829851, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325877172123229, "monotonicNs": 252475092712549, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325877681318613, "monotonicNs": 252475601908119, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325878190090940, "monotonicNs": 252476110680408, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325878699484282, "monotonicNs": 252476620076606, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325879208401161, "monotonicNs": 252477128990816, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325879717750753, "monotonicNs": 252477638344165, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325880226471718, "monotonicNs": 252478147062431, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325880735953937, "monotonicNs": 252478656547468, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325881245025190, "monotonicNs": 252479165614670, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325881754438600, "monotonicNs": 252479675028180, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325882263978892, "monotonicNs": 252480184568428, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325882772899740, "monotonicNs": 252480693489151, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325883281742803, "monotonicNs": 252481202336548, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325883790949172, "monotonicNs": 252481711542444, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325884300653995, "monotonicNs": 252482221246306, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325884809579350, "monotonicNs": 252482730168884, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325885318567663, "monotonicNs": 252483239158542, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325885827818390, "monotonicNs": 252483748410310, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325886336999405, "monotonicNs": 252484257589008, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325886846536332, "monotonicNs": 252484767128460, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325887355119223, "monotonicNs": 252485275708694, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325887863896248, "monotonicNs": 252485784485946, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325888372796796, "monotonicNs": 252486293386325, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325888881698933, "monotonicNs": 252486802288506, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325889391107403, "monotonicNs": 252487311696901, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325889900162380, "monotonicNs": 252487820752146, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325890409022223, "monotonicNs": 252488329614964, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325890918404714, "monotonicNs": 252488838994061, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325891428139430, "monotonicNs": 252489348731575, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325891936743454, "monotonicNs": 252489857333148, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325892445703991, "monotonicNs": 252490366293380, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325892954713245, "monotonicNs": 252490875302601, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325893463307272, "monotonicNs": 252491383899937, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325893971902774, "monotonicNs": 252491892492248, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325894481084677, "monotonicNs": 252492401674059, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325894990196659, "monotonicNs": 252492910788098, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325895499612100, "monotonicNs": 252493420204765, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325896008813523, "monotonicNs": 252493929403529, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325896517483663, "monotonicNs": 252494438073214, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325897026221576, "monotonicNs": 252494946811080, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325897535460502, "monotonicNs": 252495456053580, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325898044311776, "monotonicNs": 252495964905208, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325898553598351, "monotonicNs": 252496474191298, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325899062925904, "monotonicNs": 252496983519485, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325899571538617, "monotonicNs": 252497492128087, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325900080460291, "monotonicNs": 252498001049807, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325900589652736, "monotonicNs": 252498510242116, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325901098739737, "monotonicNs": 252499019332657, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325901607754103, "monotonicNs": 252499528343546, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325902116869514, "monotonicNs": 252500037458898, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325902625911304, "monotonicNs": 252500546500663, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325903134919038, "monotonicNs": 252501055508560, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325903643612527, "monotonicNs": 252501564202230, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325904152836492, "monotonicNs": 252502073429072, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325904662124435, "monotonicNs": 252502582713908, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325905171098835, "monotonicNs": 252503091688299, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325905680093886, "monotonicNs": 252503600685214, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325906188985483, "monotonicNs": 252504109576572, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325906698014153, "monotonicNs": 252504618606974, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325907207062896, "monotonicNs": 252505127652605, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325907716510144, "monotonicNs": 252505637103879, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325908225248120, "monotonicNs": 252506145837486, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325908734470907, "monotonicNs": 252506655063497, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325909243233472, "monotonicNs": 252507163822903, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325909752474169, "monotonicNs": 252507673063700, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325910261764584, "monotonicNs": 252508182357850, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325910770708336, "monotonicNs": 252508691301548, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325911279254870, "monotonicNs": 252509199847513, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325911788039366, "monotonicNs": 252509708628995, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325912297164197, "monotonicNs": 252510217753699, "servicePid": 355468, "relayPorts": [], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325912806504860, "monotonicNs": 252510727094396, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {}}
+{"event": "socket_snapshot", "timeNs": 1795325913315253072, "monotonicNs": 252511235842656, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {}}
+{"timeNs": 1795325912600979000, "utc": "2026-11-22T05:38:32.600979+00:00", "case": "r06-session-1.allocation-1", "event": "turn_wire", "kind": "0x3", "direction": "request", "lifetime": null, "transactionHash": "0d5ca0fd6e027bfc"}
+{"timeNs": 1795325912602375000, "utc": "2026-11-22T05:38:32.602375+00:00", "case": "r06-session-1.allocation-1", "event": "turn_wire", "kind": "0x103", "direction": "response", "lifetime": 600, "transactionHash": "0d5ca0fd6e027bfc", "relayPort": 49205}
+{"timeNs": 1795325912723931000, "utc": "2026-11-22T05:38:32.723931+00:00", "case": "r06-session-1.allocation-2", "event": "turn_wire", "kind": "0x3", "direction": "request", "lifetime": null, "transactionHash": "e16c97acd64270bc"}
+{"timeNs": 1795325912725249000, "utc": "2026-11-22T05:38:32.725249+00:00", "case": "r06-session-1.allocation-2", "event": "turn_wire", "kind": "0x103", "direction": "response", "lifetime": 600, "transactionHash": "e16c97acd64270bc", "relayPort": 49198}
+{"event": "socket_snapshot", "timeNs": 1795325913824292354, "monotonicNs": 252511744881970, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325914333214585, "monotonicNs": 252512253804070, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325914842300270, "monotonicNs": 252512762892979, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325915351659241, "monotonicNs": 252513272248657, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325915860929859, "monotonicNs": 252513781523724, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325916370474695, "monotonicNs": 252514291064468, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325916879860123, "monotonicNs": 252514800453037, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325917389233529, "monotonicNs": 252515309826229, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325917899146762, "monotonicNs": 252515819736172, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325918408114738, "monotonicNs": 252516328704485, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325918916996906, "monotonicNs": 252516837586490, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325919426564407, "monotonicNs": 252517347153984, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325919935684549, "monotonicNs": 252517856274169, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325920444969875, "monotonicNs": 252518365559463, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325920954323547, "monotonicNs": 252518874915942, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325921466726495, "monotonicNs": 252519387316420, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325921976206435, "monotonicNs": 252519896795966, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325922485434428, "monotonicNs": 252520406024258, "servicePid": 355468, "relayPorts": [49198, 49205], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"timeNs": 1795325921709108000, "utc": "2026-11-22T05:38:41.709108+00:00", "case": "r06-session-1.allocation-1", "event": "turn_wire", "kind": "0x4", "direction": "request", "lifetime": 0, "transactionHash": "9798564fe910fe4e"}
+{"timeNs": 1795325921709498000, "utc": "2026-11-22T05:38:41.709498+00:00", "case": "r06-session-1.allocation-1", "event": "turn_wire", "kind": "0x104", "direction": "response", "lifetime": 0, "transactionHash": "9798564fe910fe4e"}
+{"event": "socket_snapshot", "timeNs": 1795325922995194239, "monotonicNs": 252520915787065, "servicePid": 355468, "relayPorts": [49198], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325923504850995, "monotonicNs": 252521425440558, "servicePid": 355468, "relayPorts": [49198], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"timeNs": 1795325923485578000, "utc": "2026-11-22T05:38:43.485578+00:00", "case": "r06-session-1.allocation-2", "event": "turn_wire", "kind": "0x4", "direction": "request", "lifetime": 0, "transactionHash": "b214d9020359d9d9"}
+{"timeNs": 1795325923486090000, "utc": "2026-11-22T05:38:43.486090+00:00", "case": "r06-session-1.allocation-2", "event": "turn_wire", "kind": "0x104", "direction": "response", "lifetime": 0, "transactionHash": "b214d9020359d9d9"}
+{"event": "socket_snapshot", "timeNs": 1795325924013914837, "monotonicNs": 252521934507143, "servicePid": 355468, "relayPorts": [49198], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325924522820194, "monotonicNs": 252522443412238, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325925032392261, "monotonicNs": 252522952981578, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325925541642769, "monotonicNs": 252523462232255, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325926050555740, "monotonicNs": 252523971145285, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325926559738084, "monotonicNs": 252524480327454, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325927068870796, "monotonicNs": 252524989463394, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325927577971635, "monotonicNs": 252525498564305, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325928087180389, "monotonicNs": 252526007769767, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325928596516046, "monotonicNs": 252526517105575, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325929105779590, "monotonicNs": 252527026372446, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325929614885753, "monotonicNs": 252527535475405, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325930124273471, "monotonicNs": 252528044863685, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325930633382419, "monotonicNs": 252528553972968, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325931142526981, "monotonicNs": 252529063116474, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325931651781828, "monotonicNs": 252529572385151, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325932161141430, "monotonicNs": 252530081732585, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325932670005720, "monotonicNs": 252530590595246, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325933179901256, "monotonicNs": 252531100491056, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325933689244202, "monotonicNs": 252531609833645, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325934198193015, "monotonicNs": 252532118782389, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325934707574526, "monotonicNs": 252532628164124, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325935216826547, "monotonicNs": 252533137415999, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325935726485227, "monotonicNs": 252533647078324, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325936236211593, "monotonicNs": 252534156804390, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325936745604986, "monotonicNs": 252534666194629, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325937255229620, "monotonicNs": 252535175822499, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325937764756251, "monotonicNs": 252535685345821, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325938273908238, "monotonicNs": 252536194497820, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325938783380493, "monotonicNs": 252536703969995, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325939292094544, "monotonicNs": 252537212684055, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325939801300587, "monotonicNs": 252537721889836, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325940310143239, "monotonicNs": 252538230732892, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325940822640354, "monotonicNs": 252538743233437, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325941331591848, "monotonicNs": 252539252181315, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325941841041838, "monotonicNs": 252539761631408, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325942350599810, "monotonicNs": 252540271192986, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325942859657293, "monotonicNs": 252540780246749, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325943368590978, "monotonicNs": 252541289180573, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325943877554814, "monotonicNs": 252541798144287, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325944386722910, "monotonicNs": 252542307315278, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325944896011270, "monotonicNs": 252542816601055, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325945405265475, "monotonicNs": 252543325854935, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325945914641576, "monotonicNs": 252543835231055, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325946423706542, "monotonicNs": 252544344295981, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325946932858221, "monotonicNs": 252544853447614, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325947442740552, "monotonicNs": 252545363333044, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325947952223867, "monotonicNs": 252545872817133, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325948461608699, "monotonicNs": 252546382198282, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325948971072813, "monotonicNs": 252546891662658, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325949480458941, "monotonicNs": 252547401051345, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325949989995059, "monotonicNs": 252547910584525, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325950499333568, "monotonicNs": 252548419922956, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325951009102036, "monotonicNs": 252548929691669, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325951518607900, "monotonicNs": 252549439200820, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325952028124159, "monotonicNs": 252549948713538, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325952537084099, "monotonicNs": 252550457676230, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325953046129880, "monotonicNs": 252550966722790, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325953555303536, "monotonicNs": 252551475893043, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325954064537048, "monotonicNs": 252551985126550, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325954573812628, "monotonicNs": 252552494406534, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325955083003275, "monotonicNs": 252553003595278, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325955592213626, "monotonicNs": 252553512805082, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325956101999441, "monotonicNs": 252554022588783, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325956610569638, "monotonicNs": 252554531161111, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325957119234921, "monotonicNs": 252555039824419, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325957628147580, "monotonicNs": 252555548737116, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325958137141227, "monotonicNs": 252556057730718, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325958646146836, "monotonicNs": 252556566740008, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325959155246187, "monotonicNs": 252557075839364, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325959664839880, "monotonicNs": 252557585429223, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325960173742464, "monotonicNs": 252558094331958, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325960683328289, "monotonicNs": 252558603917763, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325961192686063, "monotonicNs": 252559113278782, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325961701807097, "monotonicNs": 252559622396886, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325962210906562, "monotonicNs": 252560131496020, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325962720357405, "monotonicNs": 252560640950297, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325963229749378, "monotonicNs": 252561150338876, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325963739025663, "monotonicNs": 252561659617881, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325964248788105, "monotonicNs": 252562169377731, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325964758858414, "monotonicNs": 252562679448194, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325965268821092, "monotonicNs": 252563189414388, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325965778082050, "monotonicNs": 252563698671681, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325966287749789, "monotonicNs": 252564208342476, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325966797281065, "monotonicNs": 252564717873483, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325967306322156, "monotonicNs": 252565226911742, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325967815563832, "monotonicNs": 252565736153289, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325968324861894, "monotonicNs": 252566245454212, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325968834074538, "monotonicNs": 252566754671901, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325969344046890, "monotonicNs": 252567264639227, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325969853364014, "monotonicNs": 252567773953381, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325970362389804, "monotonicNs": 252568282979334, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325970874948954, "monotonicNs": 252568795542752, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325971384370065, "monotonicNs": 252569304962392, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325971893805530, "monotonicNs": 252569814394872, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325972402714070, "monotonicNs": 252570323303484, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325972911881734, "monotonicNs": 252570832474319, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325973420546811, "monotonicNs": 252571341139517, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325973929222224, "monotonicNs": 252571849811579, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325974438367678, "monotonicNs": 252572358956986, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325974947136513, "monotonicNs": 252572867729312, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325975456471528, "monotonicNs": 252573377061203, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325975966812339, "monotonicNs": 252573887401757, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325976476011877, "monotonicNs": 252574396601250, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325976985126966, "monotonicNs": 252574905716323, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325977494399703, "monotonicNs": 252575414989241, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325978004035571, "monotonicNs": 252575924628367, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325978513080567, "monotonicNs": 252576433670179, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325979022572945, "monotonicNs": 252576943165790, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325979533846199, "monotonicNs": 252577454435748, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325980043432722, "monotonicNs": 252577964022397, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325980552617219, "monotonicNs": 252578473206753, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325981061374165, "monotonicNs": 252578981963842, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325981571082629, "monotonicNs": 252579491675796, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325982080285098, "monotonicNs": 252580000874591, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325982589541303, "monotonicNs": 252580510130719, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325983098785602, "monotonicNs": 252581019378468, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325983608332735, "monotonicNs": 252581528925530, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325984117746745, "monotonicNs": 252582038336113, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325984627224721, "monotonicNs": 252582547814312, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325985136586624, "monotonicNs": 252583057178970, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325985645725543, "monotonicNs": 252583566315210, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325986155469458, "monotonicNs": 252584076058960, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325986664758890, "monotonicNs": 252584585348381, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325987173998697, "monotonicNs": 252585094592274, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325987683071158, "monotonicNs": 252585603660558, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325988192766408, "monotonicNs": 252586113356277, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325988701106621, "monotonicNs": 252586621696138, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325989209672549, "monotonicNs": 252587130261928, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325989718669771, "monotonicNs": 252587639259164, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325990227639179, "monotonicNs": 252588148228680, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325990737225659, "monotonicNs": 252588657815109, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325991246082011, "monotonicNs": 252589166671380, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325991755354824, "monotonicNs": 252589675944475, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325992264393092, "monotonicNs": 252590184982640, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325992773809350, "monotonicNs": 252590694402420, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325993283169357, "monotonicNs": 252591203758764, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325993792266896, "monotonicNs": 252591712856412, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325994301148411, "monotonicNs": 252592221737800, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325994810289952, "monotonicNs": 252592730882489, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325995319372316, "monotonicNs": 252593239965385, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325995828602016, "monotonicNs": 252593749191516, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325996338079671, "monotonicNs": 252594258669545, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325996847128416, "monotonicNs": 252594767717996, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325997356758023, "monotonicNs": 252595277349894, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325997865996943, "monotonicNs": 252595786586524, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325998375080638, "monotonicNs": 252596295670683, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325998884305623, "monotonicNs": 252596804898286, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325999394063300, "monotonicNs": 252597314655134, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795325999903193973, "monotonicNs": 252597823783656, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326000412942259, "monotonicNs": 252598333531638, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326000922143488, "monotonicNs": 252598842733021, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326001431392597, "monotonicNs": 252599351982171, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326001940733771, "monotonicNs": 252599861325679, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326002450385233, "monotonicNs": 252600370974903, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326002960643818, "monotonicNs": 252600881233518, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326003470426898, "monotonicNs": 252601391016360, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326003979960702, "monotonicNs": 252601900553821, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326004489378666, "monotonicNs": 252602409968059, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326004998373372, "monotonicNs": 252602918965362, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326005507842612, "monotonicNs": 252603428435272, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326006017554140, "monotonicNs": 252603938143488, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326006526315646, "monotonicNs": 252604446905355, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326007035728409, "monotonicNs": 252604956321061, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326007544890047, "monotonicNs": 252605465479507, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326008053730687, "monotonicNs": 252605974320154, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326008562860174, "monotonicNs": 252606483452674, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326009072235755, "monotonicNs": 252606992825108, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326009581496793, "monotonicNs": 252607502087313, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326010090832412, "monotonicNs": 252608011425118, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326010600171159, "monotonicNs": 252608520761066, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326011109813608, "monotonicNs": 252609030403178, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326011619285989, "monotonicNs": 252609539879459, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326012129224478, "monotonicNs": 252610049814047, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326012638782879, "monotonicNs": 252610559372335, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326013147921398, "monotonicNs": 252611068511156, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326013657177692, "monotonicNs": 252611577771212, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326014166928127, "monotonicNs": 252612087517452, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326014675950040, "monotonicNs": 252612596539611, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326015185535264, "monotonicNs": 252613106128272, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}
+{"event": "socket_snapshot", "timeNs": 1795326015695029527, "monotonicNs": 252613615621469, "servicePid": 355468, "relayPorts": [], "allocationPorts": {"r06-session-1.allocation-1": 49205, "r06-session-1.allocation-2": 49198}}

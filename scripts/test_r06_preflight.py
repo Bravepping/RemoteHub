@@ -54,7 +54,7 @@ class PreflightTests(unittest.TestCase):
         for value in ['/', '/etc', '/run/../etc', '/run/remotehub-p007b-r06-not-a-timestamp']:
             with self.assertRaises(ValueError): guard.checked_directory(value)
 
-    def run_cleanup(self, stuck=False, query_fails=False):
+    def run_cleanup(self, stuck=False, query_fails=False, missing=False):
         parent = ROOT / 'artifacts/private'; parent.mkdir(exist_ok=True)
         folder = pathlib.Path(tempfile.mkdtemp(prefix='r06-guard-test-',dir=parent)).resolve()
         calls = []; tick = [0]
@@ -64,7 +64,7 @@ class PreflightTests(unittest.TestCase):
             if args[1] == 'show':
                 if query_fails: raise RuntimeError('FIXTURE_COMMAND_FAILURE')
                 return subprocess.CompletedProcess(args,0,'MainPID='+('42' if stuck else '0')+'\nActiveState='+('active' if stuck else 'inactive')+'\n','')
-            return subprocess.CompletedProcess(args,0,'','')
+            return subprocess.CompletedProcess(args,5 if missing else 0,'','')
         def sleep(seconds): tick[0] += seconds
         try:
             (folder/'server.json').write_text('private fixture')
@@ -93,6 +93,11 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue(any(c[1]=='kill' for c in calls))
         self.assertEqual(value['allocationReleaseVerdict'],'not_inferred_by_cleanup')
 
+    def test_already_collected_transient_units_are_idempotent(self):
+        value,calls=self.run_cleanup(missing=True)
+        self.assertTrue(all(value['dedicatedServicesStopped'].values()))
+        self.assertEqual(value['failures'],[])
+
     def test_query_failure_still_attempts_stops_and_secret_cleanup(self):
         value,calls = self.run_cleanup(query_fails=True)
         self.assertEqual([c[1] for c in calls[:3]],['stop']*3)
@@ -102,7 +107,7 @@ class PreflightTests(unittest.TestCase):
         self.assertNotIn('FIXTURE_COMMAND_FAILURE',json.dumps(value))
 
     def test_sources_and_sanitized_readonly_evidence_pass_privacy_scan(self):
-        self.assertEqual(check_files(OPS.glob('*.py'),source=True),4)
+        self.assertEqual(check_files(OPS.glob('*.py'),source=True),5)
         check_files([ROOT/'artifacts/r06-preflight/server-readonly.json'])
 
     def test_observer_rejects_extended_malformed_or_expired_windows(self):

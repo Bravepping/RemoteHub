@@ -1,0 +1,27 @@
+{
+  "recordedAt": "2026-11-22T13:37:29.186387+08:00",
+  "offlineOnly": true,
+  "passed": true,
+  "tests": 33,
+  "results": [
+    {
+      "name": "operations",
+      "exitCode": 0,
+      "tests": 12
+    },
+    {
+      "name": "privacy",
+      "exitCode": 0,
+      "tests": 12
+    },
+    {
+      "name": "delivery",
+      "exitCode": 0,
+      "tests": 9
+    }
+  ],
+  "syntaxAndPrivacySourceFiles": 7,
+  "oldReportsOverwritten": false,
+  "productSourceChanged": false,
+  "physicalTwoPcResultsAreSeparate": true
+}

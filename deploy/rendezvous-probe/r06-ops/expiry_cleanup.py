@@ -47,7 +47,9 @@ def cleanup(folder, *, reason, call=command, clock=time.monotonic, sleep=time.sl
     for name in SERVICES:
         try:
             p = call(['systemctl', 'stop', '--no-block', name])
-            if p.returncode:
+            # A transient unit may already have been collected (or never started).
+            # Its confirmed inactive/PID 0 state is a valid idempotent stop.
+            if p.returncode and not stopped(name, call):
                 result['failures'].append('DEDICATED_STOP_REQUEST_FAILED')
         except Exception:
             result['failures'].append('DEDICATED_STOP_REQUEST_FAILED')

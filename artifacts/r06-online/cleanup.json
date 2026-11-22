@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "reason": "manual",
+  "requestedAtNs": 1795326015935746374,
+  "serviceStopIsNotAllocationReleaseEvidence": true,
+  "allocationReleaseVerdict": "not_inferred_by_cleanup",
+  "forceKillRequested": false,
+  "secretsRemoved": [
+    "server.json",
+    "client-private.json",
+    "server-key.pem",
+    "ca-key.pem",
+    "server.csr",
+    "ca.srl",
+    "server.ext",
+    "observer-private.json",
+    "observer-next-private.json",
+    "control-private.pcap",
+    "capture-stderr-private.txt",
+    "observer-stderr-private.txt",
+    "observer-stdout-private.txt",
+    "baseline-private.json"
+  ],
+  "failures": [],
+  "finishedAtNs": 1795326016020973014,
+  "dedicatedServicesStopped": {
+    "remotehub-p007b-r06-wss.service": true,
+    "remotehub-turn-g6.service": true,
+    "remotehub-p007b-r06-observer.service": true
+  },
+  "temporarySecretFilesAbsent": true
+}
