@@ -1,0 +1,3 @@
+    Finished `probe` profile [optimized] target(s) in 0.16s
+
+EXIT=0

@@ -1,3 +1,11 @@
+# P1-04交接（2026-11-22，实现与验证完成，待Git交付）
+
+- 已完成带证据：481e17e开工干净/origin一致，用户仅批准P1-04；P104计划/ADR0019及合同先行。Pinia3.0.4实际安装/锁定，每应用独立store和DesktopApi；只读真实get_runtime_info、严格响应校验、固定错误、5秒/取消/代次/并发合并/卸载清理。App/main接入，bridge兼容导出，旧实验与采集函数保留。
+- 验证：pnpm verify:p104实际47/47；79前端/15Edge、Rust全feature82/默认56各1ignored、12Python、8真实Cargo配置/9隔离测试、默认Windows编译。Pinia及11传递包新增，MIT/BSD许可和无安装脚本核对，pnpm audit当时0已知漏洞；旧锁条目未删除/升级。证据artifacts/p104，旧报告/统计不改。
+- 原生：本轮最终默认EXE已用sky启动，只读首页可访问性文本确认本机核心已连接/windows·x86_64/远控关闭；无截图请求或鼠标键盘动作。只观察首页，不把SDK替身/单元超时取消扩成原生故障实测。窗口留给用户查看，后续编译若文件占用需先正常结束该程序，不得当实验窗操作。
+- 相关文件：src/ipc/contracts/tauriDesktopApi、state/desktopState/desktop、App/main/bridge及单元、tests/p104，scripts/p104*；P104计划/IPC合同/报告与ADR0019、README/TASKS/当前方案已更新。只读取消不等于取消Rust任务/媒体，未接入事件不伪造订阅。测试替身仅显式注入，默认bundle无fixture标记。
+- 未完成/边界：最终脱敏/范围及GitHub正常提交核对后停止，SHA以Git记录/回复为准；P1-05/06、正式设备/会话IPC与事件、兼容运行未实现。无云/真实桌面/输入注入，原生权限/媒体/候选/授权保持，R06仍OPEN_NOT_REPRODUCED/根因未定。以下历史交接不覆盖本段。
+
 # P1-03 交接（2026-11-22，实现与回归完成）
 
 - 已完成带证据：用户已审查d0fd876并仅批准P1-03，main/origin开工一致且干净；计划/ADR0018先行。PanelCard/LocalDeviceCard、连接准备modal和无会话浮动工具栏已集成。仅本机能力展示/刷新、弹窗开关、工具栏折叠与导航可用；其他动作禁用且说明，不造设备/进度/统计。

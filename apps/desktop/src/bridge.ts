@@ -1,18 +1,7 @@
-import { invoke, isTauri } from '@tauri-apps/api/core';
-
-export interface RuntimeInfo {
-  app_version: string;
-  os: string;
-  arch: string;
-  capture_backend: string;
-  remote_access_enabled: boolean;
-  p004_enabled?: boolean;
-  p004_lan_enabled?: boolean;
-  p005_enabled?: boolean;
-  p006_enabled?: boolean;
-  p006c_enabled?: boolean;
-  p007b_diag_enabled?: boolean;
-}
+import { invoke } from '@tauri-apps/api/core';
+import { tauriDesktopApi } from './ipc/tauriDesktopApi';
+import type { RuntimeInfo } from './ipc/contracts';
+export type { RuntimeInfo } from './ipc/contracts';
 
 export interface ProbeReport {
   width: number;
@@ -26,10 +15,7 @@ export interface ProbeReport {
 }
 
 export async function getRuntimeInfo(): Promise<RuntimeInfo> {
-  if (!isTauri()) {
-    throw new Error('当前为浏览器预览。请启动桌面客户端以检测本机能力。');
-  }
-  return invoke<RuntimeInfo>('get_runtime_info');
+  return tauriDesktopApi.readRuntime();
 }
 
 export async function runCaptureProbe(): Promise<ProbeReport> {

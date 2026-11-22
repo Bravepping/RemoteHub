@@ -1,0 +1,16 @@
+{
+  "recordedAt": "2026-11-22T08:16:16.526Z",
+  "package": "pinia@3.0.4",
+  "license": "MIT",
+  "officialRepository": "git+https://github.com/vuejs/pinia.git",
+  "installedWithScriptsDisabled": true,
+  "auditExitCode": 0,
+  "vulnerabilities": {
+    "info": 0,
+    "low": 0,
+    "moderate": 0,
+    "high": 0,
+    "critical": 0
+  },
+  "passed": true
+}

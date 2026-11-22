@@ -2,15 +2,15 @@
 
 这是已构建和实测的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。真实双机局域网视频、同一PeerConnection上的DataChannel模拟控制、跨网强制TURN均已通过；P2P优先/受阻自动回退已通过真实云WSS/TURN合成视频测试，并有真实双机直连与手机热点中继成功轮。
 
-用户审查`767ff44`后已**接受R06尚未关闭的剩余风险并批准Phase0限定退出**，正式父项7/7；P1-01/02已审查，本轮仅实施用户审查d0fd876后批准的P1-03。P004已批准统计+现场观看替代录屏，历史未录屏事实保留。R06历史两次拒绝未复现/根因未知，技术问题仍开放；新版正常终态不追补旧文件。见[退出决议](docs/PHASE0_EXIT_DECISION.md)及[风险台账](docs/PHASE0_RISK_REGISTER.md)。尚无实际输入或持久设备身份服务，不是可发布成品。
+用户审查`767ff44`后已**接受R06尚未关闭的剩余风险并批准Phase0限定退出**，正式父项7/7；P1-01至03已审查，本轮仅实施用户审查481e17e后批准的P1-04。P004已批准统计+现场观看替代录屏，历史未录屏事实保留。R06历史两次拒绝未复现/根因未知，技术问题仍开放；新版正常终态不追补旧文件。见[退出决议](docs/PHASE0_EXIT_DECISION.md)及[风险台账](docs/PHASE0_RISK_REGISTER.md)。尚无实际输入或持久设备身份服务，不是可发布成品。
 
-**P1-03已完成，提交后等待审查**：复用五页产品壳，补齐统一UI卡片、真实本机能力卡片、可打开/关闭的连接准备弹窗及可展开/收起的无会话浮动工具栏。未接入的设备身份/连接与会话动作均明确不可用，路径/RTT/FPS保持未知；不伪造连接进度或远端数据。见[报告](docs/P103_TEST_REPORT.md)、[弹窗](artifacts/p103/screenshots/connection-dialog.png)、[会话工具栏](artifacts/p103/screenshots/session-toolbar.png)及[证据](artifacts/p103/verification.json)。
+**P1-04已完成，提交后等待审查**：真实Pinia管理应用独立的本机能力状态；类型化DesktopApi复用既有get_runtime_info，严格校验返回值，提供固定错误、5秒超时、取消/迟到结果隔离、刷新合并和卸载清理。默认使用真实Tauri，浏览器保持不可用；同接口测试替身不进入产品运行路径。设备身份/正式会话接口仍未实现，界面继续诚实空态，不造设备/统计。见[报告](docs/P104_TEST_REPORT.md)、[IPC合同](docs/P104_IPC_CONTRACT.md)、[证据](artifacts/p104/verification.json)。
 
-`pnpm verify:p103`复用既有离线基础/安全检查，独立写artifacts/p103；47检查、50前端/14真实Edge通过，默认Windows EXE编译通过。本轮没有新的原生UI/双机媒体测试，浏览器截图为实际未接入空态；初轮测试假设差异保留在报告。已审查的[P1-02报告](docs/P102_TEST_REPORT.md)、[P1-01报告](docs/P101_TEST_REPORT.md)及[IPC合同](docs/P101_DESKTOP_CONTRACT.md)保持归档。P1-04至06未开工。
+`pnpm verify:p104`复用既有离线安全检查，独立写artifacts/p104；47检查、79前端/15Edge及Windows构建通过。实际默认Tauri首页只读文本观察确认“本机核心已连接”、windows/x86_64和远程访问关闭；没有截图/键鼠自动操作，未新测云/双机/媒体。Pinia3.0.4精确锁定，依赖审计0已知漏洞；[SDK替身截图](artifacts/p104/screenshots/p104-explicit-sdk-fixture.png)有醒目标记，不能当原生证据。已审查[P1-03报告](docs/P103_TEST_REPORT.md)及此前报告保持归档，P1-05/06未开工。
 
 技术栈继续Tauri v2/Rust/Vue3/TypeScript，见[P1实施方案](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前指引](docs/DEVELOPMENT_GUIDE.md)。[Foundation / V+ PC / EasyTier评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)仍为提案；WebRTC不等于已兼容三件套，运行集成/多进程/驱动及分发范围未获本轮授权。
 
-下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论，批准记录另行追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新双机/媒体或应用真实采集/远控输入。辅助截图工具的异常及丢弃在P1-02报告中披露。旧包不能自行恢复服务，提交后不自动进入P1-04或其他任务。
+下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论，批准记录另行追加。上次云实测13:40:16停服/清理；本轮没有云端实时复核、新双机/媒体或应用真实采集/远控输入。辅助截图工具的异常及丢弃在P1-02报告中披露。旧包不能自行恢复服务，提交后不自动进入P1-05或其他任务。
 
 原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
 

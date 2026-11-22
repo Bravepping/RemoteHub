@@ -1,6 +1,7 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from './App.vue';
+import { createDesktopState } from './state/desktopState';
 import { getRuntimeInfo, runCaptureProbe, type RuntimeInfo } from './bridge';
 
 vi.mock('./bridge', async (original) => {
@@ -15,8 +16,11 @@ const info: RuntimeInfo = {
   remote_access_enabled: false,
 };
 let wrapper: VueWrapper;
+function testState() {
+  return createDesktopState({ readRuntime: () => getRuntimeInfo() });
+}
 async function open() {
-  wrapper = mount(App);
+  wrapper = mount(App, { global: { plugins: [testState()] } });
   await flushPromises();
   return wrapper;
 }
@@ -136,7 +140,7 @@ describe('desktop navigation with real capability boundaries', () => {
           done = resolve;
         }),
     );
-    wrapper = mount(App);
+    wrapper = mount(App, { global: { plugins: [testState()] } });
     await flushPromises();
     expect(wrapper.get('button').attributes('disabled')).toBeDefined();
     await wrapper.get('button').trigger('click');
@@ -162,6 +166,7 @@ describe('desktop navigation with real capability boundaries', () => {
     });
     wrapper = mount(App, {
       global: {
+        plugins: [testState()],
         stubs: {
           ExperimentWorkspace: {
             template: '<div data-test="experiment">experiment fixture</div>',

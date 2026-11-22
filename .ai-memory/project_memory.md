@@ -1,12 +1,13 @@
 # RemoteHub 项目约定
 
-# 当前决议与恢复入口（2026-11-22，P1-03）
-Phase0限定退出已由用户批准，父项7/7，E04证据例外已接受；R06技术OPEN_NOT_REPRODUCED/历史根因未定，风险接受不等于修复。P1-01/02已审查，最新d0fd876后只授权P1-03，提交后等审查，不进入P1-04至06。
-当前入口：docs/P103_PLAN.md、P103_TEST_REPORT.md、ADR0018、DEVELOPMENT_GUIDE及handoff.md。pnpm verify:p103独立artifacts/p103：47检查、50前端/14真实Edge、全feature82/默认56 Rust各1ignored、12Python、8真实Cargo配置/9隔离测试，默认Windows构建。小窗modal视觉修正后另做14Edge及3构建/lint定向检查；旧证据不改。
-产品继续Tauri v2/Rust/Vue3/TS/Tailwind及五页壳。PanelCard/LocalDeviceCard只展示真实get_runtime_info；ConnectionDialog是未接入准备说明，不创建/批准会话；SessionToolbar仅无会话状态的折叠/导航，画质/码率/全屏/断开禁用。无新依赖/IPC/Pinia或远控动作，不用概念图示例填设备/统计。旧实验与原生安全/媒体/CSP/capability/锁保持。
-内建dialog允许Edge键盘焦点去浏览器chrome，背景仍inert；测Focus/关闭恢复不应错误要求浏览器chrome不能获焦点。弹窗固定头尾，正文小高度内部滚动；整页截图先回顶部，窄窗modal取实际视口图，不用截图工具伪影下结论。首轮12/14失败和真实观察已保留。此轮没有原生UI/双机/云新测试或真实桌面/输入；不沿用历史服务授权。Foundation/V+ PC/EasyTier兼容运行仍未核验/未实现。
+# 当前决议与恢复入口（2026-11-22，P1-04）
+Phase0限定退出已批准、父项7/7，P004例外已接受；R06技术OPEN_NOT_REPRODUCED/历史根因未定，风险接受不等于修复。P1-01至03已审查，最新481e17e后只授权P1-04，提交后等审查，不进入P1-05/06。
+当前入口：docs/P104_PLAN.md、P104_IPC_CONTRACT.md、P104_TEST_REPORT.md、ADR0019、DEVELOPMENT_GUIDE和handoff。pnpm verify:p104独立artifacts/p104：47检查、79前端/15Edge、全feature82/默认56 Rust各1ignored、12Python、8真实Cargo配置/9隔离测试及默认Windows编译；依赖审计当时0已知漏洞。
+Pinia精确3.0.4（MIT，现有Vue3.5匹配），新增12包，无新安装脚本；传递speakingurl为BSD-3-Clause，后续二进制分发须保留相应版权许可。本轮无安装包发布。Cargo/权限/原生媒体/旧实验及历史证据不改，Node锁只增加Pinia相关项。
+App通过真实Pinia拥有本机读取状态；DesktopApi固定get_runtime_info、运行时响应校验/冻结、固定错误、5秒/取消。每应用独立服务注入，测试替身不进入默认路径；取消代次防迟到成功/错误/finally覆盖新状态，卸载清timer/监听。取消只停止等待只读IPC，不能声称取消native任务/会话；无事件源就不伪造订阅。设备/正式会话仍空态，不造设备/统计。
+实际原生只读首页观察确认IPC→Pinia→UI，本轮无截图/键鼠动作；只验证首页，不扩成原生刷新/取消/超时、双机或新媒体。Edge新增SDK替身带醒目标记，不作原生证据。默认窗口仍留给用户查看，后续编译可能有占用；不得在旧实验窗操作。无阿里云/采集/注入，历史云授权已结束，兼容运行尚未实现。
 
-以下历史记忆不覆盖本段或最新用户授权。
+以下历史记忆不覆盖本段和最新用户授权。
 
 2026-11-21 首次工程。Windows / Tauri v2 / Vue 3 / Rust，遵循原交付设计；Phase 0 真实媒体优先。不可用时报告失败，不显示假设备/RTT/FPS。不实现未授权后台监控、权限提升、凭据采集。
 
