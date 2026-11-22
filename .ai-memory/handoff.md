@@ -5,7 +5,7 @@
 - 接收端认证末周期分别893/880接收/解码/呈现，lost0/freeze0；B独立final未收取，不能写全链最终900或用源browserClosed冒充B关闭证明。更早两次DIRECT_SELECTED_PAIR_NOT_APPROVED失败，0帧/0控制，资源已回收，保留development；原因未归因，未改安全匹配或声称已修复。P006c保持doing、成功轮与本次操作收尾完成、待审查上述问题；P006/Phase0不提前全done，不进输入或Phase1，不要求重复旧P006b接收端停止补测。
 - 同coturn PID337919最多2分配，四次尝试8实际Allocation均Refresh0请求/成功回应+1.0615–1.4659秒首次socket消失；停服务前socket0。原租约600秒，本轮不声称所有deadline+15再测完，历史自动云9例完整期限及更早timeout单独保留。新旧WSS/coturn均停，旧disabled/新无持久unit、timer取消、端口0；原配置/unit/旧binary/FWhash/26服务集合/业务容器启动时间不变，云key/invitations/labels/rawpcap删、SSH关闭。
 - 独立报告docs/PHASE0_P006C_MANUAL_TEST_REPORT.md；artifacts/p006c-manual分LAN/hotspot/development/cloud/summary/local-cleanup与verification。scripts/p006c-manual-evidence.py离线从实际记录复算，无网络/采集。操作脚本归档deploy/rendezvous-probe/p006c-manual-ops，仅审查不用旧授权执行。
-- 本机已删除artifacts/private/p006c-manual-client-private.json、父目录已激活解压包的p006c-private.json及带凭据ZIP，程序和stats保留。第二台需用户删p006c-private.json及带凭据ZIP，actualSecondPcDeletionVerified=false，不能称Agent已删B文件；旧邀请服务端已清理。无凭据旧交付ZIP仍保留，未来需新授权/短期配置。
+- 本机已删除artifacts/private/p006c-manual-client-private.json、父目录已激活解压包的p006c-private.json及带凭据ZIP，程序和stats保留。用户随后明确确认第二台p006c-private.json及带配置“已激活”ZIP已删除、程序和统计保留，清理闭环；证据为用户陈述，actualSecondPcDeletionVerified=false仍保留，不能称Agent已独立核验B文件或补写B视频终态。旧邀请服务端已清理。无凭据旧交付ZIP仍保留，未来需新授权/短期配置。
 - 本轮无产品代码变动，不重跑不冒称74Rust/24前端全套；核对日志/新离线脚本/凭据扫描完成。完成GitHub提交和运维记录后停止扩展等待审查，最终Git SHA以对话/提交为准，避免自引用。
 
 # P006c 真实云视频自动验证交付检查点（历史已收尾）

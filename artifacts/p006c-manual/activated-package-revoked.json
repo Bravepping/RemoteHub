@@ -5,5 +5,7 @@
   "serverInvitationDeleted": true,
   "localKnownConfigCopiesAndCredentialArchiveDeleted": true,
   "independentSecondPcFileDeletionVerified": false,
-  "programAndStatisticsPreserved": true
+  "programAndStatisticsPreserved": true,
+  "secondPcCredentialFilesDeletedConfirmedByUser": true,
+  "userConfirmationRecordedAt": "2026-11-22T10:02:21.956251+08:00"
 }

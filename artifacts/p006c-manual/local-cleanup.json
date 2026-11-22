@@ -1,8 +1,13 @@
 {
-    "checkedAt":  "2026-11-22T09:55:08.3838094+08:00",
-    "knownLocalClientConfigCopiesDeleted":  true,
-    "localCredentialBearingZipDeleted":  true,
-    "programAndStatisticsPreserved":  true,
-    "secondPcDeletion":  "Pending user; remove p006c-private.json and credential-bearing zip on second PC",
-    "actualSecondPcDeletionVerified":  false
+  "checkedAt": "2026-11-22T09:55:08.3838094+08:00",
+  "knownLocalClientConfigCopiesDeleted": true,
+  "localCredentialBearingZipDeleted": true,
+  "programAndStatisticsPreserved": true,
+  "secondPcDeletion": "User confirmed p006c-private.json and credential-bearing activated ZIP deleted; program and statistics preserved",
+  "actualSecondPcDeletionVerified": false,
+  "secondPcDeletionConfirmedByUser": true,
+  "secondPcDeletionEvidence": "explicit user statement in this conversation",
+  "secondPcUserConfirmationRecordedAt": "2026-11-22T10:02:21.956251+08:00",
+  "secondPcProgramAndStatisticsPreservedByUser": true,
+  "cleanupTaskOutstanding": false
 }
