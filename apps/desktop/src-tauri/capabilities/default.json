@@ -27,6 +27,7 @@
     "allow-p004-lan-metrics",
     "allow-p004-lan-stop",
     "allow-p004-lan-save",
+    "allow-run-v2-loopback-diagnostic",
     "allow-p006-interfaces",
     "allow-p006-start",
     "allow-p006-ready",

@@ -6,6 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [features]
+v2-loopback-signaling = ["dep:hub-signal-v2"]
 p3-lan = ["dep:windows-sys"]
 p006-turn-probe = ["dep:zeroize"]
 p006-direct-probe = ["p006-turn-probe"]
@@ -34,6 +35,7 @@ path = "src/bin/authenticated-session-probe.rs"
 required-features = ["p006-session-probe"]
 
 [dependencies]
+hub-signal-v2 = { path = "../hub-signal-v2", optional = true }
 hub-encode-win = { path = "../hub-encode-win" }
 serde.workspace = true
 serde_json.workspace = true

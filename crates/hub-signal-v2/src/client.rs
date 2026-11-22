@@ -2,11 +2,17 @@ use crate::wire::{
     self, ClientFrame, Flow, Role, ServerFrame, SignalKind, MAX_WIRE, PATH, ROOM_LIFETIME, VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
-use std::{net::SocketAddr, time::Duration};
+use rustls::{
+    pki_types::{CertificateDer, ServerName},
+    ClientConfig, RootCertStore,
+};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 use tokio::{
+    io::{AsyncRead, AsyncWrite},
     net::TcpStream,
     time::{timeout, timeout_at, Instant},
 };
+use tokio_rustls::TlsConnector;
 use tokio_tungstenite::{
     client_async_with_config,
     tungstenite::{
@@ -22,6 +28,35 @@ use zeroize::Zeroizing;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_POLL_TIMEOUT: Duration = Duration::from_secs(30);
+const MAX_TRUST_ANCHOR_DER: usize = 64 * 1024;
+
+trait RelayIo: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> RelayIo for T {}
+
+/// Trust configuration provisioned independently of the relay, not obtained
+/// from the endpoint being connected to. It does not authorize a remote peer.
+pub struct LoopbackTlsTrust(Arc<ClientConfig>);
+
+impl LoopbackTlsTrust {
+    /// Trust exactly this DER CA for this connector, without using system
+    /// roots or altering system trust. Rustls checks the chain and IP SAN.
+    pub fn from_ca_der(ca_der: &[u8]) -> Result<Self, ClientError> {
+        if ca_der.is_empty() || ca_der.len() > MAX_TRUST_ANCHOR_DER {
+            return Err(ClientError::TlsTrust);
+        }
+        let mut roots = RootCertStore::empty();
+        roots
+            .add(CertificateDer::from(ca_der))
+            .map_err(|_| ClientError::TlsTrust)?;
+        let config =
+            ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .map_err(|_| ClientError::TlsTrust)?
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+        Ok(Self(Arc::new(config)))
+    }
+}
 
 /// Native-only 256-bit bearer. Never log, serialize, or forward to JavaScript.
 pub struct RelayToken(Zeroizing<String>);
@@ -64,6 +99,10 @@ pub enum ClientError {
     Token,
     #[error("invalid relay room")]
     Room,
+    #[error("invalid loopback relay trust configuration")]
+    TlsTrust,
+    #[error("loopback relay TLS handshake or certificate verification failed")]
+    TlsHandshake,
     #[error("relay rejected the WebSocket authorization")]
     Unauthorized,
     #[error("relay rejected the signaling session")]
@@ -97,7 +136,7 @@ enum JoinPhase {
 }
 
 pub struct LoopbackRelay {
-    socket: Option<WebSocketStream<TcpStream>>,
+    socket: Option<WebSocketStream<Box<dyn RelayIo>>>,
     deadline: Instant,
     role: Role,
     phase: JoinPhase,
@@ -115,18 +154,32 @@ impl LoopbackRelay {
         room: RoomId,
         role: Role,
     ) -> Result<Self, ClientError> {
+        Self::connect_with_trust(address, token, room, role, None).await
+    }
+
+    /// Use WSS with an independently provisioned trust anchor. The HTTP
+    /// Authorization header is built and sent only after verified TLS.
+    /// Connection or trust failure is terminal; there is no plain fallback.
+    pub async fn connect_wss(
+        address: SocketAddr,
+        token: &RelayToken,
+        room: RoomId,
+        role: Role,
+        trust: &LoopbackTlsTrust,
+    ) -> Result<Self, ClientError> {
+        Self::connect_with_trust(address, token, room, role, Some(trust)).await
+    }
+
+    async fn connect_with_trust(
+        address: SocketAddr,
+        token: &RelayToken,
+        room: RoomId,
+        role: Role,
+        trust: Option<&LoopbackTlsTrust>,
+    ) -> Result<Self, ClientError> {
         if !address.ip().is_loopback() || address.port() == 0 {
             return Err(ClientError::Endpoint);
         }
-        let mut request = format!("ws://{address}{PATH}")
-            .into_client_request()
-            .map_err(|_| ClientError::Endpoint)?;
-        let auth = Zeroizing::new(format!("Bearer {}", token.0.as_str()));
-        let mut auth_header = HeaderValue::from_str(&auth).map_err(|_| ClientError::Token)?;
-        auth_header.set_sensitive(true);
-        request
-            .headers_mut()
-            .insert(header::AUTHORIZATION, auth_header);
         let config = WebSocketConfig::default()
             .write_buffer_size(0)
             .max_write_buffer_size(MAX_WIRE * 2)
@@ -135,9 +188,29 @@ impl LoopbackRelay {
         let deadline = Instant::now() + ROOM_LIFETIME;
         let socket = timeout(IO_TIMEOUT, async {
             // SocketAddr makes the TCP target explicit independently of the HTTP Host.
-            let stream = TcpStream::connect(address)
+            let tcp = TcpStream::connect(address)
                 .await
                 .map_err(|_| ClientError::Transport)?;
+            let (scheme, stream): (&str, Box<dyn RelayIo>) = match trust {
+                Some(trust) => {
+                    let name = ServerName::IpAddress(address.ip().into());
+                    let tls = TlsConnector::from(trust.0.clone())
+                        .connect(name, tcp)
+                        .await
+                        .map_err(|_| ClientError::TlsHandshake)?;
+                    ("wss", Box::new(tls))
+                }
+                None => ("ws", Box::new(tcp)),
+            };
+            let mut request = format!("{scheme}://{address}{PATH}")
+                .into_client_request()
+                .map_err(|_| ClientError::Endpoint)?;
+            let auth = Zeroizing::new(format!("Bearer {}", token.0.as_str()));
+            let mut auth_header = HeaderValue::from_str(&auth).map_err(|_| ClientError::Token)?;
+            auth_header.set_sensitive(true);
+            request
+                .headers_mut()
+                .insert(header::AUTHORIZATION, auth_header);
             let (socket, _) = client_async_with_config(request, stream, Some(config))
                 .await
                 .map_err(|error| match error {

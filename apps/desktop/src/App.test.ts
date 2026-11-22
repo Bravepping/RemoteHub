@@ -51,6 +51,19 @@ describe('desktop navigation with real capability boundaries', () => {
     expect(runCaptureProbe).not.toHaveBeenCalled();
     expect(wrapper.find('input[type="checkbox"]').exists()).toBe(false);
   });
+  it('passes a native opt-in diagnostic flag to the product workspace', async () => {
+    vi.mocked(getRuntimeInfo).mockResolvedValue({
+      ...info,
+      p3_enabled: true,
+      v2_loopback_diagnostic_enabled: true,
+    });
+    await open();
+    expect(wrapper.find('[aria-label="局域网远程会话"]').exists()).toBe(true);
+    expect(wrapper.get('#v2-diagnostic-heading').text()).toBe(
+      'V2 本机信令诊断',
+    );
+    expect(runCaptureProbe).not.toHaveBeenCalled();
+  });
   it('renders core-returned fields only in read-only settings', async () => {
     await open();
     await visit('设置');

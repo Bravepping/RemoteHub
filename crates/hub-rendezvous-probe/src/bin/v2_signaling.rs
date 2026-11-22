@@ -418,6 +418,10 @@ async fn main() {
 mod data_smoke;
 
 #[cfg(test)]
+#[path = "v2_signaling/tls_smoke.rs"]
+mod tls_smoke;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use hub_signal_v2::{

@@ -15,6 +15,7 @@ fn main() {
             "p004_lan_metrics",
             "p004_lan_stop",
             "p004_lan_save",
+            "run_v2_loopback_diagnostic",
             "p006_interfaces",
             "p006_start",
             "p006_ready",

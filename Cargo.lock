@@ -1941,10 +1941,12 @@ name = "hub-signal-v2"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "rustls",
  "serde",
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls",
  "tokio-tungstenite",
  "uuid",
  "zeroize",
@@ -1971,6 +1973,7 @@ dependencies = [
  "hmac",
  "hub-encode-win",
  "hub-probe-wire",
+ "hub-signal-v2",
  "ring",
  "rtc",
  "rustls",

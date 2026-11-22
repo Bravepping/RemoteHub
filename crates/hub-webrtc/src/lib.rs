@@ -1,3 +1,5 @@
+#[cfg(feature = "v2-loopback-signaling")]
+pub mod authenticated_relay;
 pub mod control;
 #[cfg(windows)]
 pub mod control_channel;

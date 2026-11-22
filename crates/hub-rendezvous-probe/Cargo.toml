@@ -24,7 +24,7 @@ ring = "=0.17.14"
 [dev-dependencies]
 rtc = { version = "=0.21.1", default-features = false }
 async-trait = "=0.1.92"
-hub-webrtc = { path = "../hub-webrtc" }
+hub-webrtc = { path = "../hub-webrtc", features = ["v2-loopback-signaling"] }
 webrtc = "=0.21.1"
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem"] }
 tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }

@@ -2,6 +2,7 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { LanProbe, type LanStatus, type LanReceiver } from '../p004/lan';
+const props = defineProps<{ v2LoopbackDiagnosticEnabled?: boolean }>();
 const video = ref<HTMLVideoElement>();
 const surface = ref<HTMLDivElement>();
 const role = ref<'sender' | 'receiver'>('receiver');
@@ -16,9 +17,14 @@ const error = ref('');
 const native = ref<LanStatus>();
 const receiver = ref<LanReceiver>();
 const input = ref(false);
+const diagnosticConsent = ref(false);
+const diagnosticBusy = ref(false);
+const diagnosticCount = ref<number>();
+const diagnosticError = ref('');
 const emit = defineEmits<{ sessionState: [state: string] }>();
 let session: LanProbe | undefined;
 let lastMove = 0;
+let disposed = false;
 const labels: Record<string, string> = {
   idle: '尚未连接',
   starting: '等待原生授权',
@@ -30,6 +36,15 @@ const labels: Record<string, string> = {
   stopping: '正在停止和回收',
   stopped: '会话已结束',
   failed: '会话失败',
+};
+const diagnosticMessages: Readonly<Record<string, string>> = {
+  V2_NATIVE_CONSENT_DENIED: '没有批准本次诊断，未交换任何信令。',
+  V2_BUSY: '本机信令诊断正在运行，请等它完成后重试。',
+  V2_TOKEN_REQUIRED: '本机诊断未配置临时令牌。检查启动配置，不要分享令牌。',
+  V2_CONNECT_FAILED: '无法连接本机信令服务，请确认服务已运行。',
+  V2_TIMEOUT: '本机信令诊断超时，请检查服务后重试。',
+  V2_SIGNAL_FAILED: '本机信令交换未通过验证。',
+  V2_DISABLED: '当前客户端未启用本机信令诊断。',
 };
 function safeError(value: unknown) {
   const text = String(value);
@@ -48,7 +63,8 @@ async function detect() {
   }
 }
 async function start() {
-  if (busy.value || !video.value || !consent.value) return;
+  if (diagnosticBusy.value || busy.value || !video.value || !consent.value)
+    return;
   busy.value = true;
   error.value = '';
   native.value = undefined;
@@ -88,6 +104,47 @@ async function start() {
     realControl: true,
     controlSim: false,
   });
+}
+async function runDiagnostic() {
+  if (
+    disposed ||
+    props.v2LoopbackDiagnosticEnabled !== true ||
+    busy.value ||
+    diagnosticBusy.value ||
+    !diagnosticConsent.value
+  )
+    return;
+  diagnosticBusy.value = true;
+  diagnosticConsent.value = false;
+  diagnosticCount.value = undefined;
+  diagnosticError.value = '';
+  try {
+    const result = await invoke<unknown>('run_v2_loopback_diagnostic', {
+      consent: true,
+    });
+    if (disposed) return;
+    if (
+      !result ||
+      typeof result !== 'object' ||
+      ![Object.prototype, null].includes(Object.getPrototypeOf(result)) ||
+      Object.keys(result).length !== 1 ||
+      !Object.hasOwn(result, 'authenticatedSignals') ||
+      (result as Record<string, unknown>).authenticatedSignals !== 4
+    )
+      throw new Error();
+    diagnosticCount.value = (
+      result as { authenticatedSignals: number }
+    ).authenticatedSignals;
+  } catch (error) {
+    if (!disposed) {
+      diagnosticError.value =
+        typeof error === 'string' && Object.hasOwn(diagnosticMessages, error)
+          ? diagnosticMessages[error]
+          : '本机信令诊断未完成。请检查客户端和本机信令服务后重试。';
+    }
+  } finally {
+    if (!disposed) diagnosticBusy.value = false;
+  }
 }
 function pause() {
   session?.enableInput(false);
@@ -157,6 +214,7 @@ onMounted(() => {
   document.addEventListener('visibilitychange', pause);
 });
 onBeforeUnmount(() => {
+  disposed = true;
   window.removeEventListener('blur', pause);
   document.removeEventListener('visibilitychange', pause);
   void stop();
@@ -214,7 +272,11 @@ onBeforeUnmount(() => {
         <button
           class="outline-button"
           :disabled="
-            !consent || !local || !peer || (role === 'receiver' && !code)
+            diagnosticBusy ||
+            !consent ||
+            !local ||
+            !peer ||
+            (role === 'receiver' && !code)
           "
           @click="start"
         >
@@ -297,6 +359,43 @@ onBeforeUnmount(() => {
             : '尚无本次结果'
       }}。未接入公网、云身份或持久信任库；每轮都要重新确认和配对。
     </p>
+  </section>
+  <section
+    v-if="v2LoopbackDiagnosticEnabled === true"
+    class="product-card remote-workspace"
+    aria-labelledby="v2-diagnostic-heading"
+  >
+    <div class="card-header">
+      <h2 id="v2-diagnostic-heading">V2 本机信令诊断</h2>
+    </div>
+    <p>
+      只在本机回环交换测试用 offer、answer 和 ICE
+      消息。不会采集屏幕、发送视频、操作键鼠或连接其他设备，也不改变局域网远程会话。
+    </p>
+    <p>使用已启动的本机信令服务；诊断不会启动服务。</p>
+    <label>
+      <input
+        v-model="diagnosticConsent"
+        type="checkbox"
+        :disabled="busy || diagnosticBusy"
+      />
+      我同意执行本次本机信令诊断
+    </label>
+    <p>
+      <button
+        class="outline-button"
+        :disabled="busy || diagnosticBusy || !diagnosticConsent"
+        @click="runDiagnostic"
+      >
+        {{ diagnosticBusy ? '诊断进行中…' : '运行本机诊断' }}
+      </button>
+    </p>
+    <p v-if="diagnosticBusy" role="status">请在原生窗口确认本次诊断。</p>
+    <p v-if="diagnosticCount !== undefined" role="status">
+      本机信令诊断通过：已认证并转发
+      {{ diagnosticCount }} 条测试消息。此结果不代表远程视频或键鼠连接通过。
+    </p>
+    <p v-if="diagnosticError" role="alert">{{ diagnosticError }}</p>
   </section>
 </template>
 <style scoped>

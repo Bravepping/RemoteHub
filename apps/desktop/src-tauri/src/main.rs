@@ -18,6 +18,8 @@ mod p004_lan;
 mod p006;
 #[cfg(feature = "p007b-diag")]
 mod p007b_diag;
+#[cfg(all(feature = "p004-lan", not(feature = "p006-relay")))]
+mod v2_loopback;
 
 #[cfg(not(feature = "p006-relay"))]
 use hub_capture_win::ProbeReport;
@@ -67,6 +69,7 @@ struct RuntimeInfo {
     capture_backend: &'static str,
     remote_access_enabled: bool,
     p3_enabled: bool,
+    v2_loopback_diagnostic_enabled: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
@@ -102,6 +105,10 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
         },
         remote_access_enabled: false,
         p3_enabled: cfg!(all(feature = "p3-lan", not(feature = "p006-relay"))),
+        v2_loopback_diagnostic_enabled: cfg!(all(
+            feature = "v2-loopback-diagnostic",
+            not(feature = "p006-relay")
+        )),
         p004_enabled: cfg!(feature = "p004-probe"),
         p004_lan_enabled: cfg!(feature = "p004-lan"),
         p005_enabled: cfg!(feature = "p005-control"),
@@ -241,7 +248,8 @@ fn main() {
             p004_lan::p004_lan_stats,
             p004_lan::p004_lan_metrics,
             p004_lan::p004_lan_stop,
-            p004_lan::p004_lan_save
+            p004_lan::p004_lan_save,
+            v2_loopback::run_v2_loopback_diagnostic
         ])
         .on_window_event(p004_lan::on_window_event);
     #[cfg(feature = "p006-relay")]

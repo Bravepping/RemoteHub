@@ -21,6 +21,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
     vi.mocked(invoke).mockResolvedValue({
       ...fixture,
       p004_enabled: false,
+      v2_loopback_diagnostic_enabled: true,
       p007b_diag_enabled: false,
     });
     const result = await tauriDesktopApi.readRuntime();
@@ -28,6 +29,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
     expect(result).toEqual({
       ...fixture,
       p004_enabled: false,
+      v2_loopback_diagnostic_enabled: true,
       p007b_diag_enabled: false,
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -56,6 +58,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
     { ...fixture, os: 'fixture\nprivate' },
     { ...fixture, remote_access_enabled: 'false' },
     { ...fixture, p004_enabled: 'true' },
+    { ...fixture, v2_loopback_diagnostic_enabled: 'true' },
     { ...fixture, unexpected_private_field: 'private-fixture' },
     Object.create(fixture),
   ])(

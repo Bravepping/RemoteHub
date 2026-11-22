@@ -119,6 +119,9 @@ onUnmounted(() => {
       />
       <RemoteWorkspace
         v-if="runtime?.p3_enabled"
+        :v2-loopback-diagnostic-enabled="
+          runtime?.v2_loopback_diagnostic_enabled === true
+        "
         @session-state="remoteState = $event"
       />
       <HomePage

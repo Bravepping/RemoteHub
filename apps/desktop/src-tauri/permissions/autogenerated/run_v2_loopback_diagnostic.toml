@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-v2-loopback-diagnostic"
+description = "Enables the run_v2_loopback_diagnostic command without any pre-configured scope."
+commands.allow = ["run_v2_loopback_diagnostic"]
+
+[[permission]]
+identifier = "deny-run-v2-loopback-diagnostic"
+description = "Denies the run_v2_loopback_diagnostic command without any pre-configured scope."
+commands.deny = ["run_v2_loopback_diagnostic"]

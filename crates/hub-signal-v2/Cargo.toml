@@ -7,6 +7,8 @@ license.workspace = true
 publish = false
 
 [dependencies]
+rustls = { version = "=0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
 futures-util = { version = "=0.3.34", features = ["sink"] }
 serde.workspace = true
 serde_json.workspace = true
