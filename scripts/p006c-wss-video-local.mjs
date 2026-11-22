@@ -33,6 +33,7 @@ if (
   throw new Error('EXPLICIT_WSS_CASE_AND_SCOPE_REQUIRED');
 const local = cloud ? args[3] : args[1],
   scenario = cloud ? args[5] : args[3];
+const startedAt = new Date().toISOString();
 if (
   !Object.values(networkInterfaces())
     .flat()
@@ -148,32 +149,26 @@ try {
   browser = await chromium.launch({
     channel: 'msedge',
     headless: true,
-    args: cloud
-      ? [
-          '--force-webrtc-ip-handling-policy=default_public_interface_only',
-          '--autoplay-policy=no-user-gesture-required',
-        ]
-      : [
-          '--force-webrtc-ip-handling-policy=default',
-          '--disable-features=WebRtcHideLocalIpsWithMdns',
-          '--autoplay-policy=no-user-gesture-required',
-          '--use-fake-device-for-media-stream',
-          '--use-fake-ui-for-media-stream',
-        ],
+    args: [
+      '--force-webrtc-ip-handling-policy=default',
+      '--disable-features=WebRtcHideLocalIpsWithMdns',
+      '--autoplay-policy=no-user-gesture-required',
+      '--use-fake-device-for-media-stream',
+      '--use-fake-ui-for-media-stream',
+    ],
   });
-  const context = await browser.newContext(
-    cloud ? {} : { permissions: ['camera', 'microphone'] },
-  );
+  const context = await browser.newContext({
+    permissions: ['camera', 'microphone'],
+  });
   const page = await context.newPage();
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}`);
-  if (!cloud)
-    await page.evaluate(async () => {
-      const fake = await navigator.mediaDevices.getUserMedia({
-        video: true,
-        audio: false,
-      });
-      fake.getTracks().forEach((t) => t.stop());
+  await page.evaluate(async () => {
+    const fake = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: false,
     });
+    fake.getTracks().forEach((t) => t.stop());
+  });
   let readyResolve, readyReject;
   const ready = new Promise((r, j) => {
     readyResolve = r;
@@ -216,6 +211,18 @@ try {
     const e = JSON.parse(line);
     if (e.event === 'private_rpc_ready') readyResolve();
     else if (e.event === 'private_rpc_response') {
+      if (cloud && e.value?.ice?.ice_servers) {
+        const labels = Object.fromEntries(
+          e.value.ice.ice_servers.map((s) => [
+            s.username,
+            `${scenario}-${startedAt.replace(/[^0-9]/g, '')}`,
+          ]),
+        );
+        writeFileSync(
+          path.join(privateParent, 'p006c-video-cloud-observer-labels.json'),
+          JSON.stringify({ labels }),
+        );
+      }
       const p = pending.get(e.id);
       if (p) {
         pending.delete(e.id);
@@ -362,19 +369,26 @@ try {
     final.saved &&
     !final.error &&
     (['auto', 'fallback'].includes(scenario)
-      ? source.frames_sent === 300
+      ? source.frames_sent === 300 &&
+        source.stream.frames_input === 300 &&
+        source.stream.frames_encoded === 300 &&
+        final.receiver.framesReceived === 300 &&
+        final.receiver.framesDecoded === 300 &&
+        final.receiver.framesRendered === 300
       : source.frames_sent > 0 && source.frames_sent < 450) &&
     (scenario !== 'fallback' ||
       (source.native_path.path === 'relay' &&
         source.diagnostic_transport?.drop_direct &&
         source.diagnostic_transport.dropped_packets > 0)) &&
-    (cloud || source.native_path.path === 'direct');
+    (scenario === 'fallback' || source.native_path.path === 'direct');
   const result = {
     scenario,
+    startedAt,
+    finishedAt: new Date().toISOString(),
     scope: cloud
       ? 'one Windows PC; approved cloud WSS/TURN + real native clients/Session/MF/RTP/Edge/control.v1; synthetic video, not two physical PCs or desktop capture'
       : 'one Windows PC; real local TLS server + native WSS clients + Session MF/RTP + shared frontend RelayProbe/Edge + control.v1; generated video, no cloud/TURN/desktop',
-    browserTestOnlyFakeDevicePermission: !cloud,
+    browserTestOnlyFakeDevicePermission: true,
     localTestPcFactoryRemovedIceServers: !cloud,
     native: nativeFinal,
     browserDuring: during,

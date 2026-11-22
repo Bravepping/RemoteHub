@@ -1,0 +1,32 @@
+[
+  {
+    "name": "final-typecheck",
+    "command": "pnpm --dir apps/desktop typecheck",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T01:31:25.065Z"
+  },
+  {
+    "name": "final-frontend-unit",
+    "command": "pnpm --dir apps/desktop test",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T01:31:26.659Z"
+  },
+  {
+    "name": "final-lint",
+    "command": "pnpm lint",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T01:31:27.615Z"
+  },
+  {
+    "name": "final-python",
+    "command": "E:/ides/Python/python.exe -m unittest discover -s scripts -p test_*turn*.py -v",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T01:31:27.689Z"
+  },
+  {
+    "name": "cloud-evidence-verification",
+    "command": "E:/ides/Python/python.exe scripts/p006c-cloud-evidence.py",
+    "exitCode": 0,
+    "finishedAt": "2026-11-22T01:31:27.783Z"
+  }
+]

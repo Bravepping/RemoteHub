@@ -118,3 +118,80 @@ it.each(['P006_STOPPED', 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED'])(
     else expect(failures).toEqual([`Error: ${code}`]);
   },
 );
+it.each([true, false])(
+  'reads final live counters before closing, preserving selected-pair validation: %s',
+  async (permitted) => {
+    const order: string[] = [];
+    const failures: string[] = [];
+    const snapshots: Array<number | null | undefined> = [];
+    const video = document.createElement('video');
+    const report = new Map([
+      [
+        'inbound',
+        {
+          type: 'inbound-rtp',
+          kind: 'video',
+          framesReceived: 300,
+          framesDecoded: 300,
+        },
+      ],
+      ['transport', { type: 'transport', selectedCandidatePairId: 'pair' }],
+      ['pair', { localCandidateId: 'local', remoteCandidateId: 'remote' }],
+      [
+        'local',
+        { candidateType: 'relay', protocol: 'udp', address: ip, port: 49160 },
+      ],
+      [
+        'remote',
+        {
+          candidateType: 'relay',
+          protocol: 'udp',
+          address: ip,
+          port: permitted ? 49161 : 49260,
+        },
+      ],
+    ] as Array<[string, Record<string, unknown>]>);
+    const pc = {
+      connectionState: 'connected',
+      getStats: async () => {
+        order.push('read');
+        return report;
+      },
+      getReceivers: () => [{ track: { stop: () => order.push('track-stop') } }],
+      close: () => {
+        order.push('close');
+        pc.connectionState = 'closed';
+      },
+    };
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'p006_stats')
+        return {
+          resources_released: true,
+          error: null,
+          receiver_samples: [{ framesDecoded: 280 }],
+        };
+      if (command === 'p006_save') return 'saved';
+      return undefined;
+    });
+    const probe = new RelayProbe(
+      video,
+      (_state, _status, receiver) => {
+        if (receiver) snapshots.push(receiver.framesDecoded);
+      },
+      (e) => failures.push(e),
+      () => {},
+      () => {},
+    );
+    Object.assign(probe, { id: 'final-snapshot', pc, server: ip });
+    await probe.stop();
+    expect(order.indexOf('read')).toBeLessThan(order.indexOf('track-stop'));
+    expect(pc.connectionState).toBe('closed');
+    if (permitted) {
+      expect(failures).toEqual([]);
+      expect(snapshots).toEqual([300]);
+    } else {
+      expect(failures).toEqual(['Error: BROWSER_SELECTED_RELAY_UNVERIFIED']);
+      expect(snapshots).toEqual([]);
+    }
+  },
+);

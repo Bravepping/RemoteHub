@@ -19,6 +19,25 @@ def fixture(zero=False, gone=61, end=80):
 
 
 class LifecycleTests(unittest.TestCase):
+    def test_shared_username_preserves_each_client_allocation_and_refresh(self):
+        packets=[]
+        server=('192.0.2.1',3478)
+        for i,client in enumerate([('192.0.2.2',40001),('192.0.2.2',40002)],1):
+            for kind,tid,attrs,src,dst in [
+                (3,bytes([i])*12,[(6,b'shared-session')],client,server),
+                (0x103,bytes([i])*12,[(13,struct.pack('!I',600))],server,client),
+                (4,bytes([i+2])*12,[(6,b'shared-session'),(13,struct.pack('!I',0))],client,server),
+                (0x104,bytes([i+2])*12,[(13,struct.pack('!I',0))],server,client),
+            ]:
+                k,t,v=parse(packet(kind,tid,attrs));packets.append((len(packets)*10**9,k,t,v,src,dst))
+        rows,_=lifecycle_events(packets,{'shared-session':'fixture'},True)
+        self.assertEqual({r['case'] for r in rows},{'fixture.allocation-1','fixture.allocation-2'})
+        for case in {'fixture.allocation-1','fixture.allocation-2'}:
+            selected=[r for r in rows if r['case']==case]
+            self.assertEqual([r['kind'] for r in selected],['0x3','0x103','0x4','0x104'])
+        text=str(rows)
+        self.assertNotIn('shared-session',text);self.assertNotIn('192.0.2',text)
+
     def test_refresh_zero_needs_response_and_socket_disappearance(self):
         self.assertEqual(classify(fixture(True,3),'fixture')['classification'],'refresh_zero_immediate')
         missing=[e for e in fixture(True,3) if e.get('kind')!='0x104']

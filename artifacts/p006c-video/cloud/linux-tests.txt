@@ -1,0 +1,25 @@
+warning: unused workspace dependency `thiserror`
+  --> Cargo.toml:14:1
+   |
+14 | thiserror = "=2.0.18"
+   | ^^^^^^^^^
+   |
+   = note: `cargo::unused_workspace_dependencies` is set to `warn` by default
+help: consider removing the workspace dependency `thiserror`
+warning: workspace (manifest) generated 1 warning
+   Compiling hub-probe-wire v0.1.0 (/opt/remotehub-p006c-video-20261122/src/crates/hub-probe-wire)
+   Compiling hub-turn-credentials v0.1.0 (/opt/remotehub-p006c-video-20261122/src/crates/hub-turn-credentials)
+   Compiling hub-rendezvous-probe v0.1.0 (/opt/remotehub-p006c-video-20261122/src/crates/hub-rendezvous-probe)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.84s
+     Running unittests src/main.rs (/opt/remotehub-p006b-build/target/debug/build/hub-rendezvous-probe/6c52a64135d22564/out/hub_rendezvous_probe-6c52a64135d22564)
+
+running 6 tests
+test integration_tests::direct_room_rejects_mismatched_mode_before_creating_receiver_grants ... ok
+test integration_tests::real_wss_validates_tls_invitation_origin_roles_and_authenticated_frames ... ok
+test integration_tests::rooms_require_both_roles_reject_replay_and_retire ... ok
+test tests::hello_rejects_invalid_duration_and_room ... ok
+test tests::invitation_is_role_specific_and_bounded ... ok
+test integration_tests::real_wss_direct_mode_authenticates_path_policy_before_video_sdp ... ok
+
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.24s
+

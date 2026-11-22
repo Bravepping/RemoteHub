@@ -87,7 +87,9 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 已依次接入Rust Session、现有WebView2前端代码和认证WSS，复用同一个视频/control.v1 PeerConnection。DirectPreferred显式使用ICE All并核对双方真实selected pair；旧本机/LAN/RelayOnly限制保留。新path策略经HMAC认证，只发布对方明确允许的私有host；停止、过期、模式错配和重放均拒绝。
 
-本机7轮真实合成视频测试通过；认证WSS完整轮300帧输入/编码/发送/接收/解码/呈现，720p30，100事件发送/原生接收/ACK/确认一致，异常0、host/host、资源回收完成。35组完整检查通过（74 Rust/22前端/3 Edge/11 Python）；Tauri新版已构建。本轮未采集桌面或启动云服务，单机Edge合成图案测试不能充当新版嵌入WebView2、物理双机或云视频回退验收，P006c保持doing。
+本机7轮真实合成视频测试通过；本地完整轮300帧全链、100事件一致。随后单独获授权的真实云WSS/TURN自动验证也通过：ICE All正常host/host，直连UDP进程内受阻后自动relay/relay，两轮各300帧720p30完整接收/解码/呈现、100条发送/原生接收/ACK/确认、异常0。9个云分配均Refresh(0)即时释放，原600秒租约+15秒无残留；专用服务已停止、不自启，临时凭据删除，业务与配置/防火墙未变。没有自动采集桌面或做物理双机，P006c保持doing。
+
+历史35项完整检查（74 Rust/22前端/3 Edge/11 Python）继续保留；本次前端最终快照修复后，当前24前端/12 Python、类型/lint/build/3 Edge及新版Tauri构建通过，未重复未变Rust全回归。[云端独立报告](docs/PHASE0_P006C_VIDEO_CLOUD_TEST_REPORT.md)及artifacts/p006c-video/cloud保留实际pair、释放和收尾证据。双机包与[操作说明](docs/P006C_MANUAL_ACCEPTANCE.md)已准备，包内没有有效邀请；后续用户另行批准服务启动和真实双机采集，再刷新临时配置。
 
 见[独立测试报告](docs/PHASE0_P006C_VIDEO_TEST_REPORT.md)、[协议契约](docs/P006C_VIDEO_CONTRACT.md)、[复现与构建](docs/P006C_VIDEO_RUNBOOK.md)、[待授权云端范围](docs/P006C_VIDEO_CLOUD_PLAN.md)。构建入口`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video.ps1 -BuildOnly`；离线回归`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video-checks.ps1`。正式窗口每轮仍须亲自确认；合成源及故障注入只在独立操作员probe启用，无实际键鼠注入。
 

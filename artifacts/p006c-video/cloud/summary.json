@@ -1,0 +1,71 @@
+{
+  "scope": "one physical Windows, real cloud WSS/TURN, real MF/RTP/SCTP/Edge, generated pixels; physical two-PC desktop acceptance pending",
+  "passed": true,
+  "cases": [
+    {
+      "scenario": "auto",
+      "startedAt": "2026-11-22T01:10:17.143Z",
+      "finishedAt": "2026-11-22T01:10:32.725Z",
+      "path": "direct",
+      "nativePair": {
+        "local_type": "host",
+        "path": "direct",
+        "protocol": "udp",
+        "remote_type": "host"
+      },
+      "browserPair": [
+        "host",
+        "host"
+      ],
+      "frames": 300,
+      "controlEvents": 100,
+      "pending": 0,
+      "anomalies": 0,
+      "packetsLost": 0,
+      "freezes": 0,
+      "browserFirstFrameMs": 2364.5,
+      "nativeConnectedMs": 273,
+      "faultDroppedPackets": 0
+    },
+    {
+      "scenario": "fallback",
+      "startedAt": "2026-11-22T01:10:59.302Z",
+      "finishedAt": "2026-11-22T01:11:15.546Z",
+      "path": "relay",
+      "nativePair": {
+        "local_type": "relay",
+        "path": "relay",
+        "protocol": "udp",
+        "remote_type": "relay"
+      },
+      "browserPair": [
+        "relay",
+        "relay"
+      ],
+      "frames": 300,
+      "controlEvents": 100,
+      "pending": 0,
+      "anomalies": 0,
+      "packetsLost": 0,
+      "freezes": 0,
+      "browserFirstFrameMs": 3040.2000000001863,
+      "nativeConnectedMs": 927,
+      "faultDroppedPackets": 40
+    }
+  ],
+  "allocationCount": 9,
+  "maxConcurrentAllocations": 3,
+  "allocationReleaseDelaySeconds": [
+    1.109709937,
+    1.396631038
+  ],
+  "grantedLifetimeSeconds": [
+    600
+  ],
+  "sourceDigest": "d63767bbf0e1f4008e4b79157cb861c04604e9aac34b2b9df3f08cf94b5b8676",
+  "sourceDigestAlgorithm": "same sorted apps/crates/scripts path+NUL+file SHA256 digest as local evidence",
+  "binaries": {
+    "remotehub-desktop.exe": "164e4bc7c7edcba5559083832f1790ba3aa453ab02374e62396b156afd948bf1",
+    "authenticated-session-probe.exe": "ca9ebe51540a10aae8068350fc82c17fb0c9211b1a3ed22ed32ff7fbedb63100"
+  }
+}

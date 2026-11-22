@@ -234,41 +234,10 @@ export class RelayProbe {
       if (this.stopped) return;
       let receiver = status.receiver_samples.at(-1);
       if (this.pc) {
-        const data = await receiveStats(
-          this.pc,
-          this.video,
-          this.started,
-          this.firstFrame,
-        );
-        const stats = await this.pc.getStats();
-        const directPath = this.directScope
-          ? selectedDirect(stats, this.localCandidates, this.remoteCandidates)
-          : null;
-        const peerMatches = directPath
-          ? directPath.verified
-          : selectedRelay(stats, this.server);
-        if (
-          peerMatches === false ||
-          ((data.framesDecoded ?? 0) > 0 && peerMatches !== true)
-        )
-          throw new Error(
-            this.directScope
-              ? 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED'
-              : 'BROWSER_SELECTED_RELAY_UNVERIFIED',
-          );
-        if (this.firstFrame === null && (data.framesDecoded ?? 0) > 0)
-          this.firstFrame = data.elapsedMs;
-        data.firstFrameMs = this.firstFrame;
-        receiver = {
-          ...(directPath ? { connectionPath: directPath.path } : {}),
-          ...data,
-          peerMatches,
-          decoderImplementation: null,
-          control: this.control?.snapshot(),
-        };
-        const playing = (data.framesDecoded ?? 0) > 0 && !this.video.paused;
+        receiver = await this.receiverStats();
+        const playing = (receiver.framesDecoded ?? 0) > 0 && !this.video.paused;
         if (!status.resources_released)
-          this.control?.beginBatch(playing && peerMatches === true);
+          this.control?.beginBatch(playing && receiver.peerMatches === true);
         if (
           !status.resources_released &&
           performance.now() - this.lastMetric > 700
@@ -300,6 +269,42 @@ export class RelayProbe {
       await this.stop();
     }
   }
+  private async receiverStats(): Promise<LanReceiver> {
+    const pc = this.pc;
+    if (!pc) throw new Error('BROWSER_PC_MISSING');
+    const data = await receiveStats(
+      pc,
+      this.video,
+      this.started,
+      this.firstFrame,
+    );
+    const stats = await pc.getStats();
+    const directPath = this.directScope
+      ? selectedDirect(stats, this.localCandidates, this.remoteCandidates)
+      : null;
+    const peerMatches = directPath
+      ? directPath.verified
+      : selectedRelay(stats, this.server);
+    if (
+      peerMatches === false ||
+      ((data.framesDecoded ?? 0) > 0 && peerMatches !== true)
+    )
+      throw new Error(
+        this.directScope
+          ? 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED'
+          : 'BROWSER_SELECTED_RELAY_UNVERIFIED',
+      );
+    if (this.firstFrame === null && (data.framesDecoded ?? 0) > 0)
+      this.firstFrame = data.elapsedMs;
+    return {
+      ...(directPath ? { connectionPath: directPath.path } : {}),
+      ...data,
+      firstFrameMs: this.firstFrame,
+      peerMatches,
+      decoderImplementation: null,
+      control: this.control?.snapshot(),
+    };
+  }
   stop(): Promise<void> {
     if (this.stopping) return this.stopping;
     this.stopped = true;
@@ -313,6 +318,9 @@ export class RelayProbe {
     try {
       await this.control?.close();
       if (this.id) await this.call('p006_stop', { sessionId: this.id });
+      // Read the live browser counters before closing. A stopped native client's
+      // last uploaded sample can precede the final decoded/presented frames.
+      const finalReceiver = this.pc ? await this.receiverStats() : undefined;
       this.pc?.getReceivers().forEach((r) => r.track.stop());
       this.pc?.close();
       this.video.srcObject = null;
@@ -330,7 +338,7 @@ export class RelayProbe {
         this.update(
           status.error ? 'failed' : 'stopped',
           status,
-          status.receiver_samples.at(-1),
+          finalReceiver ?? status.receiver_samples.at(-1),
         );
       } else this.update('stopped');
     } catch (e) {

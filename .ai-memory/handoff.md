@@ -1,4 +1,13 @@
-# P006c 视频/control/WSS集成检查点
+# P006c 真实云视频自动验证交付检查点
+
+- 用户明确授权90分钟/4alloc/自动合成WSS/TURN，明确禁止自动真实双机桌面采集；结束必须全停不自启、删临时凭据。开工fetch main f57674c干净，沿用ADR0010，无Rust/Tauri源码改动。新目录/opt/remotehub-p006c-video-20261122、旧工具chain/vendor离线编译WSS6tests/release过，低权transient WSS沿用8443，coturn配置/旧WSS/业务FW SG不改。
+- 2026-11-22 09:07:51启动；真实Windows单机两原生WSS角色+Session/MF/前端Edge合成图案。09:10:17正常host/host，09:10:59进程内直连阻断40包自动relay/relay；ICE All，两轮各300帧输入/编码/发送/接收/解码/呈现、720p30、100事件发送/原生接收/ACK/确认、连续1..101+pingpong1、异常0/lost0/freeze0。首帧观察2364.5/3040.2ms不能当纯RTT/任意NAT结论。测试浏览器fake设备权限只为VPN下物理接口曝光，不读实际设备，生产WebView2无该开关。
+- 保留首云轮passed=false：原生300帧/100ACK，前端finish用旧周期样本280覆盖新stats，不能判真实20丢帧。现finish在PC/track关闭前读取真实最终snapshot并保留候选校验；两云轮均全300。前端新增2项最终快照与安全拒绝回归、当前24tests/type/lint过；现有build/3Edge/12Python/Tauri构建过，日志cloud-automatic。Rust源码未变，历史74/clippy不冒称本轮重跑。最终原生回传样本仍可能早于浏览器终态，本轮不扩原生save协议。
+- 同coturn PID332698最多3分配，三轮9实际Allocation（含首失败），全部Refresh0请求/成功回应+1.1097–1.3967秒首次socket消失，实际600秒租约及+15秒均无残留。observer显式split-shared-credentials按真实UDP tuple私有关联，公开别名，不把WSS共享username混为一个。9:21:08提前finish保护拒绝未变更；9:28:18重连核对9项/同PID/0socket后停止，shutdown完整。26业务集合/容器启动时间、原config/unit/binary及FW策略不变；新旧WSS/coturn停，旧disabled、新无持久unit、timer取消、端口0，临时key/邀请/labels/rawpcap云端和本机已删，SSH关闭。
+- docs/PHASE0_P006C_VIDEO_CLOUD_TEST_REPORT.md、P006C_MANUAL_ACCEPTANCE.md，artifacts/p006c-video/cloud含真实pair/rawstats/9classifications/脱敏事件/shutdown；历史本地/首步报告保留。新scripts/p006c-cloud-evidence.py从真实事件复算，package-p006c-video.py仅全停后生成待激活包，无有效配置/secret，CRC+SHA。最终SHA/包见delivery.json与会话，避免自引用。
+- 当前只剩用户后续另行批准并操作物理双机/WebView2/DXGI，P006c保持doing/Phase0 4of7；不要求现在重复操作或旧接收端停止补测。后续启服务/签新配置必须新授权，本次窗口结束，不进SendInput或Phase1。
+
+# P006c 视频/control/WSS集成检查点（历史）
 
 - 用户要求按Rust Session→WebView2→认证WSS顺序接入，优先本地，再单独申请云范围。main e020051干净，先ADR0010/契约提交a9fb146；本轮尚未启动或变更云服务，旧授权不继承。
 - 默认关闭p006-direct，复用旧视频PC/MF/RTP/control.v1。DirectGrant绑定控制UUID，完整SDP后安装精确端点，原生及前端真实pair两侧匹配；媒体/控制等验证再开放。新HMAC path交换明确对方私有IP范围；旧RelayOnly wire缺省兼容，模式不匹配拒绝。WSS应答任务不阻塞4秒心跳。停止立即撤销生产/处理，通知并2秒close grace、5秒join后关PC/边界；旧范围预算保留。

@@ -57,11 +57,12 @@ def read_capture(path):
     return result
 
 
-def lifecycle_events(packets, labels):
+def lifecycle_events(packets, labels, split_allocations=False):
     transactions = {}
     output = []
     seen = set()
     allocations = {}
+    allocation_cases = {}
     for ns, kind, tid, values, src, dst in packets:
         direction = 'request' if kind in (3, 4) else 'response'
         ident = (kind, tid, src, dst)
@@ -74,6 +75,14 @@ def lifecycle_events(packets, labels):
             case = labels.get(username)
             if case is None:
                 continue
+            if split_allocations:
+                # Both WSS peers receive one session username. Keep their actual
+                # client/server UDP tuples separate without exporting addresses.
+                route = (case, src, dst)
+                if route not in allocation_cases:
+                    number = 1 + sum(k[0] == case for k in allocation_cases)
+                    allocation_cases[route] = f'{case}.allocation-{number}'
+                case = allocation_cases[route]
             transactions[key] = case
         else:
             case = transactions.get(key)
@@ -109,7 +118,7 @@ def relay_sockets(pid):
     return sorted(set(ports))
 
 
-def run(config_path, folder, seconds, max_allocations=2):
+def run(config_path, folder, seconds, max_allocations=2, split_allocations=False):
     config = json.loads(config_path.read_text())
     assert set(config) == {'labels', 'turn_pid'}
     assert 1 <= seconds <= 5400
@@ -133,7 +142,7 @@ def run(config_path, folder, seconds, max_allocations=2):
                 assert Path(f'/proc/{pid}').exists(), 'TURN_STOPPED_DURING_OBSERVATION'
                 current = json.loads(config_path.read_text())
                 assert current['turn_pid'] == pid, 'OBSERVER_SERVICE_CONTEXT_CHANGED'
-                events, allocations = lifecycle_events(read_capture(capture), current['labels'])
+                events, allocations = lifecycle_events(read_capture(capture), current['labels'], split_allocations)
                 for e in events:
                     ident = (e['kind'], e['transactionHash'], e['case'])
                     if ident not in written:
@@ -164,5 +173,6 @@ if __name__ == '__main__':
     ap.add_argument('--private-dir', type=Path, required=True)
     ap.add_argument('--seconds', type=int, default=3600)
     ap.add_argument('--max-allocations',type=int,default=2)
+    ap.add_argument('--split-shared-credentials',action='store_true')
     args = ap.parse_args()
-    run(args.private_config, args.private_dir, args.seconds,args.max_allocations)
+    run(args.private_config, args.private_dir, args.seconds,args.max_allocations,args.split_shared_credentials)
