@@ -15,6 +15,7 @@ import {
   readdirSync,
   realpathSync,
   readFileSync,
+  statSync,
 } from 'node:fs';
 import path from 'node:path';
 const args = process.argv.slice(2);
@@ -28,7 +29,13 @@ if (
     : args.length !== 4 ||
       args[0] !== '--local' ||
       args[2] !== '--case' ||
-      !['auto', 'sender-stop', 'receiver-stop'].includes(args[3])
+      ![
+        'auto',
+        'sender-stop',
+        'receiver-stop',
+        'stats-failure',
+        'wss-disconnect',
+      ].includes(args[3])
 )
   throw new Error('EXPLICIT_WSS_CASE_AND_SCOPE_REQUIRED');
 const local = cloud ? args[3] : args[1],
@@ -68,6 +75,7 @@ const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 let service,
   native,
   browser,
+  page,
   vite,
   exited = false,
   nativeFinal,
@@ -160,7 +168,7 @@ try {
   const context = await browser.newContext({
     permissions: ['camera', 'microphone'],
   });
-  const page = await context.newPage();
+  page = await context.newPage();
   await page.goto(`http://127.0.0.1:${vite.httpServer.address().port}`);
   await page.evaluate(async () => {
     const fake = await navigator.mediaDevices.getUserMedia({
@@ -190,6 +198,7 @@ try {
     { stdio: ['pipe', 'pipe', 'pipe'] },
   );
   const pending = new Map();
+  const evidenceFiles = [];
   let next = 0,
     nativeError = '';
   native.stderr.on('data', (b) => {
@@ -227,7 +236,14 @@ try {
       if (p) {
         pending.delete(e.id);
         if (e.error) p.reject(new Error(e.error));
-        else p.resolve(e.value);
+        else {
+          if (
+            typeof e.value === 'string' &&
+            /^[0-9a-f-]+-receiver-(pre-close|final)\.json$/.test(e.value)
+          )
+            evidenceFiles.push(e.value);
+          p.resolve(e.value);
+        }
       }
     } else if (e.event === 'native_final') nativeFinal = e;
   });
@@ -240,6 +256,19 @@ try {
     return bounded(p, 25000, 'LOCAL_RPC_RESPONSE_TIMEOUT');
   }
   await bounded(ready, 10000, 'LOCAL_NATIVE_PAIR_TIMEOUT');
+  const senderEvidenceDenial = await rpc('test_sender_report_denial');
+  if (senderEvidenceDenial.denial !== 'RECEIVER_EVIDENCE_WRONG_ROLE')
+    throw new Error('LOCAL_REPORT_ROLE_CHECK');
+  let foreignOwnerRejected = false;
+  try {
+    await rpc('p006_save', {
+      sessionId: 'foreign-owner',
+      receiverEvidence: {},
+    });
+  } catch (e) {
+    foreignOwnerRejected = e.message === 'LOCAL_RPC_OWNER';
+  }
+  if (!foreignOwnerRejected) throw new Error('LOCAL_REPORT_OWNER_CHECK');
   await page.exposeFunction('nativeInvoke', rpc);
   await page.evaluate(
     async ({ local, seconds, cloud }) => {
@@ -305,7 +334,8 @@ try {
   await page.waitForFunction(
     () =>
       window.wssFixture?.receiver?.control?.ackReceived === 100 ||
-      window.wssFixture?.error,
+      window.wssFixture?.error ||
+      ['stopped', 'failed'].includes(window.wssFixture?.states.at(-1)),
     {},
     { timeout: cloud ? 75000 : 25000 },
   );
@@ -315,12 +345,27 @@ try {
     error: window.wssFixture.error,
   }));
   if (during.error) throw new Error('LOCAL_FRONTEND_FAILED');
+  if (scenario === 'stats-failure')
+    await page.evaluate(() => {
+      window.wssFixture.pc.getStats = () =>
+        Promise.reject(new Error('DIAG_GETSTATS_FAILURE'));
+    });
+  if (scenario === 'wss-disconnect') {
+    service.kill();
+    await bounded(
+      new Promise((r) => service.once('exit', r)),
+      3000,
+      'LOCAL_WSS_DISCONNECT_TIMEOUT',
+    );
+  }
   if (scenario === 'sender-stop') await rpc('sender_cancel');
   if (scenario === 'receiver-stop')
     await page.evaluate(() => window.wssFixture.probe.stop());
   await page.waitForFunction(
     () =>
-      Boolean(window.wssFixture?.saved) || Boolean(window.wssFixture?.error),
+      Boolean(window.wssFixture?.saved) &&
+      window.wssFixture.pc.connectionState === 'closed' &&
+      ['stopped', 'failed'].includes(window.wssFixture.states.at(-1)),
     {},
     { timeout: 20000 },
   );
@@ -343,9 +388,25 @@ try {
   );
   const source = nativeFinal?.sender?.source,
     control = during.receiver?.control;
+  const evidenceDirectory = path.join(
+    cloud ? path.dirname(path.resolve(args[1])) : privateDir,
+    'receiver-evidence',
+  );
+  const receiverEvidence = evidenceFiles.map((name) =>
+    JSON.parse(readFileSync(path.join(evidenceDirectory, name), 'utf8')),
+  );
+  const evidencePassed =
+    receiverEvidence.length === 2 &&
+    receiverEvidence[0].stage === 'pre_close' &&
+    receiverEvidence[1].stage === 'cleanup' &&
+    receiverEvidence[0].capture ===
+      (scenario === 'stats-failure' ? 'last_known' : 'live') &&
+    receiverEvidence[1].cleanup.peerClosed === true &&
+    receiverEvidence[1].cleanup.nativeResourcesReleased === true;
   const passed =
-    exitCode === 0 &&
-    !nativeError &&
+    evidencePassed &&
+    (scenario === 'wss-disconnect' ? exitCode === 1 : exitCode === 0) &&
+    (scenario === 'wss-disconnect' || !nativeError) &&
     source?.resources_released &&
     nativeFinal.sender.authenticated &&
     nativeFinal.receiver.authenticated &&
@@ -367,7 +428,11 @@ try {
     during.receiver.framesDecoded > 0 &&
     final.browserClosed &&
     final.saved &&
-    !final.error &&
+    (scenario === 'stats-failure'
+      ? final.error === 'Error: DIAG_GETSTATS_FAILURE'
+      : scenario === 'wss-disconnect'
+        ? Boolean(final.error)
+        : !final.error) &&
     (['auto', 'fallback'].includes(scenario)
       ? source.frames_sent === 300 &&
         source.stream.frames_input === 300 &&
@@ -393,6 +458,11 @@ try {
     native: nativeFinal,
     browserDuring: during,
     browserFinal: final,
+    receiverEvidence,
+    securityReportChecks: {
+      senderRoleDenied: true,
+      foreignOwnerDenied: foreignOwnerRejected,
+    },
     exitCode,
     passed: Boolean(passed),
   };
@@ -402,13 +472,59 @@ try {
     data.includes('"sdp":')
   )
     throw new Error('LOCAL_WSS_EVIDENCE_PRIVATE_DATA');
-  const out = cloud
-    ? 'artifacts/p006c-video/cloud'
-    : 'artifacts/p006c-video/wss-local';
+  const out =
+    process.env.REMOTEHUB_LOCAL_EVIDENCE_DIR ??
+    (cloud ? 'artifacts/p006c-video/cloud' : 'artifacts/p006c-video/wss-local');
   mkdirSync(out, { recursive: true });
   writeFileSync(`${out}/${scenario}.json`, data);
   console.log(`${scenario} WSS/video: ${passed ? 'PASS' : 'FAIL'}`);
   if (!passed) process.exitCode = 1;
+} catch (error) {
+  const partial = await page
+    ?.evaluate(() => {
+      const s = window.wssFixture;
+      return s
+        ? {
+            states: s.states,
+            error: s.error,
+            receiver: s.receiver,
+            status: s.status,
+          }
+        : null;
+    })
+    .catch(() => null);
+  const code = String(error?.message ?? error);
+  const failureCode = /^[A-Z_0-9]+$/.test(code)
+    ? code
+    : 'LOCAL_CASE_TIMEOUT_OR_RUNNER_ERROR';
+  const out =
+    process.env.REMOTEHUB_LOCAL_EVIDENCE_DIR ??
+    (cloud ? 'artifacts/p006c-video/cloud' : 'artifacts/p006c-video/wss-local');
+  const data =
+    JSON.stringify(
+      {
+        scenario,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        passed: false,
+        scope:
+          'local/cloud case failed before final assertion; not success evidence',
+        failureCode,
+        browserPartial: partial,
+        native: nativeFinal ?? null,
+      },
+      null,
+      2,
+    ) + '\n';
+  if (
+    [local, ...secretValues].some((s) => data.includes(s)) ||
+    data.includes('"sdp":')
+  )
+    throw new Error('LOCAL_WSS_FAILED_EVIDENCE_PRIVATE_DATA');
+  mkdirSync(out, { recursive: true });
+  writeFileSync(`${out}/${scenario}.json`, data);
+  console.log(`${scenario} WSS/video: FAIL (${failureCode})`);
+  process.exitCode = 1;
 } finally {
   if (native && !exited) {
     native.stdin.end();
@@ -430,6 +546,21 @@ try {
     if (!checked.startsWith(privateParent + path.sep) || checked !== privateDir)
       throw new Error('PRIVATE_CLEANUP_SCOPE');
     for (const name of readdirSync(privateDir)) {
+      if (name === 'receiver-evidence') {
+        const directory = path.join(privateDir, name);
+        if (
+          realpathSync(directory) !== directory ||
+          !statSync(directory).isDirectory()
+        )
+          throw new Error('PRIVATE_EVIDENCE_CLEANUP_SCOPE');
+        for (const file of readdirSync(directory)) {
+          if (!/^[0-9a-f-]+-receiver-(pre-close|final)\.json$/.test(file))
+            throw new Error('PRIVATE_EVIDENCE_CLEANUP_FILE');
+          unlinkSync(path.join(directory, file));
+        }
+        rmdirSync(directory);
+        continue;
+      }
       if (
         ![
           'cert.pem',

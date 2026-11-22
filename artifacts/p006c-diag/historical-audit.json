@@ -1,0 +1,78 @@
+{
+  "scope": "historical offline evidence plus exact baseline source; no cloud/no desktop/no new two-PC run",
+  "historicalImplementationCommit": "acd19101b98f4c3c6d886442594c2927f30bde03",
+  "sourceSha256": {
+    "crates/hub-webrtc/src/direct_policy.rs": "c4d03c587a30d3f01e90d799d0d0a7cfa3a1908b5b847ac46e80d0a63b48e01c",
+    "crates/hub-webrtc/src/session_direct.rs": "d584a1082f77bf3d92f8fd21d2c10b7dcd733dd22700f6f843301848bdd912de"
+  },
+  "failures": [
+    {
+      "attempt": 1,
+      "retainedReportSha256": "4c196124771249e4e8390d33acbcff67339f5d0fe2be783e4020df29492c0483",
+      "recordedError": "DIRECT_SELECTED_PAIR_NOT_APPROVED",
+      "sourceFrames": 0,
+      "acceptedMoves": 0,
+      "nativeResourcesReleased": true,
+      "publishedLocalCandidateTypes": [
+        "srflx/approved/udp",
+        "relay/approved/udp"
+      ],
+      "nativeSelectedPair": null,
+      "browserPeriodicPair": [
+        "srflx",
+        "srflx"
+      ],
+      "conclusion": "At least one native selected (IPv4 UDP endpoint, supported type) was absent from its corresponding validated set. Exact rejected side/address/port/type was not retained.",
+      "provenSpecificRootCause": null,
+      "notInferable": [
+        "local_or_remote_side",
+        "address_change",
+        "port_change",
+        "type_mismatch",
+        "exact_selected_endpoint"
+      ],
+      "excludedAtThisSpecificReturnSite": [
+        "missing_candidate_set",
+        "unsupported_candidate_type",
+        "non_udp_protocol"
+      ],
+      "permissionNote": "A real channel open event does not grant control permission; source/media and accepted control remained zero."
+    },
+    {
+      "attempt": 2,
+      "retainedReportSha256": "4e6e01456a039f185594f9759ecb9bb3cc41c7ec6591eafc8115bf25f69d4e03",
+      "recordedError": "DIRECT_SELECTED_PAIR_NOT_APPROVED",
+      "sourceFrames": 0,
+      "acceptedMoves": 0,
+      "nativeResourcesReleased": true,
+      "publishedLocalCandidateTypes": [
+        "srflx/approved/udp",
+        "relay/approved/udp"
+      ],
+      "nativeSelectedPair": null,
+      "browserPeriodicPair": [
+        "srflx",
+        "srflx"
+      ],
+      "conclusion": "At least one native selected (IPv4 UDP endpoint, supported type) was absent from its corresponding validated set. Exact rejected side/address/port/type was not retained.",
+      "provenSpecificRootCause": null,
+      "notInferable": [
+        "local_or_remote_side",
+        "address_change",
+        "port_change",
+        "type_mismatch",
+        "exact_selected_endpoint"
+      ],
+      "excludedAtThisSpecificReturnSite": [
+        "missing_candidate_set",
+        "unsupported_candidate_type",
+        "non_udp_protocol"
+      ],
+      "permissionNote": "A real channel open event does not grant control permission; source/media and accepted control remained zero."
+    }
+  ],
+  "rootCauseLocated": false,
+  "observedContrast": "Both failures retained local published srflx/relay only; successful native host/srflx round retained host/srflx/relay.",
+  "plausibleButUnprovenMechanism": "A native selected local host absent from the published answer set would be rejected even though a browser reports srflx. Retained failure pair is missing, so this is a testable hypothesis, not historical attribution.",
+  "next": "collect new redacted pair diagnosis only after separately approved minimum online scope"
+}

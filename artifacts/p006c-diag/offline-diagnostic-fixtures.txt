@@ -1,0 +1,44 @@
+
+running 3 tests
+test direct_diagnostics::tests::type_and_address_changes_are_diagnostic_only ... ok
+DIAG_OFFLINE_FIXTURE {"version":1,"approved":false,"local_set_source":"validated_published_answer","remote_set_source":"authenticated_validated_offer","private_local_publication_approved":null,"local":{"reason":"candidate_type_absent_from_sdp","candidate_type":"host","protocol":"udp","address_class":"loopback","approved_count":1,"same_address_count":0,"same_port_count":1,"same_type_count":0,"same_endpoint_count":0,"exact_match_count":0},"remote":{"reason":"address_range_rejected","candidate_type":"host","protocol":"udp","address_class":"loopback","approved_count":1,"same_address_count":0,"same_port_count":1,"same_type_count":0,"same_endpoint_count":0,"exact_match_count":0}}
+test direct_diagnostics::tests::omitted_host_is_not_silently_reapproved_as_reflexive_candidate ... ok
+test direct_diagnostics::tests::precise_failures_remain_rejected_and_export_no_endpoints ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 43 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+   Compiling hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
+    Finished `test` profile [unoptimized] target(s) in 4.06s
+     Running unittests src\lib.rs (target\debug\build\hub-webrtc/696c1adfb8f1c861\out\hub_webrtc-696c1adfb8f1c861.exe)
+     Running unittests src\bin\authenticated-session-probe.rs (target\debug\build\hub-webrtc/bb87a6e81eaf2885\out\authenticated_session_probe-bb87a6e81eaf2885.exe)
+     Running unittests src\bin\ice-path-probe.rs (target\debug\build\hub-webrtc/9854a8588f9f4ec9\out\ice_path_probe-9854a8588f9f4ec9.exe)
+     Running unittests src\bin\turn-allocate-probe.rs (target\debug\build\hub-webrtc/0f20552c5530baeb\out\turn_allocate_probe-0f20552c5530baeb.exe)
+     Running unittests src\bin\video-session-probe.rs (target\debug\build\hub-webrtc/3995296795978ff6\out\video_session_probe-3995296795978ff6.exe)
+     Running tests\real_mf_packetization.rs (target\debug\build\hub-webrtc/e1084337de6a2b37\out\real_mf_packetization-e1084337de6a2b37.exe)
+
+EXIT=0

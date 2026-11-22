@@ -356,6 +356,9 @@ pub fn selected(
     local_candidates: &VerifiedCandidates,
     remote_candidates: &VerifiedCandidates,
 ) -> Result<PathSummary, String> {
+    if local_candidates.scope != remote_candidates.scope {
+        return Err("DIRECT_SELECTED_PAIR_SCOPE_MISMATCH".into());
+    }
     if !local_candidates.values.contains(&local) || !remote_candidates.values.contains(&remote) {
         return Err("DIRECT_SELECTED_PAIR_NOT_APPROVED".into());
     }
@@ -441,6 +444,9 @@ mod tests {
         };
         assert_eq!(selected(c1, c2, &v, &v).unwrap().path, "relay");
         assert_eq!(selected(c2, c2, &v, &v).unwrap().path, "direct");
+        let mut foreign = v.clone();
+        foreign.scope = uuid::Uuid::new_v4();
+        assert!(selected(c2, c2, &v, &foreign).is_err());
         assert!(selected(
             c1,
             c2,

@@ -1,0 +1,225 @@
+{
+  "recordedAt": "2026-11-22T10:45:17.519811+08:00",
+  "scope": "offline regression + one physical Windows generated-video real localhost TLS/WSS/MF/RTP/Edge/SCTP; no new cloud or two-PC/desktop test",
+  "regressionCommands": 35,
+  "rustPassed": 80,
+  "frontendPassed": 32,
+  "edgePassed": 3,
+  "pythonPassed": 12,
+  "localCases": [
+    {
+      "scenario": "auto",
+      "startedAt": "2026-11-22T02:40:49.920Z",
+      "finishedAt": "2026-11-22T02:41:05.513Z",
+      "sourceFrames": 300,
+      "persisted": [
+        {
+          "stage": "pre_close",
+          "capture": "live",
+          "framesDecoded": 300,
+          "sampledAtMs": 1795315263839,
+          "recordedAtMs": 1795315263839,
+          "errors": [],
+          "cleanup": {
+            "controlClosed": null,
+            "peerClosed": false,
+            "tracksStopped": null,
+            "nativeResourcesReleased": true
+          }
+        },
+        {
+          "stage": "cleanup",
+          "capture": "live",
+          "framesDecoded": 300,
+          "sampledAtMs": 1795315263866,
+          "recordedAtMs": 1795315263882,
+          "errors": [],
+          "cleanup": {
+            "controlClosed": true,
+            "peerClosed": true,
+            "tracksStopped": true,
+            "nativeResourcesReleased": true
+          }
+        }
+      ],
+      "nativeExitCode": 0,
+      "expectedFailure": false,
+      "passed": true
+    },
+    {
+      "scenario": "sender-stop",
+      "startedAt": "2026-11-22T02:41:05.826Z",
+      "finishedAt": "2026-11-22T02:41:17.075Z",
+      "sourceFrames": 170,
+      "persisted": [
+        {
+          "stage": "pre_close",
+          "capture": "live",
+          "framesDecoded": 170,
+          "sampledAtMs": 1795315275401,
+          "recordedAtMs": 1795315275401,
+          "errors": [],
+          "cleanup": {
+            "controlClosed": null,
+            "peerClosed": false,
+            "tracksStopped": null,
+            "nativeResourcesReleased": true
+          }
+        },
+        {
+          "stage": "cleanup",
+          "capture": "live",
+          "framesDecoded": 170,
+          "sampledAtMs": 1795315275428,
+          "recordedAtMs": 1795315275439,
+          "errors": [],
+          "cleanup": {
+            "controlClosed": true,
+            "peerClosed": true,
+            "tracksStopped": true,
+            "nativeResourcesReleased": true
+          }
+        }
+      ],
+      "nativeExitCode": 0,
+      "expectedFailure": false,
+      "passed": true
+    },
+    {
+      "scenario": "receiver-stop",
+      "startedAt": "2026-11-22T02:41:17.404Z",
+      "finishedAt": "2026-11-22T02:41:27.417Z",
+      "sourceFrames": 171,
+      "persisted": [
+        {
+          "stage": "pre_close",
+          "capture": "live",
+          "framesDecoded": 170,
+          "sampledAtMs": 1795315286581,
+          "recordedAtMs": 1795315286582,
+          "errors": [],
+          "cleanup": {
+            "controlClosed": null,
+            "peerClosed": false,
+            "tracksStopped": null,
+            "nativeResourcesReleased": true
+          }
+        },
+        {
+          "stage": "cleanup",
+          "capture": "live",
+          "framesDecoded": 171,
+          "sampledAtMs": 1795315286626,
+          "recordedAtMs": 1795315286634,
+          "errors": [],
+          "cleanup": {
+            "controlClosed": true,
+            "peerClosed": true,
+            "tracksStopped": true,
+            "nativeResourcesReleased": true
+          }
+        }
+      ],
+      "nativeExitCode": 0,
+      "expectedFailure": false,
+      "passed": true
+    },
+    {
+      "scenario": "stats-failure",
+      "startedAt": "2026-11-22T02:41:27.726Z",
+      "finishedAt": "2026-11-22T02:41:38.076Z",
+      "sourceFrames": 182,
+      "persisted": [
+        {
+          "stage": "pre_close",
+          "capture": "last_known",
+          "framesDecoded": 170,
+          "sampledAtMs": 1795315296853,
+          "recordedAtMs": 1795315297215,
+          "errors": [
+            "DIAG_GETSTATS_FAILURE"
+          ],
+          "cleanup": {
+            "controlClosed": null,
+            "peerClosed": false,
+            "tracksStopped": null,
+            "nativeResourcesReleased": true
+          }
+        },
+        {
+          "stage": "cleanup",
+          "capture": "last_known",
+          "framesDecoded": 170,
+          "sampledAtMs": 1795315296853,
+          "recordedAtMs": 1795315297286,
+          "errors": [
+            "DIAG_GETSTATS_FAILURE"
+          ],
+          "cleanup": {
+            "controlClosed": true,
+            "peerClosed": true,
+            "tracksStopped": true,
+            "nativeResourcesReleased": true
+          }
+        }
+      ],
+      "nativeExitCode": 0,
+      "expectedFailure": true,
+      "passed": true
+    },
+    {
+      "scenario": "wss-disconnect",
+      "startedAt": "2026-11-22T02:41:38.393Z",
+      "finishedAt": "2026-11-22T02:41:49.572Z",
+      "sourceFrames": 171,
+      "persisted": [
+        {
+          "stage": "pre_close",
+          "capture": "live",
+          "framesDecoded": 171,
+          "sampledAtMs": 1795315307872,
+          "recordedAtMs": 1795315307873,
+          "errors": [
+            "P006_WSS_CLOSED"
+          ],
+          "cleanup": {
+            "controlClosed": null,
+            "peerClosed": false,
+            "tracksStopped": null,
+            "nativeResourcesReleased": true
+          }
+        },
+        {
+          "stage": "cleanup",
+          "capture": "live",
+          "framesDecoded": 171,
+          "sampledAtMs": 1795315307898,
+          "recordedAtMs": 1795315307910,
+          "errors": [
+            "P006_WSS_CLOSED"
+          ],
+          "cleanup": {
+            "controlClosed": true,
+            "peerClosed": true,
+            "tracksStopped": true,
+            "nativeResourcesReleased": true
+          }
+        }
+      ],
+      "nativeExitCode": 1,
+      "expectedFailure": true,
+      "passed": true
+    }
+  ],
+  "localTemporaryTlsConfigsAndKeysDeleted": true,
+  "cloudStartedThisRound": false,
+  "realDesktopCapturedThisRound": false,
+  "sourceDigest": "faa201569b32e0a4b24170f5d0e4893f6d7e8d5fdc9679f2f92ea34a42e95c05",
+  "sourceDigestAlgorithm": "sha256 over sorted apps/crates/scripts path + NUL + each file SHA256 digest",
+  "binaries": {
+    "remotehub-desktop.exe": "f201fadab10e170613fabd5d6ee4654bd431e3164c72a04f35b95d2e6a078557",
+    "authenticated-session-probe.exe": "f049491ba8bd35929d28813591d1ddfe6e20cbd50e8fe89b3c1b0fee2aff0f5b"
+  },
+  "historicalRootCauseLocated": false,
+  "minimumOnlinePlan": "docs/P006C_DIAG_MINIMUM_ONLINE_PLAN.md"
+}

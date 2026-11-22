@@ -113,7 +113,7 @@ it.each(['P006_STOPPED', 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED'])(
       localIp: '192.168.1.2',
       seconds: 30,
     });
-    expect(states).toContain('stopped');
+    expect(states).toContain(code === 'P006_STOPPED' ? 'stopped' : 'failed');
     if (code === 'P006_STOPPED') expect(failures).toEqual([]);
     else expect(failures).toEqual([`Error: ${code}`]);
   },
@@ -191,7 +191,8 @@ it.each([true, false])(
       expect(snapshots).toEqual([300]);
     } else {
       expect(failures).toEqual(['Error: BROWSER_SELECTED_RELAY_UNVERIFIED']);
-      expect(snapshots).toEqual([]);
+      // Failed-path counters are retained as diagnostic evidence, not success.
+      expect(snapshots).toEqual([300]);
     }
   },
 );

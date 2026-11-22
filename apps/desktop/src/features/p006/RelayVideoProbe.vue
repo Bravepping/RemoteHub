@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { RelayProbe } from './relay';
 import type { LanStatus, LanReceiver } from '../p004/lan';
 const props = defineProps<{ directEnabled?: boolean }>();
@@ -22,6 +23,7 @@ const saved = ref('');
 const status = ref<LanStatus>();
 const receiver = ref<LanReceiver>();
 let probe: RelayProbe | undefined;
+let unlistenClose: UnlistenFn | undefined;
 const labels: Record<string, string> = {
   idle: '尚未开始',
   waiting: '等待另一台电脑配对',
@@ -35,6 +37,9 @@ const labels: Record<string, string> = {
 };
 onMounted(async () => {
   try {
+    unlistenClose = await listen('p006-close-requested', () => {
+      void probe?.stop();
+    });
     interfaces.value = await invoke<string[]>('p006_interfaces');
     localIp.value =
       interfaces.value.find((ip) => ip.startsWith('192.168.')) ??
@@ -83,7 +88,10 @@ async function start() {
   consent.value = false;
   await probe.start(config);
 }
-onBeforeUnmount(() => void probe?.stop());
+onBeforeUnmount(() => {
+  unlistenClose?.();
+  void probe?.stop();
+});
 </script>
 <template>
   <section class="relay-panel">

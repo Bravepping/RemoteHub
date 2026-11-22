@@ -1,0 +1,58 @@
+
+Running 3 tests using 3 workers
+
+10:17:35 [vite] (client) dependency optimized: @tauri-apps/api/event
+10:17:35 [vite] (client) optimized dependencies changed. reloading
+  x  2 tests\control-offer.spec.ts:2:1 › real Edge creates bundled H264 video and reliable control.v1 without screen capture (780ms)
+  x  1 tests\relay-options.spec.ts:2:1 › real Edge stores relay-only transport policy without gathering or network probe (848ms)
+  ok 3 tests\preview.spec.ts:3:1 › browser preview does not impersonate a working desktop core (1.1s)
+
+
+  1) tests\control-offer.spec.ts:2:1 › real Edge creates bundled H264 video and reliable control.v1 without screen capture
+
+    Error: page.evaluate: Execution context was destroyed, most likely because of a navigation
+
+      4 | }) => {
+      5 |   await page.goto('/');
+    > 6 |   const result = await page.evaluate(async () => {
+        |                             ^
+      7 |     const pc = new RTCPeerConnection({
+      8 |       iceServers: [],
+      9 |       bundlePolicy: 'max-bundle',
+        at C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\tests\control-offer.spec.ts:6:29
+
+    Error Context: test-results\control-offer-real-Edge-cr-c463d-l-v1-without-screen-capture\error-context.md
+
+  2) tests\relay-options.spec.ts:2:1 › real Edge stores relay-only transport policy without gathering or network probe
+
+    Error: page.evaluate: Execution context was destroyed, most likely because of a navigation
+
+      4 | }) => {
+      5 |   await page.goto('/');
+    > 6 |   const policy = await page.evaluate(() => {
+        |                             ^
+      7 |     // No local description, capture, gather or remote endpoint is used here.
+      8 |     const pc = new RTCPeerConnection({
+      9 |       iceTransportPolicy: 'relay',
+        at C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\tests\relay-options.spec.ts:6:29
+
+    Error Context: test-results\relay-options-real-Edge-st-0e0f5--gathering-or-network-probe\error-context.md
+
+  2 failed
+    tests\control-offer.spec.ts:2:1 › real Edge creates bundled H264 video and reliable control.v1 without screen capture
+    tests\relay-options.spec.ts:2:1 › real Edge stores relay-only transport policy without gathering or network probe
+  1 passed (1.9s)
+C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop:
+[ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL] @remotehub/desktop@0.1.0 test:e2e: `node scripts/e2e.mjs`
+Exit status 1
+[ELIFECYCLE] Command failed with exit code 1.
+$ pnpm --filter @remotehub/desktop test:e2e
+$ node scripts/e2e.mjs
+(node:16528) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:20516) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:13612) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+EXIT=1

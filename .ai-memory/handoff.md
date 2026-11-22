@@ -1,4 +1,13 @@
-# P006c 真实双机手动验收收尾（当前服务已停）
+# P0-06c-DIAG 交付检查点（本轮仅离线/本机，无云授权）
+
+- 用户本轮要求诊断两次DIRECT_SELECTED_PAIR_NOT_APPROVED、完善接收端独立getStats落盘/异常证据、完整回归及Git交付。main acd1910干净；ADR0011/契约先提交76dd4af。没有登录/启动云WSS/TURN，没有真实桌面/摄像头/新物理双机，不请求用户重测，不进入P0-07/P1；既有云停用授权结束，未来需新具体授权。
+- 审计旧源码及保留JSON，能证明至少一侧实际(endpoint,type)不在验证集合；两次已发布本端集合缺host，成功多host。原生getSelected读取agent候选索引并复制字段，未发布host被选中的假设可离线复现拒绝，但旧失败pair/批准布尔缺失，具体侧/地址/端口/类型不能定位，不能宣称现场修复。historical-audit.json保留SHA/结论，最小20分钟4alloc在线方案仅文档待审查，未执行。
+- 新direct_diagnostics按真实native pair和grant分别记录固定reason/类型/协议/地址类别/集合来源/大小与相等关系计数、private_local_publication_approved；首次失败不被清理覆盖，无原IP/端口/SDP/secret/端点hash。旧精确selected保持，scope交叉/协议/分量/范围/类型更严格；运行UDP白名单不改，未加入prflx或host-srflx别名放行。Session策略集成负例保持0帧/控制权限关闭。
+- 新receiver_evidence本地journal严格schema/owner/接收角色/大小/固定错误码，p006_save可选receiverEvidence且browserClosed可选；pre-close及receiver-final各create_new/fsync，原生回收真值覆盖前端。视频/ICE同份getStats；读取失败保留原时间last_known或unavailable。Stop先同步control.revoke和发NativeStop，日志不能延后撤销；晚poll停后退出不改终态。各步独立catch，失败仍关track/PC/native；原生关窗立即cancel并emit、最多25秒等JS，没响应写unavailable。新OS嵌入WebView2/关窗未实测，不能夸大单机Edge覆盖。
+- 最终35项完整回归全部达预期，80 Rust/32前端/3Edge/12Python，旧桌面3另测、私有MF1ignored；默认/全特性及生产特性clippy、fmt、所有旧feature兼容/构建通过。使用dev/test debug0+incremental0避免缓存膨胀。最终真实本机TLS/WSS/Session/MF/RTP/Edge/control五轮auto/sender-stop/receiver-stop/stats-failure/wss-disconnect通过，正常300全帧+100ACK；原生实际文件2阶段落盘，角色/外会话写入拒绝。stats故障为API注入/last_known，WSS断开真实kill本地TLSserver/exit1预期保留，不冒充正常零错。临时TLS私钥/配置目录均清理，无TURN/no cloud/no actual desktop。
+- artifacts/p006c-diag分automatic/local/development/historical audit/offline fixture/summary，summary保留源码摘要/二进制SHA。开发保留Vite首opt重载失败和一次100ACK等待超时（未获完整失败快照、原因未归因）；runner已补提前异常失败JSON+退出码/完成时刻交叉验证防旧成功JSON残留冒充，最终五轮通过，不能改历史FAIL。报告PHASE0_P006C_DIAG_TEST_REPORT.md/最小在线计划/契约已更新。最终Git SHA以实际提交为准，完成后停止扩展待审查。
+
+# P006c 真实双机手动验收收尾（历史服务已停）
 
 - 用户单独授权最多90分钟，本轮亲自批准两端采集；main基线65993e1，沿用d805ecb程序，未改产品源码/不代点。09:39:31启动独立低权transient WSS及既有专用TURN，09:53:20提前停服，expiry timer已取消，授权结束不得沿用重开。
 - 两真实Windows成功轮：LAN直连native host/srflx、浏览器认证周期srflx/srflx；B手机热点轮双方relay/relay。ICE All、desktop源DXGI/MF各900输入/编码/发送，720p，100发送/原生接收/ACK/确认，pingpong1/序号1..101/异常0、源控制join。用户观看变化画面并确认双方资源回收无错。

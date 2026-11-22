@@ -70,8 +70,9 @@ export async function receiveStats(
   video: HTMLVideoElement,
   started: number,
   firstFrameMs: number | null,
+  provided?: RTCStatsReport,
 ): Promise<ReceiverSnapshot> {
-  const all = await pc.getStats();
+  const all = provided ?? (await pc.getStats());
   let inbound: RTCInboundRtpStreamStats | undefined;
   let pair: RTCIceCandidatePairStats | undefined;
   let codec: { mimeType?: string; sdpFmtpLine?: string } | undefined;

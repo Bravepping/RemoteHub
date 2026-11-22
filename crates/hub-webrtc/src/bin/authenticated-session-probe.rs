@@ -56,6 +56,11 @@ mod probe {
             Some(local),
         )?;
         let mut receiver = None;
+        let owner_id = uuid::Uuid::new_v4().to_string();
+        let evidence_dir = config
+            .parent()
+            .ok_or("LOCAL_RPC_REPORT_DIRECTORY")?
+            .join("receiver-evidence");
         let result = async {
             tokio::time::timeout(Duration::from_secs(8), async {
                 while sender.stats().state != "waiting_peer" {
@@ -95,9 +100,17 @@ mod probe {
                     break;
                 }
                 let args = &request["args"];
+                if command=="p006_save"&&args["sessionId"].as_str()!=Some(owner_id.as_str()) {
+                    emit(serde_json::json!({"event":"private_rpc_response","id":id,"error":"LOCAL_RPC_OWNER"}));continue;
+                }
                 let response: Result<serde_json::Value, String> = match command {
+                    "test_sender_report_denial"=>{
+                        let e=hub_webrtc::receiver_evidence::ReceiverEvidence::unavailable(hub_webrtc::receiver_evidence::Stage::PreClose);
+                        let denied=sender.save_receiver_evidence(&evidence_dir,&owner_id,e).err().ok_or("LOCAL_RPC_ROLE_NOT_DENIED")?;
+                        Ok(serde_json::json!({"denial":denied}))
+                    }
                     "p006_start" => {
-                        Ok(serde_json::json!({"sessionId":"local-owner","pairingCode":null}))
+                        Ok(serde_json::json!({"sessionId":owner_id,"pairingCode":null}))
                     }
                     "p006_ready" => viewer.browser_ready().await.and_then(|r| {
                         serde_json::to_value(r).map_err(|_| "LOCAL_RPC_ENCODING".into())
@@ -113,6 +126,12 @@ mod probe {
                         .map(|_| serde_json::Value::Null),
                     "p006_stop" => viewer.stop().await.map(|_| serde_json::Value::Null),
                     "p006_save" => {
+                        if let Some(e)=args.get("receiverEvidence") {
+                            let e=serde_json::from_value(e.clone()).map_err(|_|"LOCAL_RPC_EVIDENCE_SCHEMA")?;
+                            let result=viewer.save_receiver_evidence(&evidence_dir,&owner_id,e);
+                            emit(match result {Ok(name)=>serde_json::json!({"event":"private_rpc_response","id":id,"value":name}),Err(e)=>serde_json::json!({"event":"private_rpc_response","id":id,"error":e})});
+                            continue;
+                        }
                         if let Some(c) = args.get("control") {
                             viewer.record_control(
                                 serde_json::from_value(c.clone())

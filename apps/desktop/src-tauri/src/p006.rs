@@ -12,7 +12,7 @@ use std::{
     },
     time::Duration,
 };
-use tauri::{Manager, WebviewWindow};
+use tauri::{Emitter, Manager, WebviewWindow};
 use windows::{
     core::HSTRING,
     Win32::{
@@ -305,11 +305,23 @@ pub fn p006_save(
     window: WebviewWindow,
     state: tauri::State<'_, Arc<State>>,
     session_id: String,
-    browser_closed: bool,
+    browser_closed: Option<bool>,
     control: Option<hub_webrtc::control::BrowserStats>,
+    receiver_evidence: Option<hub_webrtc::receiver_evidence::ReceiverEvidence>,
 ) -> Result<String, String> {
     crate::experiment_origin::origin(&window)?;
     let s = find(&state, &session_id)?;
+    if let Some(e) = receiver_evidence {
+        let name = s.save_receiver_evidence(&report_dir()?, &session_id, e)?;
+        return Ok(format!(
+            "artifacts/private/{}/{name}",
+            if cfg!(feature = "p006-direct") {
+                "p006c"
+            } else {
+                "p006b"
+            }
+        ));
+    }
     if let Some(c) = control {
         s.record_control(c)?;
     }
@@ -317,7 +329,18 @@ pub fn p006_save(
     if !stats.resources_released {
         return Err("P006_CLEANUP_PENDING".into());
     }
-    write(&session_id, "final", &stats, Some(browser_closed))
+    write(&session_id, "final", &stats, browser_closed)
+}
+fn report_dir() -> Result<std::path::PathBuf, String> {
+    Ok(std::env::current_exe()
+        .map_err(|_| "REPORT_DIR")?
+        .parent()
+        .ok_or("REPORT_DIR")?
+        .join(if cfg!(feature = "p006-direct") {
+            "artifacts/private/p006c"
+        } else {
+            "artifacts/private/p006b"
+        }))
 }
 fn write(
     id: &str,
@@ -372,11 +395,19 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
         if let Some((_, s)) = &active {
             s.cancel();
         }
+        let _ = window.emit("p006-close-requested", ());
         let window = window.clone();
         let state = state.inner().clone();
         tauri::async_runtime::spawn(async move {
             let clean = if let Some((id, s)) = active {
+                let deadline = tokio::time::Instant::now() + Duration::from_secs(25);
+                while !s.receiver_evidence_complete() && tokio::time::Instant::now() < deadline {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
                 let ok = s.stop().await.is_ok();
+                if let Ok(dir) = report_dir() {
+                    let _ = s.save_missing_receiver_evidence(&dir, &id);
+                }
                 let _ = write(&id, "window-close", &s.stats(), None);
                 ok
             } else {

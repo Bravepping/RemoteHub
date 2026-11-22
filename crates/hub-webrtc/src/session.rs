@@ -43,6 +43,9 @@ pub use direct::DirectSettings;
 
 #[derive(Clone, Default, Serialize)]
 pub struct Stats {
+    #[cfg(feature = "p006-direct")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub direct_pair_diagnostic: Option<crate::direct_diagnostics::PairDiagnostic>,
     pub ice_transport_policy: String,
     #[cfg(feature = "p006-session-probe")]
     #[serde(skip_serializing_if = "Option::is_none")]

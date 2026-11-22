@@ -20,6 +20,20 @@ function fixture() {
   return { client, dc, pc, failed };
 }
 afterEach(() => vi.useRealTimers());
+it('revokes sending immediately while retaining the channel for final stats', async () => {
+  vi.useFakeTimers();
+  const { client, dc } = fixture();
+  dc.onopen?.(new Event('open'));
+  client.beginBatch(true);
+  await vi.advanceTimersByTimeAsync(60);
+  const sent = vi.mocked(dc.send).mock.calls.length;
+  client.revoke();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(dc.send).toHaveBeenCalledTimes(sent);
+  expect(dc.close).not.toHaveBeenCalled();
+  expect(client.snapshot().sendClosed).toBe(true);
+  expect(client.snapshot().state).toBe('open');
+});
 it('creates one reliable ordered channel on the supplied video PC, then counts real event callbacks', async () => {
   vi.useFakeTimers();
   const { client, dc, pc, failed } = fixture();

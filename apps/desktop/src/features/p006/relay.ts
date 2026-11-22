@@ -4,6 +4,11 @@ import { receiveStats } from '../p004/webrtc';
 import type { LanStatus, LanReceiver } from '../p004/lan';
 import { relayOptions, type IceConfig } from './ice';
 import {
+  evidenceCode,
+  evidenceBounded,
+  type ReceiverEvidence,
+} from './evidence';
+import {
   directOptions,
   directSdp,
   directAnswerCandidates,
@@ -75,6 +80,9 @@ export class RelayProbe {
   private firstFrame: number | null = null;
   private lastMetric = 0;
   private server = '';
+  private lastReceiver?: { sample: LanReceiver; at: number };
+  private failureCodes: string[] = [];
+  private receiverRole = false;
   constructor(
     private video: HTMLVideoElement,
     private update: (
@@ -90,7 +98,16 @@ export class RelayProbe {
     private createPeer: (options: RTCConfiguration) => RTCPeerConnection = (
       options,
     ) => new RTCPeerConnection(options),
-  ) {}
+  ) {
+    const notify = this.fail;
+    this.fail = (error) => {
+      const code = evidenceCode(error);
+      if (!this.failureCodes.includes(code) && this.failureCodes.length < 8) {
+        this.failureCodes.push(code);
+        notify(error);
+      }
+    };
+  }
   async start(config: {
     role: 'sender' | 'receiver';
     consent: boolean;
@@ -100,6 +117,7 @@ export class RelayProbe {
     mode?: 'relay_only' | 'direct_preferred';
     peerIp?: string;
   }) {
+    this.receiverRole = config.role === 'receiver';
     try {
       const result = await this.call<{
         sessionId: string;
@@ -235,6 +253,8 @@ export class RelayProbe {
       let receiver = status.receiver_samples.at(-1);
       if (this.pc) {
         receiver = await this.receiverStats();
+        if (this.stopped) return;
+        this.lastReceiver = { sample: receiver, at: Date.now() };
         const playing = (receiver.framesDecoded ?? 0) > 0 && !this.video.paused;
         if (!status.resources_released)
           this.control?.beginBatch(playing && receiver.peerMatches === true);
@@ -250,6 +270,11 @@ export class RelayProbe {
         }
       }
       if (this.stopped) return;
+      if (status.error) this.fail(status.error);
+      if (status.resources_released) {
+        await this.stop();
+        return;
+      }
       this.update(
         (receiver?.framesDecoded ?? 0) > 0 && !status.resources_released
           ? 'playing'
@@ -257,11 +282,6 @@ export class RelayProbe {
         status,
         receiver,
       );
-      if (status.error) this.fail(status.error);
-      if (status.resources_released) {
-        await this.stop();
-        return;
-      }
       this.timer = setTimeout(() => void this.poll(), 350);
     } catch (e) {
       if (!this.stopped && !(await this.completedNormally(e)))
@@ -269,26 +289,27 @@ export class RelayProbe {
       await this.stop();
     }
   }
-  private async receiverStats(): Promise<LanReceiver> {
+  private async receiverStats(strict = true): Promise<LanReceiver> {
     const pc = this.pc;
     if (!pc) throw new Error('BROWSER_PC_MISSING');
+    const stats = await pc.getStats();
     const data = await receiveStats(
       pc,
       this.video,
       this.started,
       this.firstFrame,
+      stats,
     );
-    const stats = await pc.getStats();
     const directPath = this.directScope
       ? selectedDirect(stats, this.localCandidates, this.remoteCandidates)
       : null;
     const peerMatches = directPath
       ? directPath.verified
       : selectedRelay(stats, this.server);
-    if (
+    const invalid =
       peerMatches === false ||
-      ((data.framesDecoded ?? 0) > 0 && peerMatches !== true)
-    )
+      ((data.framesDecoded ?? 0) > 0 && peerMatches !== true);
+    if (invalid && strict)
       throw new Error(
         this.directScope
           ? 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED'
@@ -296,7 +317,7 @@ export class RelayProbe {
       );
     if (this.firstFrame === null && (data.framesDecoded ?? 0) > 0)
       this.firstFrame = data.elapsedMs;
-    return {
+    const result: LanReceiver = {
       ...(directPath ? { connectionPath: directPath.path } : {}),
       ...data,
       firstFrameMs: this.firstFrame,
@@ -304,6 +325,7 @@ export class RelayProbe {
       decoderImplementation: null,
       control: this.control?.snapshot(),
     };
+    return result;
   }
   stop(): Promise<void> {
     if (this.stopping) return this.stopping;
@@ -315,40 +337,132 @@ export class RelayProbe {
   }
   private async finish() {
     this.update('stopping');
-    try {
-      await this.control?.close();
-      if (this.id) await this.call('p006_stop', { sessionId: this.id });
-      // Read the live browser counters before closing. A stopped native client's
-      // last uploaded sample can precede the final decoded/presented frames.
-      const finalReceiver = this.pc ? await this.receiverStats() : undefined;
-      this.pc?.getReceivers().forEach((r) => r.track.stop());
-      this.pc?.close();
-      this.video.srcObject = null;
-      if (this.id) {
-        const status = await this.call<LanStatus>('p006_stats', {
-          sessionId: this.id,
-        });
-        this.saved(
-          await this.call<string>('p006_save', {
+    this.control?.revoke();
+    const nativeStop = this.id
+      ? Promise.resolve().then(() =>
+          this.call('p006_stop', { sessionId: this.id }),
+        )
+      : undefined;
+    void nativeStop?.catch(() => {});
+    const errors = this.failureCodes;
+    const attempt = async <T>(
+      step: () => Promise<T> | T,
+    ): Promise<T | undefined> => {
+      try {
+        return await step();
+      } catch (e) {
+        const code = evidenceCode(e);
+        this.fail(code);
+        return undefined;
+      }
+    };
+    let capture: ReceiverEvidence['capture'] = 'unavailable';
+    const captureNow = async () => {
+      const current = await attempt(() =>
+        evidenceBounded(this.receiverStats(false)),
+      );
+      if (current) {
+        this.lastReceiver = { sample: current, at: Date.now() };
+        capture = 'live';
+        if (
+          current.peerMatches === false ||
+          ((current.framesDecoded ?? 0) > 0 && current.peerMatches !== true)
+        )
+          this.fail(
+            `Error: ${this.directScope ? 'BROWSER_SELECTED_DIRECT_PATH_UNVERIFIED' : 'BROWSER_SELECTED_RELAY_UNVERIFIED'}`,
+          );
+      } else if (this.lastReceiver) capture = 'last_known';
+    };
+    // A real final read happens while this browser PC and tracks still exist.
+    if (this.pc) {
+      await captureNow();
+    }
+    if (!this.pc && this.lastReceiver) capture = 'last_known';
+    let status: LanStatus | undefined;
+    const cleanup: ReceiverEvidence['cleanup'] = {
+      controlClosed: null,
+      peerClosed: this.pc ? this.pc.connectionState === 'closed' : null,
+      tracksStopped: null,
+      nativeResourcesReleased: null,
+    };
+    const save = async (stage: ReceiverEvidence['stage']) => {
+      if (!this.id || !this.receiverRole) return;
+      const sample = this.lastReceiver;
+      const receiverEvidence: ReceiverEvidence = {
+        version: 1,
+        stage,
+        capture,
+        sampledAtMs: sample?.at ?? null,
+        recordedAtMs: Date.now(),
+        snapshot: sample?.sample ?? null,
+        errors: [...errors].slice(0, 8),
+        cleanup: { ...cleanup },
+      };
+      const result = await attempt(async () => {
+        const path = await evidenceBounded(
+          this.call<string>('p006_save', {
             sessionId: this.id,
-            browserClosed: !this.pc || this.pc.connectionState === 'closed',
-            control: this.control?.snapshot(),
+            receiverEvidence,
           }),
         );
-        this.update(
-          status.error ? 'failed' : 'stopped',
-          status,
-          finalReceiver ?? status.receiver_samples.at(-1),
-        );
-      } else this.update('stopped');
-    } catch (e) {
-      this.fail(String(e));
-      this.update('failed');
-    } finally {
-      this.pc?.getReceivers().forEach((r) => r.track.stop());
-      this.pc?.close();
-      this.pc = undefined;
-      this.video.srcObject = null;
+        this.saved(path);
+        return true;
+      });
+      return result === true;
+    };
+    const preSaved = await save('pre_close');
+    await attempt(async () => {
+      await evidenceBounded(this.control?.close() ?? Promise.resolve());
+      cleanup.controlClosed = this.control
+        ? ['closed', 'failed'].includes(this.control.snapshot().state)
+        : null;
+    });
+    if (nativeStop) await attempt(() => evidenceBounded(nativeStop, 15000));
+    // Capture drained frames too, before close. Preserve the earlier durable file.
+    if (this.pc) {
+      await captureNow();
     }
+    if (this.receiverRole && !preSaved) await save('pre_close');
+    await attempt(() => {
+      this.pc?.getReceivers().forEach((r) => r.track.stop());
+      cleanup.tracksStopped = this.pc ? true : null;
+    });
+    await attempt(() => {
+      this.pc?.close();
+      cleanup.peerClosed = this.pc
+        ? this.pc.connectionState === 'closed'
+        : null;
+    });
+    this.video.srcObject = null;
+    if (this.id)
+      status = await attempt(() =>
+        evidenceBounded(
+          this.call<LanStatus>('p006_stats', { sessionId: this.id }),
+        ),
+      );
+    if (status?.error && !errors.includes(evidenceCode(status.error)))
+      this.fail(status.error);
+    cleanup.nativeResourcesReleased = status?.resources_released ?? null;
+    await save('cleanup');
+    if (this.id)
+      await attempt(async () => {
+        this.saved(
+          await evidenceBounded(
+            this.call<string>('p006_save', {
+              sessionId: this.id,
+              browserClosed: !this.pc || this.pc.connectionState === 'closed',
+              control: this.control?.snapshot(),
+            }),
+          ),
+        );
+      });
+    if (status?.error && !errors.includes(status.error))
+      errors.push(evidenceCode(status.error));
+    this.update(
+      errors.length || status?.error ? 'failed' : 'stopped',
+      status,
+      this.lastReceiver?.sample ?? status?.receiver_samples.at(-1),
+    );
+    this.pc = undefined;
   }
 }

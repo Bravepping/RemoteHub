@@ -5,5 +5,6 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [vue(), tailwindcss()],
   clearScreen: false,
+  optimizeDeps: { include: ['@tauri-apps/api/core', '@tauri-apps/api/event'] },
   test: { environment: 'jsdom', include: ['src/**/*.test.ts'] },
 });

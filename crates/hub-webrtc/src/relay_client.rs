@@ -147,6 +147,7 @@ struct Context {
     exchange: Option<hub_probe_wire::PathExchange>,
 }
 pub struct RelayClient {
+    receiver_journal: Mutex<crate::receiver_evidence::Journal>,
     mode: PathMode,
     #[cfg(feature = "p006-direct")]
     private_peers: Vec<Ipv4Addr>,
@@ -231,6 +232,7 @@ impl RelayClient {
         let display = (role == Role::Sender).then(|| key.display());
         let (tx, rx) = mpsc::channel(4);
         let this = Arc::new(Self {
+            receiver_journal: Mutex::new(crate::receiver_evidence::Journal::default()),
             mode,
             #[cfg(feature = "p006-direct")]
             private_peers,
@@ -408,6 +410,36 @@ impl RelayClient {
         c.validate()?;
         self.update(|s| s.browser_control = Some(c));
         Ok(())
+    }
+    pub fn save_receiver_evidence(
+        &self,
+        dir: &std::path::Path,
+        id: &str,
+        e: crate::receiver_evidence::ReceiverEvidence,
+    ) -> Result<String, String> {
+        if self.role != Role::Receiver {
+            return Err("RECEIVER_EVIDENCE_WRONG_ROLE".into());
+        }
+        self.receiver_journal
+            .lock()
+            .map_err(|_| "RECEIVER_EVIDENCE_LOCK")?
+            .save(dir, id, e, self.stats().resources_released)
+    }
+    pub fn receiver_evidence_complete(&self) -> bool {
+        self.role != Role::Receiver || self.receiver_journal.lock().is_ok_and(|j| j.complete())
+    }
+    pub fn save_missing_receiver_evidence(
+        &self,
+        dir: &std::path::Path,
+        id: &str,
+    ) -> Result<(), String> {
+        if self.role != Role::Receiver {
+            return Ok(());
+        }
+        self.receiver_journal
+            .lock()
+            .map_err(|_| "RECEIVER_EVIDENCE_LOCK")?
+            .save_missing(dir, id, self.stats().resources_released)
     }
     fn path_ready(&self, c: &Context) -> bool {
         if self.mode == PathMode::RelayOnly {

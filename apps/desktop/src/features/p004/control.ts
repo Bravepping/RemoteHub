@@ -184,10 +184,13 @@ export class ControlClient {
       this.fail('CONTROL_RESPONSE_INVALID');
     }
   }
-  async close() {
+  revoke() {
     this.stopped = true;
     clearInterval(this.timer);
     this.stats.sendClosed = true;
+  }
+  async close() {
+    this.revoke();
     if (this.dc.readyState !== 'closed') {
       this.stats.state = 'closing';
       this.dc.close();

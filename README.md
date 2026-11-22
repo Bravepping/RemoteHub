@@ -97,6 +97,12 @@ CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、�
 
 见[独立测试报告](docs/PHASE0_P006C_VIDEO_TEST_REPORT.md)、[协议契约](docs/P006C_VIDEO_CONTRACT.md)、[复现与构建](docs/P006C_VIDEO_RUNBOOK.md)、[待授权云端范围](docs/P006C_VIDEO_CLOUD_PLAN.md)。构建入口`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video.ps1 -BuildOnly`；离线回归`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video-checks.ps1`。正式窗口每轮仍须亲自确认；合成源及故障注入只在独立操作员probe启用，无实际键鼠注入。
 
+## P0-06c-DIAG 连接诊断与独立最终统计
+
+保持原精确候选/UDP授权，新增分侧拒绝原因、地址类别和相等关系计数；无原地址、端口、SDP或凭据。旧失败集合缺host是已确认线索，但被拒绝pair未保留，不能判定历史根因或放宽匹配。新增接收端原生独立receiver-pre-close/receiver-final文件，关闭前真实getStats及清理状态落盘；读取失败保留带原时间的last_known或明确unavailable，写盘失败仍回收，停止不等待日志才撤销控制。
+
+完整35项回归及本机5轮真实合成传输通过（80 Rust/32前端/3 Edge/12 Python，1私有样本ignored），不采集桌面、不启动云端或重测物理双机。[本轮报告](docs/PHASE0_P006C_DIAG_TEST_REPORT.md)、[ADR0011](docs/ADR/0011-p006c-diagnostics-final-evidence.md)、[契约](docs/P006C_DIAG_CONTRACT.md)、[最小在线方案（未授权）](docs/P006C_DIAG_MINIMUM_ONLINE_PLAN.md)。复现入口scripts/p006c-diag-checks.ps1；本机合成入口`node scripts/p006c-diag-local.mjs --local PRIVATE_INTERFACE_IPV4`，证据artifacts/p006c-diag。历史记录不追补，完成后停等审查，不进入P0-07。
+
 ## P0-03 本机编码 probe
 
 以下命令在源码根目录执行，编译后也可直接运行 `target/release/encode-probe.exe`。默认不采集，只有显式 `--consent` 才采集；输出限定在 `artifacts/private/NAME` 的新目录。
