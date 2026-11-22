@@ -1,4 +1,0 @@
-   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
-    Finished `dev` profile [unoptimized] target(s) in 1.14s
-
-EXIT=0

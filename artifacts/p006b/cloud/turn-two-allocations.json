@@ -1,8 +1,0 @@
-{
-  "transport": "real UDP TURN; one Windows machine, two allocations; no video",
-  "allocations": 2,
-  "permissions": 2,
-  "bidirectionalPayloads": 2,
-  "released": true,
-  "passed": true
-}

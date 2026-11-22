@@ -1,5 +1,0 @@
-authenticated-session-probe --synthetic --private-local-wss PRIVATE_JSON --approved-local PRIVATE_IPV4 --seconds 5..15
-Authorized cloud variant: replace --private-local-wss with --approved-wss, optional --drop-direct for process-local packet-fault test. Requires fresh target-specific operator authorization.
-Generated Session video only; no desktop capture or input. Default denied.
-
-EXIT=0

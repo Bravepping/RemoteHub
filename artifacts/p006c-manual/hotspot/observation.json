@@ -1,8 +1,0 @@
-{
-  "userReport": "Two physical PCs, broadband sender and receiver phone hotspot; changing picture, current relay, 100/100, pending0/anomalies0, both released and no errors.",
-  "originalReportSha256": "ba7d061a96580b9bdb5eb0cd7e59636c0639690b4935129d9e91f1fd5894f8cf",
-  "originalReportWrittenAt": "2026-11-22T09:52:10.358564+08:00",
-  "independentReceiverFinalCollected": false,
-  "receiverLastPeriodicFrames": 880,
-  "note": "Actual sender final and authenticated periodic receiver metrics. Do not fill in final receiver 900 frames or infer final local close from sender browserClosed."
-}

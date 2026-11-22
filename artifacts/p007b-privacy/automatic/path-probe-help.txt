@@ -1,5 +1,0 @@
-ice-path-probe --approved-target PRIVATE_JSON --case direct|fallback|turn-unavailable|all-unavailable
-Two real native PCs on one Windows machine. No capture/input. Default: no network access.
-Faults drop packets only inside this diagnostic process; all cases retain ICE All. A failed connectivity case exits 1 even when expected by the test runner.
-
-EXIT=0

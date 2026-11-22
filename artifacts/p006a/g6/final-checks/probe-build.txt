@@ -1,4 +1,0 @@
-$ cargo build -p hub-webrtc --bin turn-allocate-probe --features p006-turn-probe --profile probe --locked --offline
-    Finished `probe` profile [optimized] target(s) in 0.24s
-
-EXIT=0

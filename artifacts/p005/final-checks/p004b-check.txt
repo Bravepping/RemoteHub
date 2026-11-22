@@ -1,4 +1,0 @@
-$ cargo check -p remotehub-desktop --features p004-lan --locked --offline
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.34s
-
-EXIT=0

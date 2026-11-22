@@ -1,195 +1,59 @@
-# RemoteHub · Windows 桌面客户端原型
+# RemoteHub V2 — Clean Core
 
-这是已构建和实测的 Windows 原型：**Tauri 客户端 + DXGI 主屏采集 + Media Foundation H.264 + Rust WebRTC → WebView2**。真实双机局域网视频、同一PeerConnection上的DataChannel模拟控制、跨网强制TURN均已通过；P2P优先/受阻自动回退已通过真实云WSS/TURN合成视频测试，并有真实双机直连与手机热点中继成功轮。
+自用 Windows 远程控制软件：**Tauri v2 + Vue 3 / TypeScript + Rust**。本分支专注可用远控，不重做已成功的视频与输入链路。
 
-Phase0限定退出及P004录屏证据例外已批准，R06历史可靠性问题继续OPEN。用户审查`d7ce2e0`后已接受P1-06人工结果/保留限制，并**批准Phase 1限定退出**；批准只追加记录，见[Phase 1决议](docs/PHASE1_EXIT_DECISION.md)，旧[人工报告](docs/P106_MANUAL_TEST_REPORT.md)/[最终评审](docs/PHASE1_FINAL_EXIT_REVIEW.md)不改当时结论。
+**开发分支**：`v2/clean-core` · **提取基线**：`v2/fast-track@4385454`（含 `main@d7dbc9b` 的真实 LAN 视频与英文输入）。原 `main`、`v2/fast-track` 保持独立。
 
-**Phase3 最小真实局域网远控已跑通。** 用户已接受 `382aac0` 的 P2-01，并明确暂缓 P2-02–06。显式 `p3-lan` 构建复用产品五页界面、DXGI/MF、同一 WebRTC PeerConnection 与 DataChannel，增加每轮两端原生批准的基本键鼠输入；默认普通构建仍关闭远控。只限指定 LAN 对端、一次码 HMAC、30 秒和主屏 720p30，无云、无人值守或正式信任库。用户已确认英文真实同步，首轮实际853帧/29条输入及ACK一致；其余点位/暂停与清理结果及限制见[单份汇总报告](docs/PHASE3_MINIMAL_REMOTE_CONTROL_REPORT.md)。
+## 实际状态
 
-v1因已发布候选缺失被严格拒绝；v2候选两侧均 `EXACT_MATCH` 后因合法 `42c01f` SPS被过严规则拒绝。v3修复后实际3轮解码/呈现853、900、900帧，输入/ACK为29/29、81/81、132/132，资源均回收；后两轮末尾仍记录通道错误。保留两轮失败及P3-END-01 OPEN、独立短轮覆盖不足、多DPI未测，不宣称完整Phase3退出。完整离线回归及准确包SHA见汇总；历史 R06 继续 OPEN。
+| 模块 | 现状 |
+| --- | --- |
+| 局域网双机 720p H.264 视频 | 来源分支已真实验证：三轮 853 / 900 / 900 帧解码呈现 |
+| DataChannel + SendInput | 来源分支实测英文输入；29 / 81 / 132 条消息分别全部收到 ACK |
+| 原生授权、停止和临时配对码 | 已有产品 `p3-lan` 代码与历史人工操作确认 |
+| 会话结束错误 | **P3-END-01 OPEN**：后两轮 `CONTROL_CHANNEL_ERROR`；尽管资源正常回收，根因未确定 |
+| Axum WebSocket 信令 | `v2_signaling.rs` 已存在；**本分支尚未编译、执行或接入产品验证** |
+| STUN/ICE + TURN | 历史研究/实验曾通过，V2 正式产品路径尚未集成；**R06 仍 OPEN** |
+| Windows 安装包 | 未交付 |
 
-P2-01 本地 Ed25519/DPAPI 身份已获用户接受。普通版及显式产品远控版启动创建/恢复当前用户身份；私钥以 DPAPI 密文保存，提交标记绑定完整公钥摘要，损坏/丢失/意外替换不静默换 ID。首页/设置只读真实公开标识/指纹或固定错误，短 ID 不作认证凭据。其他旧实验构建继续不初始化生产身份；本次配对未冒充正式签名身份或持久信任。
+**注意**：上述视频/键鼠结果是原版历史测试，不是当前精简分支重新运行的记录。远控只允许在已授权的 Windows 设备上进行。
 
-P2-01 历史交付的47项完整检查、100前端/20Edge、Rust全feature95/默认77各1ignored通过；另有真实Windows DPAPI13项（与workspace重叠）、两个独立进程恢复/签名验证、7权限和12隐私/9交付回归。当时仅使用并清理临时测试身份，未启动原生身份页面或访问生产身份目录；跨账户/跨机迁移未测。原结论见[报告与限制](docs/P201_TEST_REPORT.md)、[证据](artifacts/p201/verification.json)、[开发说明](docs/P201_IDENTITY_GUIDE.md)。本次用户已手动启动产品远控程序，不能沿用当时“未访问生产身份”的范围声明。
+## 核心目录
 
-[C0合同草案](docs/C0_COMPATIBILITY_TARGET_CONTRACT_DRAFT.md)与[D1–D6](docs/C0_D1_D6_USER_DECISION_SHEET.md)继续待决，自研WebRTC保持主线，未启用第三方兼容后端。R06仍OPEN_NOT_REPRODUCED/历史根因未知；Phase3 的局部故障定位不直接关闭 R06。本轮不启动阿里云或第三方软件，不修改防火墙、路由或驱动；真实采集和输入仅由用户在两端逐次亲自批准。
+| 路径 | 用途 |
+| --- | --- |
+| `apps/desktop` | Tauri v2 / Vue 3 客户端、五页导航、`RemoteWorkspace.vue` 实际 LAN 控制 UI |
+| `crates/hub-capture-win` | DXGI Desktop Duplication |
+| `crates/hub-encode-win` | Media Foundation H.264 |
+| `crates/hub-webrtc` | WebRTC、H.264、LAN、ICE、DataChannel、`remote_input.rs`、SendInput |
+| `crates/hub-identity` | Ed25519 / 当前 Windows 用户 DPAPI |
+| `crates/hub-rendezvous-probe` | 现有 Axum 依赖 + `src/bin/v2_signaling.rs` |
+| `crates/hub-turn-credentials`、`hub-probe-wire` | TURN / 信令协议现有基础 |
+| `scripts` | 少量本地工具链检测、开发与验证命令 |
+| `deploy/coturn` | 后续 TURN 的示例配置；不代表已部署 |
 
-技术栈继续Tauri v2/Rust/Vue3/TypeScript，见[P1实施方案](docs/PHASE1_DESKTOP_IMPLEMENTATION_PLAN.md)和[当前指引](docs/DEVELOPMENT_GUIDE.md)。[Foundation / V+ PC / EasyTier评估](docs/COMPATIBILITY_INTEGRATION_ASSESSMENT.md)仍为提案；WebRTC不等于已兼容三件套，运行集成/多进程/驱动及分发范围未获本轮授权。
+这里**不包含**旧分支的 `artifacts/` 大量证据、历史 `docs/`、旧任务/报告；它们可在原 `main` 中查阅。代码依赖和自动测试文件随源码保留。本分支不宣称旧证据已在新工作树复现。
 
-下文按交付时间归档，各节数量/待批状态只适用于当时；旧矩阵/最终评审不改结论。上次云实测停服/清理事实保留，本轮没有云端操作。Phase3 新尝试与原生运行范围以当前汇总报告为准。辅助截图工具的异常及丢弃在P1-02报告中披露；旧包不能自行恢复云服务，不自动进入 Phase4 或第三方兼容原型。
+## Windows 上快速编译
 
-原始需求基线位于 `docs/RemoteHub_完整开发文档_v1.0.md`；首轮范围、测量结果、未完成项见 `docs/PHASE0_TEST_REPORT.md` 和 `TASKS.md`。
-
-P0-03 新实测见 `docs/PHASE0_P003_TEST_REPORT.md`：AMD 硬件 MFT，10 秒 1280×720 / 300 帧 / 零丢帧，标准解码与八色条检查通过。原始裸流不能自带容器 PTS，请用 sidecar 中的 MF 时间戳；开发验证生成的 MP4 已检查为 30fps、10 秒。
-
-## P0-04a 同机视频实验
-
-本机原生 WebView2 已实测：五轮 15 秒各 450 帧、一轮 30 秒 900 帧全部接收/解码/呈现；实际选中 127.0.0.1、接收丢包 0，主动停止与播放中关窗回收通过。报告见 [P0-04a 测试报告](docs/PHASE0_P004_TEST_REPORT.md)。P004b双机视频后续已通过；P004父项现按用户明确批准的证据例外验收，原未录屏事实不变。
-
-普通构建默认关闭此入口。显式构建实验版：
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p004.ps1
-# 只构建、不打开窗口
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p004.ps1 -BuildOnly
-```
-
-窗口内每轮须重新勾选本次同意，并由原生确认框批准；5–30 秒，随时停止或关窗。视频经本机 WebRTC/SRTP 传送，未走磁盘视频或 IPC 像素。结束后仅在程序目录 `artifacts/private/p004/` 保存统计，不保存画面。直接运行本轮交付包的 `RemoteHub-P004a.exe` 可进入该实验。
-
-AMD 驱动实际 SPS 标识为 `42041f`，其中不适用约束位按 H.264 解码规则处理；不修改原 SPS，SDP 为 Baseline `42001f`。驱动瑕疵与互通边界见 [设计说明](docs/P004_FORMAT.md)。
-
-## P0-04b 指定局域网双机实验
-
-显式构建 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p004b.ps1 -BuildOnly`，生成的优化程序支持发送/接收两个角色。每轮两端原生确认、一次性码认证，原生TCP/UDP仅允许指定对端，连接中断或最长30秒后停止；统计保存到程序目录 `artifacts/private/p004b`。普通构建和 P004a 的网络范围不变。
-
-操作与限定防火墙设置见 [双机操作说明](docs/P004B_RUNBOOK.md)，范围/兼容性见 ADR0004。首轮RTCP候选校验错误已修复；v2真实双机30秒900帧全部接收/解码/呈现，1280×720、丢包0，主动停止/关窗/拔线回收通过。详见 [双机测试报告](docs/PHASE0_P004B_TEST_REPORT.md)。当时未保存画面，基线录屏未留存；现用户已接受真实统计+现场观看替代，仅用于本阶段限定范围，不补造录屏。
-
-## P0-05 模拟控制 DataChannel
-
-显式构建 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p005.ps1 -BuildOnly`，生成P005实验版。WebView2控制端在现有视频PeerConnection创建可靠有序control.v1，Rust被控端真实接收归一化模拟坐标并经通道返回ACK；不调用Windows输入API。
-
-两台真实Windows10有线PC，两轮30秒视频+100模拟事件，发送/Rust接收/ACK写入/B确认全为100、序号连续、异常0，720p视频同时正常播放。两端主动停止、接收端关窗/拔线清理通过。43 Rust/11前端/2Edge及受限SDP/权限/大小/限流/重放负例通过；本机SCTP自动测试与双机实测分别记录。
-
-操作见 [P005双机步骤](docs/P005_RUNBOOK.md)，协议见 [control.v1](docs/CONTROL_V1.md)，实测与限制见 [P005测试报告](docs/PHASE0_P005_TEST_REPORT.md)。新feature默认关闭，旧P004a/04b保持视频-only范围。统计位于程序目录artifacts/private/p005；不记录坐标、完整SDP、配对码或画面。P005已获阶段性审查通过，后续TURN与跨网进展见下文。
-
-## P0-06a TURN/ICE 准备
-
-状态为 **infrastructure-verified**：准备实现之后，用户单独授权的G6真实云STUN/Allocate、缺失/错误/过期票据、错误realm及危险peer拒绝已通过；[云端报告](docs/PHASE0_G6_TEST_REPORT.md)记录两次真实原生gather与11项协议检查。G6收尾时独立TURN测试服务已停止且不开机自启；后续P006b按新授权临时启动，保留受限配置，原业务服务及防火墙策略保持。双机relay视频后来已在P006b验证，P006父项仍待P006c可靠性与退出审查。
-
-原生webrtc/rtc仍锁定0.21.1，当前已实现的TURN路径只支持UDP。P006a旧relay入口严格拒绝TCP/turns/DNS和DirectPreferred；后续P006c通过独立构造器实现DirectPreferred，不以配置字符串冒充实际relay。旧Loopback/LAN PinnedRuntime、视频、control.v1及原生授权入口不变。TURN共享密钥只属于独立服务端模块，不链接进桌面应用；REST票据在有效期内可复用且不能单票即时撤销，正式持久身份/ACL尚未实现；P006b新增的临时WSS不等同正式身份服务。
-
-完整说明见 [ADR0006](docs/ADR/0006-p006a-turn-preparation.md)、[ICE与信令契约](docs/P006_ICE_CONTRACT.md)、[coturn操作说明](deploy/coturn/README.md)、[测试与验收矩阵](docs/PHASE0_P006A_TEST_REPORT.md)。54 Rust/13前端/3Edge/3Python通过；Edge仅检查真实relay属性，没有连接云端。
-
-在已有工具链和依赖缓存的工程目录可复现离线检查：
+在已安装 Rust 1.90、MSVC/Windows SDK、Node/pnpm 11、WebView2 的 Windows PC：
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-. ./scripts/use-toolchain.ps1
-$env:REMOTEHUB_PYTHON=(Get-Command python).Source
-# 使用本机 Git Bash 的真实路径；不要误用 WSL 或 Windows Store Python 别名
-$env:REMOTEHUB_BASH=(Get-Command bash).Source
-node scripts/p006a-checks.mjs
-```
-
-CLI构建需显式`--features p006-turn-probe`，检查脚本只运行帮助、默认拒绝和无法解析的占位模板，不连接公网。普通启动无采集或网络探测；真实目标的`--approved-target PRIVATE_JSON`只能在获该端点测试授权后使用。没有给默认客户端增加新公网页面或IPC。以上为G6历史交付范围，当前P006b进展单列下文。
-
-## P0-06b 跨网络强制 TURN 实验
-
-宽带发送端与手机蜂窝热点接收端已真实验证：两轮30秒720p30视频各900帧全发送/接收/解码/呈现，丢包和冻结均0；5轮都为双方真实selected relay/relay UDP，同一视频PC上的100条control.v1发送/Rust接收/ACK/确认均100，序号连续、异常0，不执行实际输入。
-
-发送端停止、接收端关窗及热点断网分别在194/196/244帧提前回收。接收端主动停止由用户现场验证并明确跳过补测；对应900帧记录不能独立证明提前停止，原报告保留该限制，不追填日志。P006b按用户接受的现场确认收尾；原未归属TURN套接字保持历史记录，后续独立生命周期测试见下文。P006c后续验证与诊断已交付，P006父项继续doing，正式退出由P0-07审查决定。
-
-60项Rust、16项前端、3项Edge及13组完整检查通过；Ubuntu隔离信令服务4测试和构建通过。结束后WSS/TURN已停止、保持disabled、实验socket清零。原基线26项服务仍运行，两个业务容器保持；新增观察到fwupd运行，未操作。源码不含实际节点地址、角色邀请、TURN共享secret或TLS私钥。
-
-操作见 [双机步骤](docs/P006B_RUNBOOK.md)，范围见 [ADR0007](docs/ADR/0007-p006b-cross-network-relay.md) 和 [协议](docs/P006B_CONTRACT.md)，真实统计位于artifacts/p006b/two-pc。复现自动检查：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b-checks.ps1`；显式构建：`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006b.ps1 -BuildOnly`。实验重新使用需要新的明确授权和私有限时配置，每轮双方亲自确认；验收归档不附带有效邀请。
-
-## TURN Allocation 生命周期验证
-
-按用户授权单独验证了6例：协议Refresh(0)、停止续租、Windows原生/Edge gather后close，以及已连接的Rust↔Edge data-only双方close。5例均真实观察到0请求/回应及约1.1–1.5秒内套接字消失；不续租例按实际授予600秒，到期后约0.318秒首次观察到回收。每例均留存基线、期间、关闭后、原租约到期及宽限后的资源状态，同一coturn PID贯穿测试，停服务不参与单例判定。
-
-完整[独立报告](docs/TURN_ALLOCATION_LIFECYCLE_TEST_REPORT.md)、[复现说明](docs/TURN_LIFECYCLE_RUNBOOK.md)及artifacts/turn-lifecycle区分真实云/Windows与离线fixture。19项检查达到预期，61 Rust/16前端/3 Edge/11 Python；本轮服务已停止、不开机自启，配置/业务容器启动时间/防火墙策略未变。没有屏幕采集或重复双机串流；Edge不是嵌入WebView2，不能将本轮data-only扩大为所有媒体负载保证。
-
-接收端主动停止按用户现场确认跳过补测，原独立日志限制保留，不再阻塞推进。本轮生命周期报告与代码独立提交后才进入P006c；P2P优先与自动回退状态另列，不由这些测试推断。
-
-## P0-06c 直连优先与自动回退首步
-
-生命周期交付88f1edc之后，新增默认关闭的`p006-direct-probe`，通过独立DirectGrant/套接字边界使用ICE All；旧本机、LAN、强制relay入口不变。一个物理Windows机器上的两个真实原生PeerConnection已自动完成真实云端四例：TURN可用选host/host；进程内直连受阻自动选relay/relay；TURN受阻仍host/host；两路均断明确失败。前三例均100条发送/接收/ACK一致，第四例0消息、无pair，不能当成连接成功。
-
-首步云端4个实际Allocation均有Refresh0成功回应及约1.14–1.40秒首次观察socket消失，停止前已经0；该轮服务已停止、不自启，WSS始终关闭。首步24项自动检查通过，66 Rust/16前端/3 Edge/11 Python，回退轮耗时34.873秒。该历史报告仅验证无视频原生路径；当前视频集成结果另列，不能互相替代。
-
-见[首步报告](docs/PHASE0_P006C_TEST_REPORT.md)、[契约](docs/P006C_CONTRACT.md)、[复现步骤](docs/P006C_RUNBOOK.md)。`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-checks.ps1`只做离线回归；`node scripts/p006c-local.mjs --local PRIVATE_INTERFACE_IPV4`显式运行无云/无采集的本机真实传输。真实云测试需新范围授权及短票，不能复用已清理配置。
-
-## P0-06c 视频与模拟控制集成
-
-已依次接入Rust Session、现有WebView2前端代码和认证WSS，复用同一个视频/control.v1 PeerConnection。DirectPreferred显式使用ICE All并核对双方真实selected pair；旧本机/LAN/RelayOnly限制保留。新path策略经HMAC认证，只发布对方明确允许的私有host；停止、过期、模式错配和重放均拒绝。
-
-本机7轮真实合成视频测试通过；本地完整轮300帧全链、100事件一致。随后单独获授权的真实云WSS/TURN自动验证也通过：ICE All正常host/host，直连UDP进程内受阻后自动relay/relay，两轮各300帧720p30完整接收/解码/呈现、100条发送/原生接收/ACK/确认、异常0。9个云分配均Refresh(0)即时释放，原600秒租约+15秒无残留；专用服务已停止、不自启，临时凭据删除，业务与配置/防火墙未变。该自动测试轮没有桌面采集或物理双机；之后用户亲自批准并完成物理双机成功轮，见下文。P006c仍待可靠性审查。
-
-历史35项完整检查（74 Rust/22前端/3 Edge/11 Python）继续保留；该轮前端最终快照修复后，24前端/12 Python、类型/lint/build/3 Edge及Tauri构建通过，当时未重复未变Rust全回归。[云端独立报告](docs/PHASE0_P006C_VIDEO_CLOUD_TEST_REPORT.md)及artifacts/p006c-video/cloud保留实际pair、释放和收尾证据。后续DIAG的最新完整回归另列下文。旧双机包与[操作说明](docs/P006C_MANUAL_ACCEPTANCE.md)保留供追溯；手动验收后服务及临时配置已清理，未来再次使用仍需新授权、新配置。
-
-历史Windows交付为工作区根目录的RemoteHub_P006c_双机实验_v1_20261122.zip，源码提交d805ecb；ZIP/程序SHA和成员校验见artifacts/p006c-video/delivery.json。该包不含后续DIAG修改，不能称作当前最新版；无有效私有配置。最新源码及脱敏证据保存在GitHub，本轮总评未生成新程序包。
-
-后续[真实双机手动报告](docs/PHASE0_P006C_MANUAL_TEST_REPORT.md)：用户亲自批准的直连、手机热点中继成功轮，各900源帧、100/100控制；实际pair已核对，8分配即时释放后09:53:20停服务且不自启。接收端末周期893/880帧及独立final缺失、两次更早候选校验拒绝原因未归因均保留，P006c待审查。云端/本机临时配置与带凭据ZIP已清理；用户已确认第二台配置/该ZIP删除，程序和统计保留。普通无凭据包仍可保留，未来联网需新授权和新配置，不自动恢复服务。
-
-见[独立测试报告](docs/PHASE0_P006C_VIDEO_TEST_REPORT.md)、[协议契约](docs/P006C_VIDEO_CONTRACT.md)、[复现与构建](docs/P006C_VIDEO_RUNBOOK.md)、[待授权云端范围](docs/P006C_VIDEO_CLOUD_PLAN.md)。构建入口`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video.ps1 -BuildOnly`；离线回归`powershell -NoProfile -ExecutionPolicy Bypass -File scripts/p006c-video-checks.ps1`。正式窗口每轮仍须亲自确认；合成源及故障注入只在独立操作员probe启用，无实际键鼠注入。
-
-## P0-06c-DIAG 连接诊断与独立最终统计
-
-保持原精确候选/UDP授权，新增分侧拒绝原因、地址类别和相等关系计数；无原地址、端口、SDP或凭据。旧失败集合缺host是已确认线索，但被拒绝pair未保留，不能判定历史根因或放宽匹配。新增接收端原生独立receiver-pre-close/receiver-final文件，关闭前真实getStats及清理状态落盘；读取失败保留带原时间的last_known或明确unavailable，写盘失败仍回收，停止不等待日志才撤销控制。
-
-完整35项回归及本机5轮真实合成传输通过（80 Rust/32前端/3 Edge/12 Python，1私有样本ignored），该DIAG轮不采集桌面、不启动云端或重测物理双机。[DIAG报告](docs/PHASE0_P006C_DIAG_TEST_REPORT.md)、[ADR0011](docs/ADR/0011-p006c-diagnostics-final-evidence.md)、[契约](docs/P006C_DIAG_CONTRACT.md)、[当时最小在线方案](docs/P006C_DIAG_MINIMUM_ONLINE_PLAN.md)。复现入口scripts/p006c-diag-checks.ps1；本机合成入口`node scripts/p006c-diag-local.mjs --local PRIVATE_INTERFACE_IPV4`，证据artifacts/p006c-diag。后续P007A/B及最终评审分别归档，历史记录不追补。
-
-## P0-07-B R06 诊断包与分轮记录
-
-新增默认关闭`p007b-diag`专用Tauri构建，固定8秒合成运动图案、DirectPreferred和本次原生确认，不提供桌面源或丢包注入开关；不会读取旧p006c-private.json。复用现有Session/控制/认证WSS及独立最终统计；私有邀请剩余期不超过20分钟。待激活包不含有效配置，`--r06-self-check`只检查构建身份，不启动窗口或网络。
-
-[准备报告](docs/PHASE0_P007B_TEST_REPORT.md)、[操作说明](docs/P007B_R06_RUNBOOK.md)、[当时待授权20分钟方案](docs/P007B_R06_ONLINE_PLAN.md)、[交付SHA/成员清单](artifacts/p007b/delivery.json)保留准备阶段结论：当时只有安全回归和本机合成，新物理双机NOT_RUN、没有云启动。之后的授权及真实短诊断独立记录如下，不回写准备报告。
-
-v2隐私修复：两处扫描器已移除疑似真实端点黑名单，改为通用规则并自检源码/输出；旧Git对象仍可达，没有重写历史。[独立修复报告](docs/PHASE0_P007B_PRIVACY_FIX_REPORT.md)、[v2 SHA清单](artifacts/p007b-privacy/delivery.json)、[实际下载核对记录](artifacts/p007b-privacy/published.json)。[GitHub诊断ZIP下载](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/RemoteHub-R06-Diagnostic-v2-20261122.zip)及[SHA文件](https://github.com/Bravepping/RemoteHub/releases/download/r06-diag-v2-20261122/SHA256SUMS.txt)已上传并从无需凭据的公开URL下载核对；自动Source code ZIP不含可运行交付。41项安全/兼容回归、12项隐私及9项交付测试、5轮本机合成是该隐私交付轮结果。后续[20分钟定向申请](docs/P007B_R06_V2_TEST_REQUEST.md)已另获授权并完成一轮8秒，见[实际诊断报告](docs/P007B_R06_ONLINE_DIAGNOSTIC_REPORT.md)；当前授权已结束，历史失败未复现，不能恢复服务或宣称根因已修复。
-
-## P0-03 本机编码 probe
-
-以下命令在源码根目录执行，编译后也可直接运行 `target/release/encode-probe.exe`。默认不采集，只有显式 `--consent` 才采集；输出限定在 `artifacts/private/NAME` 的新目录。
-
-```powershell
-Set-ExecutionPolicy -Scope Process Bypass
-. ./scripts/use-toolchain.ps1
-cargo build -p hub-encode-win --bin encode-probe --release --locked
-./target/release/encode-probe.exe --consent --seconds 10 --encoder auto --name my-local-test
-```
-
-`--encoder software` 可独立验证软件回退；`--stop-after-ms 2000` 用于主动停止测试，控制台 Ctrl+C 也请求正常停止并 drain。最长 30 秒，不覆盖已有样本。运动源复现、独立 FFmpeg 解码和统计口径见 P0-03 报告；FFmpeg 只用于开发验收，不是客户端运行依赖。P003当时只提供CLI编码实验，后续P004及网络实验已把实时编码接入Tauri视频链路。
-
-## 使用已编译程序
-
-解压首次交付 ZIP，双击 `RemoteHub.exe`。需要 Windows x64 和已安装的 WebView2 Runtime。窗口启动时不采集；明确勾选本次同意后，点击“开始采集实验”，运行最多 5 秒并显示真实统计。窗口不保存截图或发送画面。关闭窗口即退出。
-
-本节描述首次交付包的捕获入口，不代替后续视频/网络实验包。`capture-probe.exe` 是开发用的独立本机实验工具，不是产品运行依赖。只有显式执行下列命令才会保存当前主屏的 BMP 和 JSON：
-
-```powershell
-.\capture-probe.exe --consent --frames 30 --out .\private-capture-001
-```
-
-输出目录必须不存在，避免覆盖样本。样本包含桌面内容，自行决定保留。本轮软件为未签名测试构建，尚无安装器，也未做干净系统安装验证。
-
-## 从源码运行
-
-要求 Rust 1.100.0 MSVC、Microsoft C++ Build Tools / Windows SDK、Node 24、pnpm 11.25.0、WebView2。准备方式参照 [Tauri 官方 Windows 前置条件](https://v2.tauri.app/start/prerequisites/)。本机临时开发工具位于 `.tools`，没有修改全局 PATH；该目录不包含在源码 ZIP 中。换机请准备官方工具链，或在已配置的 Developer PowerShell 中执行。
-
-在工程根目录运行：
-
-```powershell
+git switch v2/clean-core
 pnpm install --frozen-lockfile
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/doctor.ps1
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Mode Desktop
+pnpm typecheck
+pnpm test
+cargo test -p hub-webrtc --features p3-lan --locked
+cargo test -p hub-rendezvous-probe --bin v2_signaling --locked
+cargo build -p remotehub-desktop --profile probe --features p3-lan,custom-protocol --locked
 ```
 
-其他入口：
+构建输出由 Cargo profile 决定，通常在 `target/probe/remotehub-desktop.exe`。**最后的 build 仅编译，不会启动或采集桌面。** 实际打开两台电脑的产品程序、测试真实画面/输入/停止前，先明确用户批准并记录 EXE SHA256。
 
-```powershell
-# 完整格式/类型/前端/Rust 测试，保存原始输出与各命令退出码
-pnpm verify
-# 浏览器验证需要本机 Microsoft Edge，仅作为预览测试
-pnpm test:e2e
-# 构建内嵌前端资源的独立 Windows 程序，不生成安装器
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Mode Build
-# 明确授权有限本机采集并导出样本
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/dev.ps1 -Mode Capture
-```
+WebSocket 本地信令独立程序采用 `REMOTEHUB_V2_TOKEN`（临时随机 64 位十六进制）、`REMOTEHUB_V2_BIND`（默认 `127.0.0.1:48620`），对外监听必须配置 `REMOTEHUB_V2_TLS_CERT` 和 `REMOTEHUB_V2_TLS_KEY`。当前**尚未接入真实远控会话，也没有部署你的阿里云服务器**。
 
-`Browser` 模式只用于页面预览，无法调用 DXGI。不能把浏览器预览当成原生窗口已通过的证据。默认构建不开放远程监听、配对旁路、键鼠注入、后台采集或自启，也不会自动启动已停止的云端实验服务。
+## 敏捷开发约定
 
-## 工程内容
+请阅读根 `AGENTS.md`：**修复关闭错误 → 稳定真实 LAN 会话 → 接通 Axum 信令 → 公网 STUN/TURN → Windows 安装器**。Agent 可连续提交代码/执行离线测试，不为每个小任务撰写 Plan/ADR/Contract/Evidence；每阶段在此 README 用少量文字记录实际结果、失败和遗留问题。真实桌面、键鼠和云端部署始终由用户审批具体操作。
 
-- `apps/desktop`：Vue 3 / TypeScript / Tailwind / Tauri v2，受限本机 IPC。
-- `crates/hub-capture-win`：D3D11 / DXGI Desktop Duplication、限时实验、BGRA 读回及 BMP 导出。
-- `crates/hub-encode-win`：MF 编码、CLI 文件实验与无文件实时 AU 生产者。
-- `crates/hub-webrtc`：隔离的本机/指定LAN/强制TURN/DirectPreferred会话、SDP/RTP、3 AU队列、DataChannel及清理；网络实验和操作员合成探针由显式feature gate隔离。
-- `crates/hub-turn-credentials`：仅服务端使用的短期票据签发纯模块，无HTTP接口，桌面客户端不依赖。
-- `crates/hub-probe-wire` / `hub-rendezvous-probe`：有界认证实验信令和独立Axum WSS；不是正式持久设备身份服务。
-- `deploy/coturn`：占位模板、离线校验/渲染和专用服务操作说明；真实云部署与停止证据已归档，重启仍需授权。
-- `scripts`：环境检测、运行入口、可保存结果的验证脚本。
-- `artifacts`：非画面测试证据；`artifacts/private` 中的桌面样本不进 Git 或交付 ZIP。
-- `docs/ADR`：历轮实验边界、媒体/控制/选路/证据契约及Phase0退出审查。
-
-首轮真实测试：Windows 10 22H2，AMD Radeon RX 6750 GRE 10GB；30 帧、2560×1440、1059ms、观察帧率 28.315 FPS。该数字是 DXGI 收到桌面更新的计数，**不是视频编码、传输或解码帧率**。
+Sunshine、Moonlight V+ PC 与 EasyTier 都不是本分支的必要依赖。

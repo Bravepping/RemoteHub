@@ -1,9 +1,0 @@
-{
-  "tlsVerified": false,
-  "wrongInvitationRejected": false,
-  "wrongCaRejected": false,
-  "pairedRoles": false,
-  "shortCredentials": false,
-  "closed": true,
-  "error": "ECONNRESET"
-}

@@ -1,3 +1,0 @@
-$ E:/tools/Git/bin/bash.exe -n deploy/coturn/verify.sh
-
-EXIT=0

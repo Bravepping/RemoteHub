@@ -1,3 +1,0 @@
-$ vue-tsc --noEmit
-
-EXIT=0

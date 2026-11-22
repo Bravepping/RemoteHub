@@ -1,5 +1,0 @@
-   Compiling hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
-   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
-    Finished `probe` profile [optimized] target(s) in 47.28s
-
-EXIT=0

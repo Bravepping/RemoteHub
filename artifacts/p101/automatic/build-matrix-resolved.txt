@@ -1,3 +1,0 @@
-{"profiles":8,"passed":true,"applicationStarted":false}
-
-EXIT=0

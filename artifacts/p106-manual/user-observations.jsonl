@@ -1,9 +1,0 @@
-{"step": "A1", "case": "A", "source": "USER_RESPONSE", "answer": "本轮实例已打开，保持窗口中", "agentRecordedAt": "2026-11-22T18:33:54.585713+08:00"}
-{"step": "A2", "case": "A", "source": "USER_RESPONSE", "answer": "已点 X，窗口已关闭，未重新打开", "agentRecordedAt": "2026-11-22T18:33:54.585743+08:00"}
-{"step": "B1", "case": "B", "source": "USER_RESPONSE", "answer": "已重新打开，驻留默认未勾选，保持窗口中", "agentRecordedAt": "2026-11-22T18:34:39.923143+08:00"}
-{"step": "B2", "case": "B", "source": "USER_RESPONSE", "answer": "窗口已隐藏，托盘图标仍在，未恢复或退出", "agentRecordedAt": "2026-11-22T18:35:15.456380+08:00"}
-{"step": "B3", "case": "B", "source": "USER_RESPONSE", "answer": "窗口正常恢复，重复显示后仍只有一个窗口", "agentRecordedAt": "2026-11-22T18:35:54.005283+08:00"}
-{"step": "B4", "case": "B", "source": "USER_RESPONSE", "answer": "取消驻留后窗口自动恢复，菜单已取消勾选", "agentRecordedAt": "2026-11-22T18:36:59.586618+08:00"}
-{"step": "B5", "case": "B", "source": "USER_RESPONSE", "answer": "已点 X，窗口关闭，未重新打开", "agentRecordedAt": "2026-11-22T18:37:24.879869+08:00"}
-{"step": "C1", "case": "C", "source": "USER_RESPONSE", "answer": "五页正常，重新检测成功，空态真实，保持窗口中", "agentRecordedAt": "2026-11-22T18:38:27.873201+08:00"}
-{"step": "C2", "case": "C", "source": "USER_RESPONSE", "answer": "隐藏正常，真正退出后窗口和托盘图标均消失", "agentRecordedAt": "2026-11-22T18:39:13.456416+08:00"}

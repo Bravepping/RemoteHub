@@ -1,9 +1,0 @@
-$ pnpm --filter @remotehub/desktop tauri build --no-bundle
-beforeBuildCommand: pnpm build
-Vue build: PASS
-Finished release profile [optimized] in 3m 01s
-Built application: target/release/remotehub-desktop.exe
-Size: 8,553,472 bytes
-Exit: 0
-
-The actual native UI was exercised with the custom-protocol debug build. The release build receives an independent process-start smoke check; this does not replace clean-system installation testing.

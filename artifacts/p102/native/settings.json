@@ -1,8 +1,0 @@
-{
-  "recordedAt": "2026-11-22T07:28:26.185Z",
-  "scope": "Actual default Tauri window UI accessibility text only; no application media or input feature",
-  "page": "settings",
-  "text": "跳到页面内容\nRemoteHub\n你的电脑，触手可及\n首页\n设备\n连接\n会话\n设置\n￼\n远程访问关闭\n仅在双方同意后连接\nREMOTEHUB / 桌面客户端\n设置\n本机信息与安全状态\n本机工作区\n本机信息\n重新检测\n以下信息来自本机核心。无法读取时保留未知状态。\n应用版本\n0.1.0\n操作系统\nwindows\n系统架构\nx86_64\n采集后端\nDXGI Desktop Duplication (probe on demand)\n权限与启动\n只读状态\n远程访问\n关闭\n后台驻留\n尚未提供设置\n开机启动\n尚未提供设置\n当前不提供权限开关。切换页面或检测本机信息不会启用采集、连接或远程控制。\n连接由你决定 · 当前不会自动发起远程访问",
-  "source": "Windows UI accessibility observation",
-  "nativeScreenshotRetained": false
-}

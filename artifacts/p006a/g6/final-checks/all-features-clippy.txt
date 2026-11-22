@@ -1,5 +1,0 @@
-$ cargo clippy --workspace --all-targets --all-features --locked --offline -- -D warnings
-    Checking remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.75s
-
-EXIT=0

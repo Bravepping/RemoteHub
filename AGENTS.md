@@ -1,35 +1,70 @@
-# AGENTS.md — RemoteHub 工程执行入口
+# AGENTS.md — RemoteHub V2 / Clean Core
 
-你是 RemoteHub 项目的工程实现 Agent。请用中文回复，源码标识符和协议字段使用英文。
+你是 RemoteHub V2 的开发 Agent。请用中文交流；Rust/TypeScript 标识符、协议字段和提交信息可用英文。
 
-## 先读文档
+## 唯一目标与工作范围
 
-- `docs/RemoteHub_完整开发文档_v1.0.md`：唯一的产品与架构基线，包含 API、目录、阶段任务和验收标准。
-- `reference/RemoteHub_UI_Concept.png`：用户已经批准的 UI 方向。图片仅作布局/样式参考，任何示例状态不得硬编码。
-- `TASKS.md`：当前任务列表，更新任务完成情况。
+**尽快交付两台 Windows PC 上实际可用的远控软件**：在被控端明确批准后，控制端看到实时桌面，通过鼠标/键盘操作，并能随时安全断开；随后完善公网直连/TURN 和 Windows 安装器。
 
-## 执行硬规则
+- **只在 `v2/clean-core` 开发**，不要提交到旧 `main` 或 `v2/fast-track`。先确认当前 Git 分支、工作区、HEAD 和锁文件。
+- 本分支从 `v2/fast-track@4385454` 提取**全部 `apps/desktop` 与 `crates` 核心源码**及必要工具链；历史 `artifacts/`、旧方案和阶段报告未复制。本分支历史仍可追溯原版提交；它不是从零重写。
+- 技术栈固定：Windows + Tauri v2 / Vue 3 / TypeScript / Pinia / Rust，采集 DXGI，编码 Media Foundation H.264，媒体 webrtc-rs/WebView2，输入可靠 DataChannel + Win32 SendInput；服务端 Axum WebSocket，后续 STUN/TURN。
+- **Sunshine、Moonlight V+ PC、EasyTier 都不是 V2 必需依赖**。暂不引入多余服务/微服务、数据库、用户系统或第三方播放器。
 
-1. 必须按 P0->P1->P2->P3->P4->P5->P6 顺序推进，**优先处理 P0 媒体链路可行性验证**；不存在真实视频传输时不得报告软件已完成。
-2. 首版只有 Windows PC 客户端。桌面框架 Tauri v2 + Vue 3 + TypeScript + Tailwind CSS；核心 Rust；云端 Axum + SQLite + coturn。
-3. 单一用户软件安装包，不能依赖用户手动打开 Sunshine、Moonlight 或 EasyTier；使用其技术理念但不要复制未审核许可的代码。
-4. 权限最小化：默认不开放无人值守访问，配对必须对端明确批准，持续会话必须能被被控端立即结束。
-5. 使用真实 ICE selected candidate pair 判断 P2P / TURN；视频、FPS、RTT、状态信息来自真实数据源。
-6. 无服务器凭据时提供可运行的本地模拟/测试环境与部署说明，不得虚构云端已经部署。
-7. 修改网络协议或核心架构需先写 ADR 和兼容性影响，不得单方面替换为全新自研网络栈。
-8. 每个 PR/任务都要写测试、结果、风险、未完成项。硬件/真实网络测试未执行必须明确标注。
-9. 本项目禁止植入未经授权的监控、隐身控制、权限提升绕过或收集凭据功能。
+## 已有事实：禁止重复造轮子
 
-## 现在开始
+- `apps/desktop/src/features/desktop/RemoteWorkspace.vue`：正式产品 UI 已有 30 秒 LAN 会话、视频、控制启停；不是默认普通版功能，须显式启用 `p3-lan` feature。
+- `apps/desktop/src-tauri/src/p004_lan.rs`：有界 LAN 实验/产品桥接、原生同意、停止与报告；暂沿用既有 IPC，不随意增加宽泛权限。
+- `crates/hub-capture-win` / `hub-encode-win`：DXGI + MF H.264。
+- `crates/hub-webrtc`：已有 LAN/ICE/PeerConnection、`remote_input.rs`（严格事件与 SendInput）、`input_pair.rs`（选中候选诊断）、`control_channel.rs`（DataChannel 和撤销清理）。
+- `crates/hub-identity`：Ed25519/CurrentUser DPAPI 本地身份；**不等于已实现云认证**。
+- `crates/hub-rendezvous-probe/src/bin/v2_signaling.rs`：V2 Axum WebSocket 信令初版，**尚无可信的实际编译、双端运行及产品 UI 接入验收**。
+- 源自原版 `main@d7dbc9b` 的 3 轮 Windows 双机 LAN 测试显示 853/900/900 帧、29/81/132 条输入消息全部获 ACK，用户现场确认英文输入同步。两轮在会话结束时有 `CONTROL_CHANNEL_ERROR`，记为 **P3-END-01 OPEN**。**R06 连接可靠性历史风险仍 OPEN**；完整 Phase3、DPI 矩阵、公网/安装器均未验收。
+- 这些是**来源分支历史证据**；不得把它们改写成 `v2/clean-core` 新构建的实测结果。
 
-1. 先检查开发环境和仓库状态。
-2. 创建 `Cargo`/`pnpm` workspace 与锁文件。
-3. 执行 `P0-01` 至 `P0-07` 的技术验证；尽快实现 Windows 画面到浏览器视频的最小通路。
-4. 每做完一个任务更新 `TASKS.md`，提交可独立验证的代码。
+## 开发顺序（可连续推进）
 
-## 每轮回答格式
+1. **先得到可编译的干净核心**：Windows 编译 `p3-lan`，运行直接关联的 Rust/前端测试；检查并修复 V2 `v2_signaling` 的实际编译/本地 WS 握手。不能仅凭源码就标 PASS。
+2. **稳定已经跑通的 LAN 远控**：优先定位 `P3-END-01` 关闭通道异常、误报/真实错误、撤销和停止时序；再补常用英文键盘、鼠标/滚轮及断线清理。仅修改所需代码，不改写既有成功路径。
+3. **接入 V2 Axum 信令**：保留旧 LAN TCP 方式作回退，将 offer/answer/ICE 接入实际产品 UI。先 loopback/LAN 验证；对外部署前完成加密、身份及来源授权。
+4. **完成公网连接**：STUN/ICE 直连优先，TURN 回退；选路必须依据真实 selected candidate pair，不用 UI 模拟状态代替；限制凭据、会话和中继资源。
+5. **Windows 安装交付**：可安装、可卸载、真实本地双机验收；逐步扩展 1080p/更长会话/多 DPI，而不是先重做 UI。
 
-**完成：** 任务 ID 和实际成果。  
-**验证：** 实际运行命令、结果、证据。  
-**阻塞：** 如实报告。  
-**下一步：** 最多三个具体任务。  
+完成一个可验证增量后直接进入下一个**已批准的代码开发与离线测试任务**；只在存在实际阻塞、改变产品安全边界或需要真实外部操作时询问用户。
+
+## 敏捷与 Git 规则
+
+- **不强制撰写 Plan / ADR / Contract / Evidence 或每项单独报告**。只在根 `README.md` 更新：当前状态、执行过的测试命令与结果、未完成项/风险。保留必要自动测试源码与简短有意义的注释。
+- 每次修改尽量可编译/可回滚；按功能提交小 commit。不要强制推送、改写原仓库历史或删除用户数据。
+- 若测试失败，报告精确错误及已定位范围，优先修复再推进；不得把 fixture、纯单元测试、build success 记作真实双机远控通过。
+- 默认先在 Windows 环境执行：
+  ```powershell
+  pnpm install --frozen-lockfile
+  pnpm typecheck
+  pnpm test
+  cargo fmt --all -- --check
+  cargo test -p hub-webrtc --features p3-lan --locked
+  cargo test -p remotehub-desktop --features p3-lan --locked
+  cargo test -p hub-rendezvous-probe --bin v2_signaling --locked
+  cargo build -p remotehub-desktop --profile probe --features p3-lan,custom-protocol --locked
+  ```
+  开始前确认可用 MSVC、Windows SDK、WebView2、Rust 和 pnpm；缺依赖如实说明，不自行关闭 TLS、提权或改安全设置。真实硬件操作不属于上述自动测试。
+- 不运行会实际采集/注入输入的程序来“自动测试”；先列出精确 EXE 路径/SHA256、目标电脑、动作与停止方式，请用户操作/同意，Agent 只做脱敏统计与取证。
+- 保留前端 TS 严格字段校验与 Rust 权限边界。公共源代码不提交真实服务器地址、令牌、证书私钥、用户名路径、配对码、SDP、桌面图像、键盘输入内容。临时输出写到被 `.gitignore` 忽略的目录。
+
+## 必须保留的远控安全边界
+
+- **对端主动确认本次画面共享和本次键鼠操作**，不能仅凭 IP、固定 token 或短设备 ID 获得无人值守访问；观看与输入权限分别受控。
+- 严格绑定具体会话/对端、有效期、认证信令、SDP/ICE 候选；拒绝重放、错序、越界输入、越权消息与意外网络目标。
+- 输入默认关闭、用户可见；失焦/暂停/断开/退出/超时撤销控制并释放**本会话注入**的键鼠状态。被控端必须有显著停止入口，紧急停止快捷键不得移除。
+- 不实现隐形控制、驻留后台采集、权限提升/UAC 绕过、凭据读取、未授权访问；不擅自安装驱动、改系统路由或防火墙。
+- 用户已表示愿意配合双机验收，但**未授权 Agent 自行启动云服务器、执行真实屏幕采集、注入输入、部署公网服务或修改系统设置**。需要时提出具体、最少的人工步骤，由用户现场批准。
+
+## 每次回答保持简短
+
+**本轮完成：** 真实修改的文件及 commit。  
+**运行验证：** 实际执行的命令、PASS/FAIL 和覆盖范围。  
+**未完成 / 阻塞：** 一个明确的下一步问题或风险。  
+**紧接着做：** 下一个最小可运行增量；没有外部操作/安全阻塞就继续开发。
+
+根 README 为当前阶段唯一进度入口，不要求逐任务生成长文档。

@@ -1,6 +1,0 @@
-    Checking hub-encode-win v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-encode-win)
-   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
-    Checking hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
-    Finished `dev` profile [unoptimized] target(s) in 2.62s
-
-EXIT=0

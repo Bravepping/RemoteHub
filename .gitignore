@@ -1,3 +1,9 @@
+/artifacts/
+/.ai-memory/
+*.pem
+*.pfx
+*.key
+*.zip
 /target/
 /node_modules/
 **/node_modules/

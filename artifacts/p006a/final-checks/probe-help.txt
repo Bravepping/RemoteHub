@@ -1,6 +1,0 @@
-$ target/probe/turn-allocate-probe.exe --help
-turn-allocate-probe --approved-target PRIVATE_JSON
-Requires explicit ownership/authorization of that exact TURN endpoint and fresh short-term credentials.
-No capture, remote SDP, control events or cloud deployment. Default invocation performs no network access.
-
-EXIT=0

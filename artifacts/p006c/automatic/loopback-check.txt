@@ -1,5 +1,0 @@
-    Checking hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
-    Checking remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.17s
-
-EXIT=0

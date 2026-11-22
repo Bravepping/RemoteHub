@@ -1,8 +1,0 @@
-{
-  "eventsSha256": "61e0abb3d9e2547a303d205858a2bdd4dec81248acb4d4bcf0c47beb7b55727b",
-  "eventCount": 411,
-  "judgedBeforeServiceStop": true,
-  "allFourExpectedOutcomesPassed": true,
-  "actualAllocations": 4,
-  "negativeCasesWithoutAllocation": 4
-}

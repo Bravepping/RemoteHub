@@ -1,4 +1,0 @@
-    Checking hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
-    Finished `dev` profile [unoptimized] target(s) in 1.24s
-
-EXIT=0

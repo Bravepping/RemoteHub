@@ -1,8 +1,0 @@
-{
-  "server_ipv4": "APPROVED_PUBLIC_IPV4",
-  "signaling_port": 8443,
-  "ca_pem": "EXPERIMENT_CA_PEM_WITHOUT_PRIVATE_KEY",
-  "sender_invitation": "EPHEMERAL_SENDER_INVITATION",
-  "receiver_invitation": "EPHEMERAL_RECEIVER_INVITATION",
-  "invitation_expires_at": 0
-}

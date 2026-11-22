@@ -1,5 +1,0 @@
-$ cargo build -p remotehub-desktop --locked --offline
-   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 5.29s
-
-EXIT=0

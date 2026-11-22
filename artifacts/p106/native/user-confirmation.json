@@ -1,9 +1,0 @@
-{
-  "recordedAt": "2026-11-22T18:05:02.717455+08:00",
-  "source": "USER_STATEMENT_THIS_TASK",
-  "status": "USER_CONFIRMED_WINDOW_VISIBLE",
-  "scope": "Previously observed RemoteHub Windows native window",
-  "fivePageNativeInteraction": "NOT_FULLY_VERIFIED",
-  "automatedWindowLocationFailureDoesNotProveLaunchFailure": true,
-  "historicalLogsPreserved": true
-}

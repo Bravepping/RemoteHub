@@ -1,6 +1,0 @@
-{
-  "recordedAt": "2026-11-22T17:24:59.616606+08:00",
-  "passed": true,
-  "exitCode": 0,
-  "source": "Actual local Edge; P104/P105 SDK fixtures are explicitly marked, not native IPC or cloud"
-}

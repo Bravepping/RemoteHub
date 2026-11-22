@@ -1,5 +1,0 @@
-$ pnpm typecheck
-$ pnpm --filter @remotehub/desktop typecheck
-$ vue-tsc --noEmit
-
-EXIT=0

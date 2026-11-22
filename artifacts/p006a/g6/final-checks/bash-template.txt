@@ -1,4 +1,0 @@
-$ E:/tools/Git/bin/bash.exe deploy/coturn/verify.sh --template
-PASS: offline configuration policy; coturn syntax/runtime and cloud network NOT tested
-
-EXIT=0

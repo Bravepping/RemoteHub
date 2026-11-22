@@ -1,5 +1,0 @@
-$ python scripts/g6_turn_wire.py
-usage: g6_turn_wire.py [-h] --approved-target APPROVED_TARGET
-g6_turn_wire.py: error: the following arguments are required: --approved-target
-
-EXIT=2

@@ -1,8 +1,0 @@
-{
-  "serverTimeNs": "1795303033300538732",
-  "windowsBeforeNs": "1795303036794887200",
-  "windowsAfterNs": "1795303038341108900",
-  "serverMinusWindowsLowerSeconds": -5.040570168,
-  "serverMinusWindowsUpperSeconds": -3.494348468,
-  "method": "One bounded SSH query including tool round trip; no cross-clock duration claims"
-}

@@ -1,6 +1,0 @@
-$ cargo check -p remotehub-desktop --features p004-probe --locked --offline
-   Compiling remotehub-desktop v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\apps\desktop\src-tauri)
-    Checking hub-webrtc v0.1.0 (C:\Users\Administrator\Documents\ChatGPT\远程项目\RemoteHub\crates\hub-webrtc)
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.79s
-
-EXIT=0

@@ -1,4 +1,0 @@
-$ E:\ides\Python\python.exe deploy/coturn/verify_config.py --template
-PASS: offline configuration policy; coturn syntax/runtime and cloud network NOT tested
-
-EXIT=0

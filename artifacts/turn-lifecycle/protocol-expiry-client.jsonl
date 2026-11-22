@@ -1,3 +1,0 @@
-{"case": "protocol-expiry", "event": "client_start", "timeNs": 1795271995911785200, "monotonicNs": 50404718662600}
-{"case": "protocol-expiry", "event": "allocation_established", "timeNs": 1795271996004853500, "monotonicNs": 50404811730400, "grantedLifetime": 600, "relayPort": 49190, "transactionElapsedMs": 46.463}
-{"case": "protocol-expiry", "event": "socket_closed_without_refresh", "timeNs": 1795271998005289800, "monotonicNs": 50406812167600}

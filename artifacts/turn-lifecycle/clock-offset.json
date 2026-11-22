@@ -1,9 +1,0 @@
-{
-  "clientBeforeNs": 1795272301460946400,
-  "clientReceiveFileWriteNs": 1795272301626332400,
-  "serverTimeNs": 1795272303402882225,
-  "serverMinusClientOffsetLowerNs": 1776549825,
-  "serverMinusClientOffsetUpperNs": 1941935825,
-  "roundTripPlusToolOverheadMs": 165.386,
-  "note": "Bounded clock-offset interval from one SSH request; PC/browser timestamps are kept in their original clock domain"
-}
