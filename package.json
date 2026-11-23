@@ -7,6 +7,7 @@
     "dev": "pnpm --filter @remotehub/desktop dev",
     "desktop": "pnpm --filter @remotehub/desktop tauri dev",
     "build": "pnpm --filter @remotehub/desktop build",
+    "installer:windows": "pnpm --filter @remotehub/desktop tauri build --config src-tauri/tauri.windows-installer.json --target x86_64-pc-windows-msvc --no-sign --features p3-lan -- --locked --no-default-features",
     "typecheck": "pnpm --filter @remotehub/desktop typecheck",
     "test": "pnpm --filter @remotehub/desktop test",
     "lint": "prettier --check apps/desktop/src apps/desktop/*.ts scripts/*.mjs",
