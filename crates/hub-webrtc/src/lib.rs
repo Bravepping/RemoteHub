@@ -18,6 +18,8 @@ pub mod direct_runtime;
 pub mod ice_policy;
 #[cfg(feature = "p3-lan")]
 pub mod input_pair;
+#[cfg(feature = "v2-input-approval")]
+pub mod input_approval;
 #[cfg(windows)]
 pub mod lan;
 #[cfg(all(feature = "v2-verified-lan", any(windows, test)))]
