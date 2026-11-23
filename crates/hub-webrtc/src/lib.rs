@@ -28,6 +28,8 @@ pub mod pinned_runtime;
 mod private_wss_contract;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
+#[cfg(feature = "v2-public-video")]
+mod public_video_route;
 #[cfg(feature = "v2-public-video-wss")]
 mod public_video_frames;
 #[cfg(feature = "v2-public-video-wss")]

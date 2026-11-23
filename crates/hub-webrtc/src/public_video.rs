@@ -1,6 +1,7 @@
 //! Offline proof contract for public video. Verifying an SDP proves its sender
 //! and approved route context, not end-user consent or candidate eligibility.
-use crate::ice_policy::{public_v4, IceMode};
+use crate::ice_policy::{public_v4, IceConfig, IceMode, RelayGrant};
+pub use crate::public_video_route::PublicVideoIcePlan;
 use hub_identity::{
     pairing::VerifiedPeer,
     session::{
@@ -90,6 +91,7 @@ impl PublicVideoScope {
 pub struct PublicVideoProof<'a> {
     local: &'a Identity,
     role: SessionRole,
+    room: Uuid,
     scope: PublicVideoScope,
     binding: SessionBinding,
     incoming: Option<PendingSessionProof>,
@@ -117,12 +119,24 @@ impl<'a> PublicVideoProof<'a> {
         Ok(Self {
             local,
             role,
+            room,
             scope,
             binding,
             incoming: Some(incoming),
             outgoing_available: true,
             offer: None,
         })
+    }
+
+    /// Validate a native-issued route grant against exactly this proof's
+    /// reserved context, before using it for ICE. Does not authorize media.
+    pub fn prepare_ice(
+        &self,
+        grant: RelayGrant,
+        config: IceConfig,
+        now: u64,
+    ) -> Result<PublicVideoIcePlan, &'static str> {
+        PublicVideoIcePlan::prepare(self.scope, self.room, grant, config, now)
     }
 
     pub fn challenge(&self) -> Option<SessionChallenge> {

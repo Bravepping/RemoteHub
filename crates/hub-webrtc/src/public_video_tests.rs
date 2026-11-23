@@ -270,3 +270,131 @@ fn an_answer_cannot_precede_or_be_paired_with_a_different_offer() {
     let answer = h.seal(v2.challenge().unwrap(), ANSWER, NOW).unwrap();
     assert_eq!(v2.open(ANSWER, &answer, NOW), Err(REJECTED));
 }
+
+fn route_fixture(
+    scope: PublicVideoScope,
+    room: Uuid,
+) -> (crate::ice_policy::RelayTarget, IceConfig) {
+    let target = crate::ice_policy::RelayTarget {
+        local: "192.168.1.2".parse().unwrap(),
+        turn: scope.turn,
+        relay: *scope.turn.ip(),
+        port_min: scope.relay_ports.0,
+        port_max: scope.relay_ports.1,
+    };
+    let expires_at = scope.expires_at - 10;
+    let config = IceConfig {
+        mode: scope.mode,
+        expires_at,
+        session_id: room.to_string(),
+        ice_servers: vec![crate::ice_policy::IceServer {
+            urls: vec![format!("turn:{}?transport=udp", scope.turn)],
+            username: format!("{expires_at}:{room}"),
+            credential: "AAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+        }],
+    };
+    (target, config)
+}
+
+#[test]
+fn video_ice_plan_reuses_only_scope_turn_and_explicit_path_policy() {
+    use webrtc::peer_connection::RTCIceTransportPolicy;
+
+    let host = Identity::generate_ephemeral().unwrap();
+    let viewer = Identity::generate_ephemeral().unwrap();
+    let room = Uuid::new_v4();
+    for mode in [IceMode::DirectPreferred, IceMode::RelayOnly] {
+        let scope = PublicVideoScope { mode, ..scope() };
+        let proof = PublicVideoProof::prepare(
+            &host,
+            &pin(&host, &viewer),
+            SessionRole::Host,
+            room,
+            [1; 32],
+            scope,
+            NOW,
+        )
+        .unwrap();
+        let (target, config) = route_fixture(scope, room);
+        let local = target.local;
+        let grant = RelayGrant::new(target, &room.to_string(), scope.expires_at, true).unwrap();
+        let deadline = config.expires_at;
+        let plan = proof.prepare_ice(grant, config, NOW).unwrap();
+        assert_eq!(plan.local_ip(), local);
+        assert!(!plan.host_candidates_allowed());
+        assert_eq!(plan.expires_at(), deadline);
+        let candidate_config = plan.rtc_configuration(NOW).unwrap();
+        let policy = if mode == IceMode::DirectPreferred {
+            RTCIceTransportPolicy::All
+        } else {
+            RTCIceTransportPolicy::Relay
+        };
+        assert_eq!(candidate_config.ice_transport_policy(), policy);
+        let mut urls = vec![format!("turn:{}?transport=udp", scope.turn)];
+        if mode == IceMode::DirectPreferred {
+            urls.push(format!("stun:{}", scope.turn));
+        }
+        assert_eq!(
+            candidate_config
+                .ice_servers()
+                .iter()
+                .flat_map(|s| s.urls.iter())
+                .collect::<Vec<_>>(),
+            urls.iter().collect::<Vec<_>>()
+        );
+        assert!(plan.rtc_configuration(deadline).is_err());
+    }
+}
+
+#[test]
+fn video_ice_plan_rejects_grant_binding_and_unapproved_configuration() {
+    let host = Identity::generate_ephemeral().unwrap();
+    let viewer = Identity::generate_ephemeral().unwrap();
+    let room = Uuid::new_v4();
+    let scope = scope();
+    let proof = PublicVideoProof::prepare(
+        &host,
+        &pin(&host, &viewer),
+        SessionRole::Host,
+        room,
+        [1; 32],
+        scope,
+        NOW,
+    )
+    .unwrap();
+    let room_text = room.to_string();
+    for case in 0..10 {
+        let (mut target, mut config) = route_fixture(scope, room);
+        let mut grant_room = room_text.clone();
+        let mut grant_expiry = scope.expires_at;
+        match case {
+            0 => grant_room = Uuid::new_v4().to_string(),
+            1 => grant_expiry -= 1,
+            2 => target.turn.set_port(target.turn.port() + 1),
+            3 => target.port_min += 1,
+            4 => target.relay = "1.1.1.1".parse().unwrap(),
+            5 => config.mode = IceMode::RelayOnly,
+            6 => config.ice_servers[0].urls[0] = format!("turn:{}?transport=tcp", scope.turn),
+            7 => {
+                let duplicate = config.ice_servers[0].urls[0].clone();
+                config.ice_servers[0].urls.push(duplicate);
+            }
+            8 => {
+                config.ice_servers[0].username = format!("{}:{}", config.expires_at, Uuid::new_v4())
+            }
+            9 => config.session_id = Uuid::new_v4().to_string(),
+            _ => unreachable!(),
+        }
+        let grant = RelayGrant::new(target, &grant_room, grant_expiry, true).unwrap();
+        let expected = if case < 5 {
+            "PUBLIC_VIDEO_ICE_GRANT_MISMATCH"
+        } else {
+            "PUBLIC_VIDEO_ICE_CONFIG_MISMATCH"
+        };
+        assert_eq!(
+            proof.prepare_ice(grant, config, NOW).err(),
+            Some(expected),
+            "case {case}"
+        );
+    }
+}
