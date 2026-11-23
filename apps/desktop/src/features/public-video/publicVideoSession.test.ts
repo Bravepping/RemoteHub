@@ -220,6 +220,40 @@ describe('public video viewer controller', () => {
     expect(JSON.stringify(update.mock.calls)).not.toContain('secret fixture');
   });
 
+  it('clears and stops before reporting a fixed native terminal diagnostic', async () => {
+    const { bridge, renderer, session, update } = harness();
+    bridge.status
+      .mockResolvedValueOnce({ phase: 'ready' })
+      .mockResolvedValueOnce({
+        phase: 'closed',
+        error: 'PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE',
+      });
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(renderer.stop).toHaveBeenCalledTimes(1);
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    expect(update).toHaveBeenLastCalledWith(
+      'failed',
+      'PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE',
+    );
+  });
+
+  it.each([
+    ['PUBLIC_VIDEO_BUSY', 'PUBLIC_VIDEO_BUSY'],
+    ['PUBLIC_VIDEO_BUSY token=secret-fixture', 'PUBLIC_VIDEO_OP_FAILED'],
+    [new Error('PUBLIC_VIDEO_BUSY'), 'PUBLIC_VIDEO_OP_FAILED'],
+  ])(
+    'allows only exact native IPC rejection codes (%s)',
+    async (cause, expected) => {
+      const { bridge, session, update } = harness();
+      bridge.start.mockRejectedValueOnce(cause);
+      session.start('host');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(update).toHaveBeenLastCalledWith('failed', expected);
+      expect(JSON.stringify(update.mock.calls)).not.toContain('secret-fixture');
+    },
+  );
+
   it('fails closed on raw buffer mismatch and never submits a malformed frame', async () => {
     const { bridge, renderer, ingress, session, update } = harness();
     bridge.nextFrame.mockResolvedValueOnce(new ArrayBuffer(3));

@@ -24,10 +24,47 @@ export type PublicVideoState =
   | 'cleanup_unconfirmed';
 
 type NativePhase = 'starting' | 'ready' | 'stopping' | 'closed';
+// Fixed native diagnostics only. Never render arbitrary IPC text, even when
+// it starts with a recognized prefix.
+const NATIVE_DIAGNOSTICS = [
+  'NATIVE_CONSENT_DENIED',
+  'PUBLIC_VIDEO_BUSY',
+  'PUBLIC_VIDEO_CAPTURE_BACKPRESSURE',
+  'PUBLIC_VIDEO_CAPTURE_ENCODER_FAILED',
+  'PUBLIC_VIDEO_CAPTURE_INVALID_AU',
+  'PUBLIC_VIDEO_CAPTURE_PATH_TIMEOUT',
+  'PUBLIC_VIDEO_CAPTURE_WORKER_FAILED',
+  'PUBLIC_VIDEO_CLOSED_UNEXPECTEDLY',
+  'PUBLIC_VIDEO_FRAME_SIZE',
+  'PUBLIC_VIDEO_ICE_PAIR_REJECTED',
+  'PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE',
+  'PUBLIC_VIDEO_MEDIA_BACKPRESSURE',
+  'PUBLIC_VIDEO_MEDIA_INVALID_AU',
+  'PUBLIC_VIDEO_PEER_MISMATCH',
+  'PUBLIC_VIDEO_PROFILE_CA_PIN',
+  'PUBLIC_VIDEO_PROFILE_EXPIRED',
+  'PUBLIC_VIDEO_PROFILE_FILE',
+  'PUBLIC_VIDEO_PROFILE_INVALID',
+  'PUBLIC_VIDEO_PROFILE_UNAVAILABLE',
+  'PUBLIC_VIDEO_PULL_BUSY',
+  'PUBLIC_VIDEO_ROLE_OR_ROUTE',
+  'PUBLIC_VIDEO_RTP_UNAVAILABLE',
+  'PUBLIC_VIDEO_VERIFY_PEER_FIRST',
+  'PUBLIC_VIDEO_WSS_ADMISSION',
+  'PUBLIC_VIDEO_WSS_CLOSED',
+  'PUBLIC_VIDEO_WSS_INVITATION',
+  'PUBLIC_VIDEO_WSS_PROTOCOL',
+  'PUBLIC_VIDEO_WSS_TIMEOUT',
+  'PUBLIC_VIDEO_WSS_TLS',
+  'PUBLIC_VIDEO_WSS_TRANSPORT',
+] as const;
+type NativeDiagnostic = (typeof NATIVE_DIAGNOSTICS)[number];
+const nativeDiagnostics: ReadonlySet<string> = new Set(NATIVE_DIAGNOSTICS);
 type PublicVideoError =
   | 'PUBLIC_VIDEO_OP_FAILED'
   | 'PUBLIC_VIDEO_RESPONSE_INVALID'
   | 'PUBLIC_VIDEO_IPC_TIMEOUT'
+  | NativeDiagnostic
   | VideoDisplayFailure;
 
 export interface PublicVideoBridge {
@@ -86,6 +123,9 @@ export function parsePublicVideoFrame(value: unknown): NativeVideoFrame | null {
 
 class InvalidResponse extends Error {}
 class IpcTimeout extends Error {}
+class NativeFailure {
+  constructor(readonly value: string) {}
+}
 
 function parseGeneration(value: unknown): string {
   if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value))
@@ -107,14 +147,18 @@ function phase(value: unknown): NativePhase {
       typeof parsed.error !== 'string')
   )
     throw new InvalidResponse();
-  if (typeof parsed.error === 'string')
-    throw new Error('Native session failed');
+  if (typeof parsed.error === 'string') throw new NativeFailure(parsed.error);
   return parsed.phase;
 }
 
 function errorCode(cause: unknown): PublicVideoError {
   if (cause instanceof InvalidResponse) return 'PUBLIC_VIDEO_RESPONSE_INVALID';
   if (cause instanceof IpcTimeout) return 'PUBLIC_VIDEO_IPC_TIMEOUT';
+  // Native Result<_, String> rejections and the typed status wrapper use
+  // the same exact allowlist; transport/JS exception messages never pass.
+  const native = cause instanceof NativeFailure ? cause.value : cause;
+  if (typeof native === 'string' && nativeDiagnostics.has(native))
+    return native as NativeDiagnostic;
   // Never put raw native IPC failures, profile values, or transport data in UI.
   return 'PUBLIC_VIDEO_OP_FAILED';
 }
