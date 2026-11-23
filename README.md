@@ -129,6 +129,7 @@ R06 诊断版要求两端分别手动选择同一个模式：「优先直连」�
 
 ## 本分支已执行验证
 
+- R06 强制 TURN 公网双机复测（2026-11-23，用户实测，Windows v4 `711b2f3`）：用户确认合成图案正常发送和接收。尚未单独提供两端实际选中的候选对或会话回收状态，不记为完整选路／回收验收；未测试公网直连、自动回退、真实桌面或键鼠，R06 仍 OPEN。
 - R06 强制 TURN 首轮公网未连上，接收端只显示 `RECEIVER_INTERNAL_ERROR`。本机代码确认新诊断发送的 `connectionPath` 会被旧通用指标校验拒绝；现仅在强制 TURN 合成诊断里校验该字段，且仍要求两端匹配的中继候选，并把固定阶段错误保留为脱敏代码。44 项 Rust 本地测试、163 项前端测试和 Windows MSVC 编译检查通过；这不能证明公网失败只有这一处原因，未重新运行公网测试。
 - R06 手动仅 TURN：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 43 项通过，新增本机脱敏、ICE 解析和精确候选校验覆盖；前端 141 项测试、类型检查及构建通过。Windows MSVC 目标的诊断构建及测试源码通过编译检查；未连接真机或公网 TURN。
 - R06 公网双机复测（用户操作）：匹配版本的 WSS 服务端使配对进入 ICE 阶段。发送端 `DIRECT_SELECTED_PAIR_NOT_APPROVED`；脱敏最终统计：本地候选 `host/private`，`candidate_type_absent_from_sdp`，已发布候选 2 个、同类型 0 个、未批准发布私网候选；远端 `matched`。接收端同时报 `CONTROL_CHANNEL_ERROR`。当前原生 ICE 仍可能选中仅在 SDP 阶段过滤掉的候选，拒绝是预期行为；不放宽核验。未验证公网直连、TURN 转发或画面；R06 仍 OPEN。
