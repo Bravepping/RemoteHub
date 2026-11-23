@@ -28,6 +28,8 @@ pub mod pinned_runtime;
 mod private_wss_contract;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
+#[cfg(feature = "v2-public-video-wss")]
+pub mod public_video_wss;
 #[cfg(all(windows, feature = "p006-relay"))]
 pub mod receiver_evidence;
 #[cfg(all(windows, feature = "p006-relay"))]

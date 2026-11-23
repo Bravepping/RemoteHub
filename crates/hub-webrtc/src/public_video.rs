@@ -33,7 +33,7 @@ pub struct PublicVideoScope {
 }
 
 impl PublicVideoScope {
-    fn checked_mode(self, now: u64) -> Result<u8, &'static str> {
+    pub(crate) fn checked_mode(self, now: u64) -> Result<u8, &'static str> {
         let mode = match self.mode {
             IceMode::DirectPreferred => 1,
             IceMode::RelayOnly => 2,

@@ -575,6 +575,10 @@ mod data_smoke;
 mod tls_smoke;
 
 #[cfg(test)]
+#[path = "v2_signaling/public_video_smoke.rs"]
+mod public_video_smoke;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use hub_signal_v2::{
