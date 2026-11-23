@@ -4,6 +4,8 @@ import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { CanvasVideoAdapter } from './canvasVideoAdapter';
 import {
   PublicVideoSession,
+  type PublicVideoEndDetail,
+  type PublicVideoEndReason,
   type PublicVideoRole,
   type PublicVideoState,
 } from './publicVideoSession';
@@ -12,6 +14,7 @@ const canvas = ref<HTMLCanvasElement>();
 const role = ref<PublicVideoRole>();
 const state = ref<PublicVideoState>('idle');
 const error = ref('');
+const endDetail = ref<PublicVideoEndDetail>();
 let session: PublicVideoSession | undefined;
 
 const statusText: Record<PublicVideoState, string> = {
@@ -26,6 +29,14 @@ const statusText: Record<PublicVideoState, string> = {
   cleanup_unconfirmed:
     '已清屏，但尚未确认原生会话停止。重新打开应用前，请先在共享端停止共享。',
 };
+const endText: Record<PublicVideoEndReason, string> = {
+  local_stop: '本机请求停止',
+  peer_left: '对端已离开，具体原因未知',
+  capture_limit: '共享达到时限',
+  capture_ended: '本机采集已结束',
+  failed: '会话出错',
+};
+const formatSeconds = (ms: number) => (ms / 1000).toFixed(1);
 const canStart = computed(
   () =>
     state.value === 'idle' ||
@@ -64,9 +75,10 @@ onMounted(() => {
         undefined,
         presented,
       ),
-    (next, code) => {
+    (next, code, detail) => {
       state.value = next;
       error.value = code ?? '';
+      endDetail.value = detail;
     },
   );
 });
@@ -103,6 +115,13 @@ function start() {
     </div>
     <p role="status">
       {{ statusText[state] }} <code v-if="error">{{ error }}</code>
+      <span v-if="endDetail?.reason"> · {{ endText[endDetail.reason] }}</span>
+      <span v-if="endDetail?.captureMs !== undefined">
+        · 本机共享采集 {{ formatSeconds(endDetail.captureMs) }} 秒
+      </span>
+      <span v-if="endDetail?.playbackMs !== undefined">
+        · 本机观看（首帧到清屏）{{ formatSeconds(endDetail.playbackMs) }} 秒
+      </span>
     </p>
     <canvas
       v-show="role === 'viewer'"

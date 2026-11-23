@@ -82,6 +82,13 @@ struct RuntimeInfo {
     p3_enabled: bool,
     v2_loopback_diagnostic_enabled: bool,
     v2_peer_pairing_enabled: bool,
+    #[cfg(all(
+        feature = "v2-public-video-desktop",
+        not(feature = "p006-relay"),
+        windows
+    ))]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    v2_peer_prefill: Option<v2_pairing::PairingCard>,
     v2_verified_lan_enabled: bool,
     v2_private_wss_lan_enabled: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
@@ -129,6 +136,12 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
             feature = "v2-peer-pairing",
             not(feature = "p006-relay")
         )),
+        #[cfg(all(
+            feature = "v2-public-video-desktop",
+            not(feature = "p006-relay"),
+            windows
+        ))]
+        v2_peer_prefill: v2_pairing::bundle_prefill(&window),
         v2_verified_lan_enabled: cfg!(all(
             feature = "v2-verified-lan",
             not(feature = "p006-relay")

@@ -24,6 +24,13 @@ export type PublicVideoState =
   | 'cleanup_unconfirmed';
 
 type NativePhase = 'starting' | 'ready' | 'stopping' | 'closed';
+export type PublicVideoEndReason =
+  'local_stop' | 'peer_left' | 'capture_limit' | 'capture_ended' | 'failed';
+export interface PublicVideoEndDetail {
+  readonly reason?: PublicVideoEndReason;
+  readonly playbackMs?: number;
+  readonly captureMs?: number;
+}
 // Fixed native diagnostics only. Never render arbitrary IPC text, even when
 // it starts with a recognized prefix.
 const NATIVE_DIAGNOSTICS = [
@@ -103,6 +110,7 @@ interface Run {
   readonly role: PublicVideoRole;
   renderer?: PublicVideoRenderer;
   ingress?: VideoFrameIngress;
+  firstPresentedAt?: number;
   cancelled: boolean;
   revoke?: Promise<void>;
   delay?: () => void;
@@ -142,19 +150,26 @@ export function parsePublicVideoFrame(value: unknown): NativeVideoFrame | null {
 
 class InvalidResponse extends Error {}
 class IpcTimeout extends Error {}
-class NativeFailure {
-  constructor(readonly value: string) {}
-}
-
 function parseGeneration(value: unknown): string {
   if (typeof value !== 'string' || !/^[0-9a-f]{32}$/.test(value))
     throw new InvalidResponse();
   return value;
 }
 
-function phase(value: unknown): NativePhase {
+interface NativeStatus {
+  phase: NativePhase;
+  error?: string;
+  end?: PublicVideoEndDetail;
+}
+
+function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
   if (typeof value !== 'object' || !value) throw new InvalidResponse();
-  const parsed = value as { phase?: unknown; error?: unknown };
+  const parsed = value as {
+    phase?: unknown;
+    error?: unknown;
+    end_reason?: unknown;
+    elapsed_ms?: unknown;
+  };
   if (
     !Object.hasOwn(parsed, 'phase') ||
     (parsed.phase !== 'starting' &&
@@ -166,8 +181,40 @@ function phase(value: unknown): NativePhase {
       typeof parsed.error !== 'string')
   )
     throw new InvalidResponse();
-  if (typeof parsed.error === 'string') throw new NativeFailure(parsed.error);
-  return parsed.phase;
+  const result: NativeStatus = { phase: parsed.phase };
+  if (typeof parsed.error === 'string') result.error = parsed.error;
+  if (
+    result.error !== undefined ||
+    parsed.phase === 'stopping' ||
+    parsed.phase === 'closed'
+  ) {
+    const reason = Object.hasOwn(parsed, 'end_reason')
+      ? parsed.end_reason
+      : undefined;
+    const elapsed = Object.hasOwn(parsed, 'elapsed_ms')
+      ? parsed.elapsed_ms
+      : undefined;
+    const end: PublicVideoEndDetail = {
+      reason:
+        reason === 'local_stop' ||
+        reason === 'peer_left' ||
+        reason === 'failed' ||
+        (role === 'host' &&
+          (reason === 'capture_limit' || reason === 'capture_ended'))
+          ? reason
+          : undefined,
+      captureMs:
+        role === 'host' &&
+        typeof elapsed === 'number' &&
+        Number.isSafeInteger(elapsed) &&
+        elapsed >= 0
+          ? elapsed
+          : undefined,
+    };
+    if (end.reason !== undefined || end.captureMs !== undefined)
+      result.end = end;
+  }
+  return result;
 }
 
 type DiagnosticPhase = 'start' | 'status' | 'frame' | 'display';
@@ -175,11 +222,10 @@ type DiagnosticPhase = 'start' | 'status' | 'frame' | 'display';
 function errorCode(cause: unknown, phase: DiagnosticPhase): PublicVideoError {
   if (cause instanceof InvalidResponse) return 'PUBLIC_VIDEO_RESPONSE_INVALID';
   if (cause instanceof IpcTimeout) return 'PUBLIC_VIDEO_IPC_TIMEOUT';
-  // Native Result<_, String> rejections and the typed status wrapper use
+  // Native Result<_, String> rejections and the parsed native status use
   // the same exact allowlist; transport/JS exception messages never pass.
-  const native = cause instanceof NativeFailure ? cause.value : cause;
-  if (typeof native === 'string' && nativeDiagnostics.has(native))
-    return native as NativeDiagnostic;
+  if (typeof cause === 'string' && nativeDiagnostics.has(cause))
+    return cause as NativeDiagnostic;
   // Never put raw native IPC failures, profile values, or transport data in UI.
   if (phase === 'status') return 'PUBLIC_VIDEO_STATUS_IPC_FAILED';
   if (phase === 'frame') return 'PUBLIC_VIDEO_FRAME_IPC_FAILED';
@@ -216,6 +262,7 @@ export class PublicVideoSession {
     private readonly update: (
       state: PublicVideoState,
       error?: PublicVideoError,
+      detail?: PublicVideoEndDetail,
     ) => void,
   ) {}
 
@@ -237,7 +284,9 @@ export class PublicVideoSession {
   }
 
   stop(): Promise<void> {
-    return this.run ? this.retire(this.run, 'stopped') : Promise.resolve();
+    return this.run
+      ? this.retire(this.run, 'stopped', undefined, { reason: 'local_stop' })
+      : Promise.resolve();
   }
 
   dispose(): void {
@@ -258,17 +307,27 @@ export class PublicVideoSession {
       while (this.active(run)) {
         if (performance.now() - statusAt >= STATUS_INTERVAL_MS) {
           diagnosticPhase = 'status';
-          const current = phase(
-            await withDeadline(this.bridge.status(generation)),
+          const nativeStatus = await withDeadline(
+            this.bridge.status(generation),
           );
           if (!this.active(run)) return;
+          const current = parseStatus(nativeStatus, run.role);
           statusAt = performance.now();
-          if (current === 'closed' || current === 'stopping') {
-            await this.retire(run, 'stopped');
+          if (current.error !== undefined || current.end?.reason === 'failed') {
+            await this.retire(
+              run,
+              'failed',
+              errorCode(current.error, 'status'),
+              current.end,
+            );
             return;
           }
-          if (ready && current !== 'ready') throw new InvalidResponse();
-          if (!ready && current === 'ready') {
+          if (current.phase === 'closed' || current.phase === 'stopping') {
+            await this.retire(run, 'stopped', undefined, current.end);
+            return;
+          }
+          if (ready && current.phase !== 'ready') throw new InvalidResponse();
+          if (!ready && current.phase === 'ready') {
             ready = true;
             if (run.role === 'host') {
               this.update('sharing');
@@ -279,7 +338,10 @@ export class PublicVideoSession {
                   if (this.active(run)) void this.retire(run, 'failed', code);
                 },
                 () => {
-                  if (this.active(run)) this.update('watching');
+                  if (!this.active(run) || run.firstPresentedAt !== undefined)
+                    return;
+                  run.firstPresentedAt = performance.now();
+                  this.update('watching');
                 },
               );
               run.ingress = run.renderer.start();
@@ -343,10 +405,21 @@ export class PublicVideoSession {
     run: Run,
     state: 'stopped' | 'failed',
     code?: PublicVideoError,
+    nativeEnd?: PublicVideoEndDetail,
   ): Promise<void> {
     if (run.revoke) return run.revoke;
     // Never wait on native stop or a pending frame before clearing old pixels.
     run.cancelled = true;
+    const detail =
+      run.firstPresentedAt === undefined
+        ? nativeEnd
+        : {
+            ...nativeEnd,
+            playbackMs: Math.max(
+              0,
+              Math.floor(performance.now() - run.firstPresentedAt),
+            ),
+          };
     run.delay?.();
     run.ingress = undefined;
     run.renderer?.stop();
@@ -364,11 +437,17 @@ export class PublicVideoSession {
     run.revoke = withDeadline(cleanup()).then(
       () => {
         if (this.run === run) this.run = undefined;
-        if (!this.disposed) this.update(state, code);
+        if (!this.disposed) {
+          if (detail) this.update(state, code, detail);
+          else this.update(state, code);
+        }
       },
       () => {
         this.cleanupUnconfirmed = true;
-        if (!this.disposed) this.update('cleanup_unconfirmed', code);
+        if (!this.disposed) {
+          if (detail) this.update('cleanup_unconfirmed', code, detail);
+          else this.update('cleanup_unconfirmed', code);
+        }
       },
     );
     return run.revoke;

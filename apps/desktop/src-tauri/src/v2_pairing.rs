@@ -8,6 +8,79 @@ pub(crate) struct PairingCard {
     fingerprint: String,
 }
 
+/// Untrusted form defaults for a private portable bundle. Neither accepts
+/// consent nor writes PairingState.
+#[cfg(all(feature = "v2-public-video-desktop", windows))]
+pub(crate) fn bundle_prefill(window: &WebviewWindow) -> Option<PairingCard> {
+    use std::io::Read;
+    use tauri::Manager;
+
+    let identity = window.state::<crate::identity::DesktopIdentity>();
+    let public = identity.public()?;
+    let dir = std::env::current_exe().ok()?;
+    let path = dir.parent()?.join("remotehub-peer-prefill.json");
+    let file = crate::public_video_profile::open_local_regular(&path).ok()?;
+    let mut bytes = Vec::new();
+    const MAX_BYTES: usize = 512;
+    file.take((MAX_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    if bytes.len() > MAX_BYTES {
+        return None;
+    }
+    parse_prefill(&bytes, &public.fingerprint)
+}
+
+#[cfg(all(feature = "v2-public-video-desktop", any(windows, test)))]
+fn parse_prefill(bytes: &[u8], local_fingerprint: &str) -> Option<PairingCard> {
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Prefill {
+        local_fingerprint: String,
+        card: String,
+        fingerprint: String,
+    }
+    let Prefill {
+        local_fingerprint: intended_local,
+        card,
+        fingerprint,
+    } = serde_json::from_slice(bytes).ok()?;
+    let candidate = hub_identity::pairing::PairingCandidate::parse(&card).ok()?;
+    if intended_local != local_fingerprint
+        || fingerprint == local_fingerprint
+        || fingerprint != candidate.fingerprint()
+    {
+        return None;
+    }
+    Some(PairingCard { card, fingerprint })
+}
+
+#[cfg(all(test, feature = "v2-public-video-desktop"))]
+mod bundle_tests {
+    use super::parse_prefill;
+    use hub_identity::pairing::PairingCandidate;
+
+    #[test]
+    fn role_bound_bundle_only_accepts_public_fields_for_this_device() {
+        let local = "a".repeat(64);
+        let card = "RH2-d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a";
+        let peer = PairingCandidate::parse(card).unwrap();
+        let mut data = serde_json::json!({
+            "local_fingerprint": local,
+            "card": card,
+            "fingerprint": peer.fingerprint(),
+        });
+        let bytes = serde_json::to_vec(&data).unwrap();
+        assert!(parse_prefill(&bytes, &local).is_some());
+        assert!(parse_prefill(&bytes, peer.fingerprint()).is_none());
+        data["consent"] = serde_json::Value::Bool(true);
+        assert!(parse_prefill(&serde_json::to_vec(&data).unwrap(), &local).is_none());
+        data.as_object_mut().unwrap().remove("consent");
+        data["fingerprint"] = serde_json::Value::String("0".repeat(64));
+        assert!(parse_prefill(&serde_json::to_vec(&data).unwrap(), &local).is_none());
+    }
+}
+
 #[derive(Serialize)]
 pub(crate) struct Verified {
     fingerprint: String,

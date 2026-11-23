@@ -176,6 +176,32 @@ it('ignores a cached record with unexpected fields and requires manual entry', (
   view.unmount();
 });
 
+it('prefills a role-bound bundle without restoring consent or persisting it', async () => {
+  const view = mount(DevicesPage, {
+    props: {
+      loading: false,
+      runtime: {
+        ...runtime,
+        v2_peer_pairing_enabled: true,
+        v2_peer_prefill: { card: peerCard, fingerprint: peerFingerprint },
+      },
+    },
+  });
+  expect((view.get('#v2-peer-card').element as HTMLInputElement).value).toBe(
+    peerCard,
+  );
+  expect(
+    (view.get('#v2-peer-fingerprint').element as HTMLInputElement).value,
+  ).toBe(peerFingerprint);
+  await view.get('form').trigger('submit');
+  expect(
+    view.get('button[type="submit"]').attributes('disabled'),
+  ).toBeDefined();
+  expect(window.localStorage.getItem(prefillKey)).toBeNull();
+  expect(invoke).not.toHaveBeenCalled();
+  view.unmount();
+});
+
 it.each([
   [() => Promise.resolve({ fingerprint: '23'.repeat(32) }), '配对操作未完成'],
   [

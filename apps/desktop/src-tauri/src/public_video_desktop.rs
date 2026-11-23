@@ -1,10 +1,13 @@
 //! Opt-in native-only public viewing. The webview can choose a role, pull one
 //! admitted AU, or stop; it cannot supply endpoints, keys, captures or input.
-use crate::{public_video_capture, public_video_profile::PublicVideoProfile};
+use crate::{
+    public_video_capture::{self, CaptureEnd, CaptureOutcome},
+    public_video_profile::PublicVideoProfile,
+};
 use hub_webrtc::{
     ice_policy::IceMode,
     public_video_media::{ScopedVideoMedia, ScopedVideoReceiver, VerifiedVideoFrame},
-    public_video_wss::{PublicVideoWss, Role, ScopedWssState},
+    public_video_wss::{PublicVideoWss, Role, ScopedWssEnd, ScopedWssState},
 };
 use serde::Serialize;
 use std::{
@@ -26,6 +29,7 @@ use windows::{
 };
 
 const CANCELLED: &str = "PUBLIC_VIDEO_CANCELLED";
+const UNEXPECTED_CLOSE: &str = "PUBLIC_VIDEO_CLOSED_UNEXPECTEDLY";
 const PULL_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_FRAME_BYTES: usize = 256 * 1024;
 
@@ -77,10 +81,81 @@ enum Phase {
     Closed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum EndReason {
+    LocalStop,
+    PeerLeft,
+    CaptureLimit,
+    CaptureEnded,
+    Failed,
+}
+
 #[derive(Clone, Serialize)]
 pub(crate) struct Status {
     phase: Phase,
     error: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_reason: Option<EndReason>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    elapsed_ms: Option<u64>,
+}
+
+type Terminal = Result<EndReason, &'static str>;
+
+struct Outcome {
+    terminal: Terminal,
+    elapsed_ms: Option<u64>,
+}
+
+impl Status {
+    fn closed(result: Result<Outcome, &'static str>) -> Self {
+        let Outcome {
+            terminal,
+            elapsed_ms,
+        } = result.unwrap_or_else(|error| Outcome {
+            terminal: Err(error),
+            elapsed_ms: None,
+        });
+        let (reason, error) = match terminal {
+            Ok(reason) => (reason, None),
+            Err(CANCELLED) => (EndReason::LocalStop, None),
+            Err(error) => (EndReason::Failed, Some(error)),
+        };
+        Self {
+            phase: Phase::Closed,
+            error,
+            end_reason: Some(reason),
+            elapsed_ms,
+        }
+    }
+}
+
+fn actor_terminal(actor: Result<ScopedWssEnd, &'static str>) -> Terminal {
+    actor.map(|end| match end {
+        ScopedWssEnd::Stopped => EndReason::LocalStop,
+        ScopedWssEnd::PeerLeft => EndReason::PeerLeft,
+    })
+}
+
+fn host_outcome(
+    actor: Result<ScopedWssEnd, &'static str>,
+    capture: CaptureOutcome,
+    locally_stopped: bool,
+) -> Outcome {
+    let terminal = match (actor, capture.end) {
+        (Err(error), _) | (_, Err(error)) => Err(error),
+        (Ok(ScopedWssEnd::PeerLeft), _) => Ok(EndReason::PeerLeft),
+        (_, Ok(CaptureEnd::LocalStop)) => Ok(EndReason::LocalStop),
+        (_, Ok(CaptureEnd::Limit)) => Ok(EndReason::CaptureLimit),
+        (_, Ok(CaptureEnd::SourceEnded)) => Ok(EndReason::CaptureEnded),
+        (_, Ok(CaptureEnd::TransportEnded)) if locally_stopped => Ok(EndReason::LocalStop),
+        (_, Ok(CaptureEnd::TransportEnded)) => Err(UNEXPECTED_CLOSE),
+    };
+    Outcome {
+        terminal,
+        elapsed_ms: capture.elapsed_ms,
+    }
 }
 
 pub(crate) struct Session {
@@ -100,6 +175,8 @@ impl Session {
             status: watch::channel(Status {
                 phase: Phase::Starting,
                 error: None,
+                end_reason: None,
+                elapsed_ms: None,
             })
             .0,
             receiver: AsyncMutex::new(None),
@@ -143,10 +220,7 @@ impl Drop for CloseSession {
             if status.phase == Phase::Closed {
                 return false;
             }
-            *status = Status {
-                phase: Phase::Closed,
-                error: Some("PUBLIC_VIDEO_CLOSED_UNEXPECTEDLY"),
-            };
+            *status = Status::closed(Err(UNEXPECTED_CLOSE));
             true
         });
     }
@@ -216,10 +290,7 @@ pub(crate) fn public_video_start(window: WebviewWindow, role: String) -> Result<
         session.stop.send_replace(true);
         *session.receiver.lock().await = None;
         drop(lease);
-        session.status.send_replace(Status {
-            phase: Phase::Closed,
-            error: result.err().filter(|e| *e != CANCELLED),
-        });
+        session.status.send_replace(Status::closed(result));
         drop(cleanup);
     });
     Ok(id)
@@ -322,7 +393,7 @@ async fn run(
     state: Arc<DesktopVideoState>,
     path: PathBuf,
     session: Arc<Session>,
-) -> Result<(), &'static str> {
+) -> Result<Outcome, &'static str> {
     let mut stop = session.stop.subscribe();
     if *stop.borrow() {
         return Err(CANCELLED);
@@ -425,14 +496,17 @@ async fn run(
                 actor.run_with_media(stop.clone(), phase_tx, media),
                 public_video_capture::run(sender, stop, phase),
             );
-            actor_result?;
-            capture_result?;
+            let locally_stopped = *session.stop.borrow();
+            Ok(host_outcome(actor_result, capture_result, locally_stopped))
         } else {
             let (media, receiver) = ScopedVideoMedia::viewer();
             *session.receiver.lock().await = Some(receiver);
-            actor.run_with_media(stop, phase_tx, media).await?;
+            let actor = actor.run_with_media(stop, phase_tx, media).await;
+            Ok(Outcome {
+                terminal: actor_terminal(actor),
+                elapsed_ms: None,
+            })
         }
-        Ok(())
     };
     let mut worker = std::pin::pin!(worker);
     tokio::select! {
@@ -461,6 +535,70 @@ pub(crate) fn allow_close_retry(window: &tauri::Window) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn host_terminal_reasons_distinguish_limit_source_stop_and_peer() {
+        for (actor, capture, expected) in [
+            (ScopedWssEnd::Stopped, CaptureEnd::Limit, "capture_limit"),
+            (
+                ScopedWssEnd::Stopped,
+                CaptureEnd::SourceEnded,
+                "capture_ended",
+            ),
+            (ScopedWssEnd::Stopped, CaptureEnd::LocalStop, "local_stop"),
+            (
+                ScopedWssEnd::PeerLeft,
+                CaptureEnd::TransportEnded,
+                "peer_left",
+            ),
+        ] {
+            let status = Status::closed(Ok(host_outcome(
+                Ok(actor),
+                CaptureOutcome {
+                    end: Ok(capture),
+                    elapsed_ms: Some(1234),
+                },
+                false,
+            )));
+            let json = serde_json::to_value(status).unwrap();
+            assert_eq!(json["phase"], "closed");
+            assert_eq!(json["end_reason"], expected);
+            assert_eq!(json["elapsed_ms"], 1234);
+            assert!(json["error"].is_null());
+        }
+    }
+
+    #[test]
+    fn viewer_has_no_capture_timer_and_errors_remain_failures() {
+        let viewer = Status::closed(Ok(Outcome {
+            terminal: actor_terminal(Ok(ScopedWssEnd::PeerLeft)),
+            elapsed_ms: None,
+        }));
+        let json = serde_json::to_value(viewer).unwrap();
+        assert_eq!(json["end_reason"], "peer_left");
+        assert!(json.get("elapsed_ms").is_none());
+
+        let initial = serde_json::to_value(&*Session::new(Role::Host).status.borrow()).unwrap();
+        assert!(initial.get("end_reason").is_none());
+        assert!(initial.get("elapsed_ms").is_none());
+
+        let stopped_early = serde_json::to_value(Status::closed(Err(CANCELLED))).unwrap();
+        assert_eq!(stopped_early["end_reason"], "local_stop");
+        assert!(stopped_early.get("elapsed_ms").is_none());
+        assert!(stopped_early["error"].is_null());
+
+        let failed = Status::closed(Ok(host_outcome(
+            Ok(ScopedWssEnd::PeerLeft),
+            CaptureOutcome {
+                end: Err("PUBLIC_VIDEO_CAPTURE_INVALID_AU"),
+                elapsed_ms: None,
+            },
+            false,
+        )));
+        let json = serde_json::to_value(failed).unwrap();
+        assert_eq!(json["end_reason"], "failed");
+        assert_eq!(json["error"], "PUBLIC_VIDEO_CAPTURE_INVALID_AU");
+    }
 
     #[test]
     fn frame_has_fixed_little_endian_header_and_exact_bytes() {

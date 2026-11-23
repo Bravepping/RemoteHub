@@ -5,7 +5,10 @@ use hub_encode_win::{h264::EncodedVideoFrame, lifecycle::StopToken};
 use hub_webrtc::{
     public_video_media::ScopedVideoSender, public_video_wss::ScopedWssState, video::Packetizer,
 };
-use std::time::Duration;
+use std::{
+    sync::{Arc, OnceLock},
+    time::{Duration, Instant as MonotonicInstant},
+};
 use tokio::{
     sync::{mpsc, watch},
     time::{timeout, Instant},
@@ -24,15 +27,38 @@ const BACKPRESSURE: &str = "PUBLIC_VIDEO_CAPTURE_BACKPRESSURE";
 const STOPPED: &str = "PUBLIC_VIDEO_CAPTURE_STOPPED";
 const TRANSPORT_CLOSED: &str = "PUBLIC_VIDEO_MEDIA_CLOSED";
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CaptureEnd {
+    LocalStop,
+    TransportEnded,
+    Limit,
+    SourceEnded,
+}
+
+#[derive(Debug)]
+pub(crate) struct CaptureOutcome {
+    pub(crate) end: Result<CaptureEnd, &'static str>,
+    pub(crate) elapsed_ms: Option<u64>,
+}
+
+impl CaptureOutcome {
+    fn before_start(end: Result<CaptureEnd, &'static str>) -> Self {
+        Self {
+            end,
+            elapsed_ms: None,
+        }
+    }
+}
+
 /// Invoke only after native approval. Keep polling through completion after
 /// signaling Stop so DXGI/MF's owning worker is joined before reporting cleanup.
-/// The result counts complete AUs admitted locally, not sent or displayed frames.
+/// The result describes the local producer, never viewer receipt or presentation.
 #[cfg(windows)]
 pub(crate) async fn run(
     sender: ScopedVideoSender,
     stop: watch::Receiver<bool>,
     phase: watch::Receiver<ScopedWssState>,
-) -> Result<u32, &'static str> {
+) -> CaptureOutcome {
     use hub_encode_win::{EncodeError, EncoderConfig};
     use std::sync::atomic::AtomicBool;
 
@@ -46,7 +72,7 @@ pub(crate) async fn run(
             },
             handoff.cancel.clone(),
             &AtomicBool::new(false),
-            |_| {},
+            |_| handoff.mark_started(),
             |frame| {
                 handoff.push(frame).map_err(|code| {
                     handoff_error = Some(code);
@@ -67,21 +93,22 @@ async fn run_with_source(
     mut phase: watch::Receiver<ScopedWssState>,
     capture_window: Duration,
     source: impl FnOnce(FrameHandoff) -> Result<(), &'static str> + Send + 'static,
-) -> Result<u32, &'static str> {
+) -> CaptureOutcome {
     tokio::select! {
         biased;
-        _ = stop.wait_for(|&stop| stop) => return Ok(0),
+        _ = stop.wait_for(|&stop| stop) => return CaptureOutcome::before_start(Ok(CaptureEnd::LocalStop)),
         phase = timeout(PATH_WAIT, phase.wait_for(|state| verified(state) || *state == ScopedWssState::Closed)) => {
             match phase {
                 Ok(Ok(state)) if verified(&state) => (),
-                Ok(_) => return Ok(0),
-                Err(_) => return Err(PATH_TIMEOUT),
+                Ok(_) => return CaptureOutcome::before_start(Ok(CaptureEnd::TransportEnded)),
+                Err(_) => return CaptureOutcome::before_start(Err(PATH_TIMEOUT)),
             }
         }
     }
 
     let cancel = CancelOnDrop(StopToken::default());
     let deadline = Instant::now() + capture_window;
+    let started = Arc::new(OnceLock::new());
     let (tx, mut rx) = mpsc::channel(1);
     let handoff = FrameHandoff {
         tx,
@@ -89,51 +116,77 @@ async fn run_with_source(
         stop: stop.clone(),
         phase: phase.clone(),
         deadline: deadline.into_std(),
+        started: started.clone(),
     };
     // The blocking worker owns all COM, MF and DXGI operations. A final
     // stop/phase check on that same thread covers shutdown while it queues.
     let worker = tokio::task::spawn_blocking(move || {
-        if !handoff.is_live() {
-            return Ok(());
-        }
-        source(handoff)
+        let result = if handoff.is_live() {
+            source(handoff)
+        } else {
+            Ok(())
+        };
+        (result, MonotonicInstant::now())
     });
 
-    let mut admitted = 0;
     let mut packetizer = Packetizer::default();
-    let result = tokio::select! {
+    let end = tokio::select! {
         biased;
-        _ = stop.wait_for(|&stop| stop) => None,
-        _ = phase.wait_for(|state| !verified(state)) => None,
-        _ = tokio::time::sleep_until(deadline) => None,
+        _ = stop.wait_for(|&stop| stop) => Ok(CaptureEnd::LocalStop),
+        _ = phase.wait_for(|state| !verified(state)) => Ok(CaptureEnd::TransportEnded),
+        _ = tokio::time::sleep_until(deadline) => Ok(CaptureEnd::Limit),
         result = async {
             while let Some(frame) = rx.recv().await {
                 let packets = packetizer.packets(frame, 102).map_err(|_| BAD_AU)?;
                 timeout(SEND_WAIT, sender.send_access_unit(packets))
                     .await
                     .map_err(|_| BACKPRESSURE)??;
-                admitted += 1;
             }
             Ok::<(), &'static str>(())
-        } => Some(result),
+        } => match result {
+            // The actor may revoke the port before broadcasting Closed.
+            Err(TRANSPORT_CLOSED) => Ok(CaptureEnd::TransportEnded),
+            other => other.map(|()| CaptureEnd::SourceEnded),
+        },
     };
-    // Revocation can reach the port before the actor broadcasts Closed.
-    // The actor, not the capture adapter, reports the underlying cause.
-    let result = result.filter(|result| !matches!(result, Err(TRANSPORT_CLOSED)));
-    // Signal first, then unblock any in-progress handoff before joining.
-    if !matches!(result, Some(Ok(()))) {
+    let cutoff = MonotonicInstant::now().min(deadline.into_std());
+    // Signal first, unblock any in-progress native handoff, and let the
+    // actor close its transport without waiting for native thread cleanup.
+    if end != Ok(CaptureEnd::SourceEnded) {
         cancel.0.stop();
     }
     drop(rx);
-    let worker_result = worker.await.map_err(|_| WORKER_FAILED)?;
-    if let Some(transfer_result) = result {
-        transfer_result?;
-        match worker_result {
-            Err(STOPPED) => (),
-            other => other?,
+    drop(sender);
+    let (end, finished) = match worker.await {
+        Ok((result, finished)) => {
+            let end = if end == Ok(CaptureEnd::SourceEnded) {
+                match result {
+                    // The worker can notice a terminal condition just
+                    // before the next poll of the async stop branches.
+                    Ok(()) | Err(STOPPED) if finished >= deadline.into_std() => {
+                        Ok(CaptureEnd::Limit)
+                    }
+                    Err(STOPPED) if *stop.borrow() || stop.has_changed().is_err() => {
+                        Ok(CaptureEnd::LocalStop)
+                    }
+                    Err(STOPPED) => Ok(CaptureEnd::TransportEnded),
+                    Err(error) => Err(error),
+                    Ok(()) => end,
+                }
+            } else {
+                end
+            };
+            (end, cutoff.min(finished))
         }
-    }
-    Ok(admitted)
+        Err(_) => (Err(WORKER_FAILED), cutoff),
+    };
+    // Monotonic time from actual stream readiness to source exit or
+    // revocation, excluding ICE, encoder setup and cleanup/join delay.
+    let elapsed_ms = started
+        .get()
+        .and_then(|began| finished.checked_duration_since(*began))
+        .map(|elapsed| elapsed.as_millis() as u64);
+    CaptureOutcome { end, elapsed_ms }
 }
 
 fn verified(state: &ScopedWssState) -> bool {
@@ -153,7 +206,8 @@ struct FrameHandoff {
     cancel: StopToken,
     stop: watch::Receiver<bool>,
     phase: watch::Receiver<ScopedWssState>,
-    deadline: std::time::Instant,
+    deadline: MonotonicInstant,
+    started: Arc<OnceLock<MonotonicInstant>>,
 }
 
 impl FrameHandoff {
@@ -164,6 +218,12 @@ impl FrameHandoff {
             && !*self.stop.borrow()
             && self.phase.has_changed().is_ok()
             && verified(&self.phase.borrow())
+    }
+
+    fn mark_started(&self) {
+        if self.started.get().is_none() && self.is_live() {
+            let _ = self.started.set(MonotonicInstant::now());
+        }
     }
 
     fn push(&self, frame: EncodedVideoFrame) -> Result<(), &'static str> {
@@ -219,7 +279,9 @@ mod tests {
             .is_err());
         phase.send_replace(path());
         stop.send_replace(true);
-        assert_eq!(capture.await, Ok(0));
+        let outcome = capture.await;
+        assert_eq!(outcome.end, Ok(CaptureEnd::LocalStop));
+        assert_eq!(outcome.elapsed_ms, None);
     }
 
     #[tokio::test]
@@ -229,10 +291,12 @@ mod tests {
         let (_phase, phase_rx) = watch::channel(path());
         assert_eq!(
             run_with_source(sender, stop_rx, phase_rx, CAPTURE_WINDOW, |handoff| {
+                handoff.mark_started();
                 handoff.push(frame(96 * 1024, 0))
             })
-            .await,
-            Ok(1)
+            .await
+            .end,
+            Ok(CaptureEnd::SourceEnded)
         );
 
         let (_media, sender) = ScopedVideoMedia::host();
@@ -242,7 +306,8 @@ mod tests {
             run_with_source(sender, stop_rx, phase_rx, CAPTURE_WINDOW, |handoff| {
                 handoff.push(frame(MAX_ANNEX_B_BYTES + 1, 0))
             })
-            .await,
+            .await
+            .end,
             Err(BAD_AU)
         );
     }
@@ -260,6 +325,7 @@ mod tests {
                 Duration::from_millis(120)
             };
             let capture = run_with_source(sender, stop_rx, phase_rx, window, |handoff| {
+                handoff.mark_started();
                 let _ = ready.send(());
                 // Never opens DXGI, and no actor drains the scoped sender.
                 while handoff.is_live() {
@@ -270,6 +336,7 @@ mod tests {
             let observer = async {
                 started.await.unwrap();
                 if explicit {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
                     stop.send_replace(true);
                 }
             };
@@ -278,7 +345,16 @@ mod tests {
             })
             .await
             .expect("cleanup must join the worker");
-            assert_eq!(outcome, Ok(0));
+            let expected = if explicit {
+                CaptureEnd::LocalStop
+            } else {
+                CaptureEnd::Limit
+            };
+            assert_eq!(outcome.end, Ok(expected));
+            let elapsed = outcome
+                .elapsed_ms
+                .expect("only source readiness starts the clock");
+            assert!((1..=window.as_millis() as u64).contains(&elapsed));
         }
     }
 
@@ -292,8 +368,9 @@ mod tests {
             run_with_source(sender, stop_rx, phase_rx, CAPTURE_WINDOW, |handoff| {
                 handoff.push(frame(5_000, 0))
             })
-            .await,
-            Ok(0)
+            .await
+            .end,
+            Ok(CaptureEnd::TransportEnded)
         );
     }
 
@@ -313,6 +390,6 @@ mod tests {
         )
         .await
         .expect("stopping must unblock and join the capture worker");
-        assert_eq!(result, Err(BACKPRESSURE));
+        assert_eq!(result.end, Err(BACKPRESSURE));
     }
 }

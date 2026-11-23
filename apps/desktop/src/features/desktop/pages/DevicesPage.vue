@@ -15,7 +15,10 @@ defineEmits<{ refresh: []; navigate: [page: PageId] }>();
     :loading="loading"
     @refresh="$emit('refresh')"
   />
-  <V2PeerPairing v-if="!loading && runtime?.v2_peer_pairing_enabled === true" />
+  <V2PeerPairing
+    v-if="!loading && runtime?.v2_peer_pairing_enabled === true"
+    :bundle-prefill="runtime.v2_peer_prefill"
+  />
   <PanelCard title="设备列表" icon="devices" label="尚未接入">
     <template #actions>
       <button disabled aria-describedby="device-unavailable">添加设备</button>

@@ -1,15 +1,18 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
+import type { PublicPeerPrefill } from '../../ipc/contracts';
 import PanelCard from './PanelCard.vue';
 
 const cardPattern = /^RH2-[0-9a-f]{64}$/;
 const fingerprintPattern = /^[0-9a-f]{64}$/;
 const prefillKey = 'remotehub.v2.peer-form-prefill.v1';
 type PublicPeerForm = { card: string; fingerprint: string };
+const props = defineProps<{ bundlePrefill?: PublicPeerPrefill }>();
 const saved = ref(readPrefill());
-const cardField = ref(saved.value?.card ?? '');
-const fingerprintField = ref(saved.value?.fingerprint ?? '');
+const initialPrefill = props.bundlePrefill ?? saved.value;
+const cardField = ref(initialPrefill?.card ?? '');
+const fingerprintField = ref(initialPrefill?.fingerprint ?? '');
 const consent = ref(false);
 const busy = ref<'read' | 'verify'>();
 const copying = ref(false);
@@ -37,6 +40,11 @@ const alreadySaved = computed(
   () =>
     saved.value?.card === card.value &&
     saved.value?.fingerprint === fingerprint.value,
+);
+const matchesBundle = computed(
+  () =>
+    props.bundlePrefill?.card === card.value &&
+    props.bundlePrefill?.fingerprint === fingerprint.value,
 );
 
 watch(
@@ -258,9 +266,11 @@ async function verify() {
       />
       <p class="card-description">
         {{
-          alreadySaved
-            ? '已填入本机保存的公开信息。这不代表已核验；若对方设备或指纹变了，请清除预填并重新核对。'
-            : '不要从配对卡推算指纹。请向对方另行核对完整 64 位十六进制指纹。'
+          matchesBundle
+            ? '已填入专用测试包提供的公开信息。请核对正确设备；预填不等于核验或授权。'
+            : alreadySaved
+              ? '已填入本机保存的公开信息。这不代表已核验；若对方设备或指纹变了，请清除预填并重新核对。'
+              : '不要从配对卡推算指纹。请向对方另行核对完整 64 位十六进制指纹。'
         }}
       </p>
       <p v-if="cardField && !cardPattern.test(card)">

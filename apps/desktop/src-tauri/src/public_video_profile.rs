@@ -318,7 +318,7 @@ fn parse_pairing_key(text: &str) -> Result<[u8; 16], &'static str> {
 }
 
 #[cfg(windows)]
-fn open_local_regular(path: &Path) -> Result<File, &'static str> {
+pub(crate) fn open_local_regular(path: &Path) -> Result<File, &'static str> {
     use std::{
         os::windows::fs::{MetadataExt, OpenOptionsExt},
         path::{Component, Prefix},

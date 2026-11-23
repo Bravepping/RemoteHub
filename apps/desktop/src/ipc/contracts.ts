@@ -14,11 +14,13 @@ export type DeviceIdentity = Readonly<
   | { status: 'ready'; device_id: string; fingerprint: string }
   | { status: 'unavailable'; error_code: IdentityErrorCode }
 >;
+export type PublicPeerPrefill = Readonly<{ card: string; fingerprint: string }>;
 export interface RuntimeInfo {
   identity?: DeviceIdentity;
   p3_enabled?: boolean;
   v2_loopback_diagnostic_enabled?: boolean;
   v2_peer_pairing_enabled?: boolean;
+  v2_peer_prefill?: PublicPeerPrefill;
   v2_verified_lan_enabled?: boolean;
   v2_private_wss_lan_enabled?: boolean;
   public_video_available?: boolean;
@@ -84,6 +86,7 @@ const flags = [
 ] as const;
 const keys = new Set([
   'identity',
+  'v2_peer_prefill',
   ...Object.keys(stringLimits),
   'remote_access_enabled',
   ...flags,
@@ -124,7 +127,34 @@ export function decodeRuntimeInfo(value: unknown): RuntimeInfo {
     ...(Object.hasOwn(record, 'identity')
       ? { identity: decodeIdentity(record.identity) }
       : {}),
+    ...(Object.hasOwn(record, 'v2_peer_prefill')
+      ? { v2_peer_prefill: decodePeerPrefill(record.v2_peer_prefill) }
+      : {}),
   }) as unknown as RuntimeInfo;
+}
+
+function decodePeerPrefill(value: unknown): PublicPeerPrefill {
+  const invalid = (): never => {
+    throw new DesktopIpcError('IPC_RESPONSE_INVALID');
+  };
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    ![Object.prototype, null].includes(Object.getPrototypeOf(value)) ||
+    Object.keys(value).sort().join(',') !== 'card,fingerprint'
+  )
+    return invalid();
+  const { card, fingerprint } = value as Record<string, unknown>;
+  if (
+    typeof card !== 'string' ||
+    card.length !== 68 ||
+    !/^RH2-[0-9a-f]{64}$/.test(card) ||
+    typeof fingerprint !== 'string' ||
+    fingerprint.length !== 64 ||
+    !/^[0-9a-f]{64}$/.test(fingerprint)
+  )
+    return invalid();
+  return Object.freeze({ card, fingerprint });
 }
 export function decodeIdentity(value: unknown): DeviceIdentity {
   const invalid = (): never => {

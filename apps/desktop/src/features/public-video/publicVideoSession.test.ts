@@ -197,7 +197,111 @@ describe('public video viewer controller', () => {
     expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
     expect(bridge.status).not.toHaveBeenCalled();
     expect(bridge.nextFrame).not.toHaveBeenCalled();
-    expect(update).toHaveBeenLastCalledWith('stopped', undefined);
+    expect(update).toHaveBeenLastCalledWith('stopped', undefined, {
+      reason: 'local_stop',
+    });
+  });
+
+  it.each(['capture_limit', 'capture_ended'] as const)(
+    'reports the native host ending %s and measured capture time',
+    async (reason) => {
+      const { bridge, session, update } = harness();
+      bridge.status
+        .mockResolvedValueOnce({ phase: 'ready' })
+        .mockResolvedValueOnce({
+          phase: 'closed',
+          error: null,
+          end_reason: reason,
+          elapsed_ms: 12_345,
+        });
+      session.start('host');
+      await vi.advanceTimersByTimeAsync(400);
+      expect(update).toHaveBeenLastCalledWith('stopped', undefined, {
+        reason,
+        captureMs: 12_345,
+      });
+      expect(bridge.status).toHaveBeenCalledTimes(2);
+      expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    },
+  );
+
+  it('reports peer departure and only local observed playback on the viewer', async () => {
+    const { bridge, renderer, session, update, draw } = harness();
+    bridge.status
+      .mockResolvedValueOnce({ phase: 'ready' })
+      .mockResolvedValueOnce({
+        phase: 'stopping',
+        end_reason: 'peer_left',
+        elapsed_ms: 98_765,
+      });
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(50);
+    draw();
+    await vi.advanceTimersByTimeAsync(350);
+    expect(renderer.stop).toHaveBeenCalledBefore(bridge.stop);
+    expect(update).toHaveBeenLastCalledWith(
+      'stopped',
+      undefined,
+      expect.objectContaining({ reason: 'peer_left', playbackMs: 313 }),
+    );
+    expect(update.mock.lastCall?.[2].captureMs).toBeUndefined();
+  });
+
+  it('excludes pre-paint and native cleanup waits from viewer playback, without extra polling on Stop', async () => {
+    const { bridge, renderer, session, update, draw } = harness();
+    const nativeStop = deferred<unknown>();
+    bridge.stop.mockReturnValueOnce(nativeStop.promise);
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(100);
+    draw();
+    await vi.advanceTimersByTimeAsync(125);
+    draw(); // Later paints must not replace the first.
+    const stopping = session.stop();
+    expect(renderer.stop).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(update).toHaveBeenLastCalledWith('stopping');
+    expect(bridge.status).toHaveBeenCalledExactlyOnceWith(first);
+    nativeStop.resolve(undefined);
+    await stopping;
+    expect(update).toHaveBeenLastCalledWith('stopped', undefined, {
+      reason: 'local_stop',
+      playbackMs: 125,
+    });
+  });
+
+  it.each([
+    { end_reason: null, elapsed_ms: null },
+    { end_reason: 'fixture secret', elapsed_ms: 'fixture secret' },
+    { end_reason: 'capture_limit', elapsed_ms: 2000 },
+  ])(
+    'does not imply viewer playback or a remote capture reason without local evidence',
+    async (end) => {
+      const { bridge, session, update } = harness();
+      bridge.status.mockResolvedValueOnce({ phase: 'closed', ...end });
+      session.start('viewer');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(update).toHaveBeenLastCalledWith('stopped', undefined);
+      expect(JSON.stringify(update.mock.calls)).not.toContain('fixture secret');
+    },
+  );
+
+  it('reports a native failed ending with a redacted error and ignores an invalid native duration', async () => {
+    const { bridge, session, update } = harness();
+    bridge.status.mockResolvedValueOnce({
+      phase: 'closed',
+      error: 'secret fixture',
+      end_reason: 'failed',
+      elapsed_ms: -2,
+    });
+    session.start('host');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(update).toHaveBeenLastCalledWith(
+      'failed',
+      'PUBLIC_VIDEO_STATUS_IPC_FAILED',
+      expect.objectContaining({ reason: 'failed' }),
+    );
+    expect(update.mock.lastCall?.[2].captureMs).toBeUndefined();
+    expect(JSON.stringify(update.mock.calls)).not.toContain('secret fixture');
   });
 
   it('does not call native start if stopped before dispatch', async () => {
