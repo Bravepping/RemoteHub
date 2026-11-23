@@ -75,6 +75,8 @@ def parser():
         ("tls-key", "Absolute server-side TLS private-key PEM path (never read or copied)."),
     ):
         p.add_argument("--" + option, required=True, help=help_text)
+    p.add_argument("--turn-config", help="Existing local coturn configuration. "
+                   "Read the REST secret locally without echo; do not change the file.")
     p.add_argument("--ca-sha256", help="Require an independently verified lowercase SHA-256 of the CA's DER.")
     p.add_argument("--ttl", type=int, default=300, help="Lifetime in seconds (180–600; default 300).")
     p.add_argument("--self-test", action="store_true", help="Run standalone synthetic tests; use by itself.")
@@ -218,6 +220,64 @@ def read_turn_secret():
     if not re.fullmatch(r"[A-Za-z0-9+/_=\-]{32,128}", text):
         raise Invalid("TURN shared secret does not match the server issuer's format.")
     return bytearray(text, "ascii")
+
+
+def read_turn_config(args):
+    """Read and verify one existing local coturn config without printing values."""
+    safe_error = "Cannot use the current private coturn configuration; verify file permissions and settings."
+    try:
+        with os.fdopen(os.open(args.turn_config, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK), "rb") as stream:
+            info = os.fstat(stream.fileno())
+            if (not stat.S_ISREG(info.st_mode)
+                    or info.st_uid not in (0, os.geteuid())
+                    or info.st_mode & 0o027):
+                raise Invalid(safe_error)
+            raw = bytearray(stream.read(64 * 1024 + 1))
+    except OSError:
+        raise Invalid(safe_error) from None
+    public_ip, turn_port = args.turn.split(":")
+    local_ip = args.bind.split(":")[0]
+    expected = {
+        b"listening-ip": local_ip.encode("ascii"),
+        b"relay-ip": local_ip.encode("ascii"),
+        b"external-ip": (public_ip + "/" + local_ip if public_ip != local_ip else public_ip).encode("ascii"),
+        b"listening-port": turn_port.encode("ascii"),
+        b"min-port": str(args.relay_ports[0]).encode("ascii"),
+        b"max-port": str(args.relay_ports[1]).encode("ascii"),
+    }
+    found = {}
+    auth = 0
+    seen_secret = False
+    try:
+        if len(raw) > 64 * 1024:
+            raise Invalid(safe_error)
+        for line in raw.splitlines():
+            line = line.strip()
+            if not line or line.startswith(b"#"):
+                continue
+            if line == b"use-auth-secret":
+                auth += 1
+            key, separator, value = line.partition(b"=")
+            key = bytes(key.strip())
+            if separator and key in (b"no-auth", b"use-auth-secret"):
+                raise Invalid(safe_error)
+            if key == b"no-auth":
+                raise Invalid(safe_error)
+            if separator and key == b"static-auth-secret":
+                if seen_secret:
+                    raise Invalid(safe_error)
+                seen_secret = True
+                found[key] = value.strip()
+            elif separator and key in expected:
+                if key in found:
+                    raise Invalid(safe_error)
+                found[key] = value.strip()
+        master = found.pop(b"static-auth-secret", b"")
+        if auth != 1 or found != expected or not re.fullmatch(rb"[A-Za-z0-9+/_=-]{32,128}", master):
+            raise Invalid(safe_error)
+        return bytearray(master)
+    finally:
+        raw[:] = b"\0" * len(raw)
 
 
 def random_bytes(length, preceding=()):
@@ -383,7 +443,7 @@ def main(argv):
         move = rename_noreplace()
         parent, name = open_output_parent(args.out_dir)
         try:
-            secret = read_turn_secret()
+            secret = read_turn_config(args) if args.turn_config else read_turn_secret()
             try:
                 files, expires = make_kit(args, secret, int(time.time()))
             finally:
@@ -539,6 +599,29 @@ def self_test():
                 self.ca.write_bytes(malformed)
                 with self.assertRaises(Invalid):
                     read_ca(self.ca)
+
+        def test_read_private_turn_config_without_exposing_secret(self):
+            from types import SimpleNamespace
+            p = self.ca.parent / "turnserver.conf"
+            settings = (b"listening-ip=10.1.2.3\nrelay-ip=10.1.2.3\n"
+                        b"external-ip=93.184.216.34/10.1.2.3\nlistening-port=3478\n"
+                        b"min-port=49160\nmax-port=49259\nuse-auth-secret\n")
+            secret = b"z" * 40
+            good = settings + b"static-auth-secret=" + secret + b"\n"
+            p.write_bytes(good)
+            p.chmod(0o640)
+            args = SimpleNamespace(turn="93.184.216.34:3478", bind="10.1.2.3:8443",
+                                   relay_ports=[49160, 49259], turn_config=p)
+            self.assertEqual(read_turn_config(args), secret)
+            for bad in (good + b"no-auth\n", good + b"static-auth-secret=duplicate\n",
+                        good.replace(b"49259", b"49260")):
+                p.write_bytes(bad)
+                with self.assertRaises(Invalid):
+                    read_turn_config(args)
+            p.write_bytes(good)
+            p.chmod(0o644)
+            with self.assertRaises(Invalid):
+                read_turn_config(args)
 
         def test_getpass_fallback_fails_without_echoed_input(self):
             with patch.object(getpass, "getpass", wraps=getpass.fallback_getpass), self.assertRaises(Invalid):
