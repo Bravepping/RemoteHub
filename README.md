@@ -13,7 +13,7 @@
 | 原生授权、停止和临时配对码 | 已有产品 `p3-lan` 代码与历史人工操作确认 |
 | 会话结束错误 | **P3-END-01 已通过 Windows 双机局域网回归**（精简分支构建 `77479f2`）：先撤销输入、通知原生停止，再关闭浏览器 DataChannel；正常结束提前发已认证的收尾信号，活动期通道故障仍报错。历史后两轮曾报 `CONTROL_CHANNEL_ERROR` |
 | 设备身份 | 可选桌面构建支持核对对端完整指纹并原生确认；单个记录保存在本机内存。可显式用于已验证设备 LAN 视频，不授予键鼠权限 |
-| 私网 WSS 信令（仅视频） | 桌面可选模式，双方设备证明及停止仍走直接 TCP；签名 offer/answer 由私网 WSS 中继转发，视频仍走指定对端的 LAN WebRTC。两台 Windows 实机已确认画面和关闭中继后无法新连；手动停止待单独确认 |
+| 私网 WSS 信令（仅视频） | 桌面可选模式，双方设备证明及停止仍走直接 TCP；签名 offer/answer 由私网 WSS 中继转发，视频仍走指定对端的 LAN WebRTC。两台 Windows 实机已确认画面、共享端手动停止后两端结束，以及关闭中继后无法建立新连接 |
 | 已验证设备 LAN（仅视频） | 可选模式，原生明确同意后，用临时配对码及双方设备签名核验；身份或信令不符直接结束，不回退。Windows 双机画面、共享端手动停止、自然结束及未核验拒绝通过（`c8122d2`） |
 | Axum WebSocket 信令 | Rust 原生客户端与 Axum 已在回环打通。两个真实 WebRTC PeerConnection 通过带会话鉴权的 offer/answer/ICE 建立 DataChannel 并传输合成文本；桌面可选构建增加原生授权后的本机信令诊断；实际远控仍使用既有 LAN TCP |
 | STUN/ICE + TURN | 历史研究/实验曾通过，V2 正式产品路径尚未集成；**R06 仍 OPEN** |
@@ -63,7 +63,7 @@ WebSocket 本地信令独立程序采用 `REMOTEHUB_V2_TOKEN`（临时随机 64 
 
 原生库的回环 WSS 使用独立配发的 CA 验证服务端证书链与 IP SAN，不修改系统信任，握手失败不回退到明文。回环测试另用两枚临时 Ed25519 身份签名，通过预先信任的完整公钥校验房间、会话、角色、一次性挑战、有效期及信令内容，再使用 SDP/ICE 建立 DataChannel。两端在 WSS 上交换一次性挑战，再验证签名；联测分别通过公开配对卡和独立提供的完整指纹绑定双方公钥。任一端发起挑战后，必须收到双方挑战才允许发 offer；旧诊断路径保留原有行为。原生 `v2-verified-signaling` 模式在本机 WSS 上只接受各一次携带完整候选的签名 offer/answer，不允许额外 trickle ICE 或明文回退。使用错误的对端公钥时，在 SDP 交给 WebRTC 前关闭连接。回环测试不代表跨机产品已验收。默认桌面远控继续使用 LAN TCP，桌面本机诊断仍只使用回环 WS；未部署云端。
 
-Axum 中继的显式 `REMOTEHUB_V2_MODE=private-lan` 模式只接受指定的 RFC1918 IPv4 和非零端口（`REMOTEHUB_V2_BIND`），强制配置 `REMOTEHUB_V2_TLS_CERT` 与 `REMOTEHUB_V2_TLS_KEY`。两个角色必须配置不同的实际 TCP 来源地址（`REMOTEHUB_V2_LAN_HOST_IP` / `REMOTEHUB_V2_LAN_VIEWER_IP`）和不同的随机令牌（`REMOTEHUB_V2_LAN_HOST_TOKEN` / `REMOTEHUB_V2_LAN_VIEWER_TOKEN`，各 64 位小写十六进制）。来源从套接字读取，不信任转发头；角色从来源及对应令牌限制，令牌不能代替设备签名。私网模式在双方各发一次挑战之前不转发 offer。原生客户端固定来源和目的 IPv4，校验预置信任 CA 和目标 IP SAN，不解析域名、不跟随重定向、不降级明文，也不修改系统信任。中继可与一台测试设备同机，但两角色来源仍须不同。仍未启动真实私网／公网服务，下面的桌面模式仅做本地验证。
+Axum 中继的显式 `REMOTEHUB_V2_MODE=private-lan` 模式只接受指定的 RFC1918 IPv4 和非零端口（`REMOTEHUB_V2_BIND`），强制配置 `REMOTEHUB_V2_TLS_CERT` 与 `REMOTEHUB_V2_TLS_KEY`。两个角色必须配置不同的实际 TCP 来源地址（`REMOTEHUB_V2_LAN_HOST_IP` / `REMOTEHUB_V2_LAN_VIEWER_IP`）和不同的随机令牌（`REMOTEHUB_V2_LAN_HOST_TOKEN` / `REMOTEHUB_V2_LAN_VIEWER_TOKEN`，各 64 位小写十六进制）。来源从套接字读取，不信任转发头；角色从来源及对应令牌限制，令牌不能代替设备签名。私网模式在双方各发一次挑战之前不转发 offer。原生客户端固定来源和目的 IPv4，校验预置信任 CA 和目标 IP SAN，不解析域名、不跟随重定向、不降级明文，也不修改系统信任。中继可与一台测试设备同机，但两角色来源仍须不同。私网模式已在同一局域网的两台 Windows 电脑上验证；未验证公网服务。
 
 启用 `v2-peer-pairing,custom-protocol` 构建后，可在「设备」页读取并复制本机配对卡与完整 SHA-256 指纹。把公钥卡交给另一台机，并通过另一条可信渠道核对完整指纹；两边都可分别验证。短设备 ID 不能用于确认；拒绝自配对、错误指纹与不合规公钥。原生确认默认为「否」，新确认成功才替换本应用内存的上一个对端，退出即清除。此步骤不需要服务器、不发网络请求、不连接设备，也不授予观看或输入权限。
 
@@ -71,7 +71,7 @@ Axum 中继的显式 `REMOTEHUB_V2_MODE=private-lan` 模式只接受指定的 RF
 
 启用 `v2-private-wss-lan,custom-protocol` 后，桌面允许手动选择「私网 WSS 信令（仅视频）」。仍需完整指纹核验、当前临时配对码、原生批准以及明确的两台电脑 LAN IPv4。两个桌面进程各自通过本机环境提供 `REMOTEHUB_V2_DESKTOP_RELAY`（同一字面私网 IPv4:端口）、`REMOTEHUB_V2_DESKTOP_CA_DER_HEX`（独立可信渠道提供的 CA DER 小写十六进制）、`REMOTEHUB_V2_DESKTOP_TOKEN`（仅该电脑角色的临时令牌）。地址或证书格式不正确时拒绝会话；令牌和证书不经过 WebView IPC。窗口的原生确认显示选定的中继地址。此配置不改系统信任或防火墙。
 
-TCP 的双方身份验证同时绑定所选中继地址。每个 WSS 房间和信令密钥从该次新鲜握手独立派生。WSS 仅用于经过设备签名的 offer/answer；中继可见信令，不能改写并通过设备签名。观看端验签并确认候选后，用现有 TCP 反馈并进入原停止/心跳流程。WSS 模式不发送鼠标/键盘事件，不接受未核验设备或模式混用，不回退；Windows 私网双机已确认正常画面及关中继后无法建立新连接，见下方实测记录。
+TCP 的双方身份验证同时绑定所选中继地址。每个 WSS 房间和信令密钥从该次新鲜握手独立派生。WSS 仅用于经过设备签名的 offer/answer；中继可见信令，不能改写并通过设备签名。观看端验签并确认候选后，用现有 TCP 反馈并进入原停止/心跳流程。WSS 模式不发送鼠标/键盘事件，不接受未核验设备或模式混用，不回退；Windows 私网双机已确认正常画面、共享端手动停止后两端结束，以及关闭中继后无法建立新连接，见下方实测记录。
 
 ## 私网 WSS 双机测试准备（操作前先确认）
 
@@ -138,7 +138,7 @@ function Import-RemoteHubWssProfile([string]$path, [switch]$Relay) {
 - Linux：`cargo test -p hub-webrtc --features v2-verified-lan --locked` 26 项通过、1 项忽略；含 4 项内存双端测试，拒绝错指纹、错端口、错临时码、旧协议和签名篡改/重放。
 - Linux：`cargo test -p hub-rendezvous-probe --bin v2_lan_test_setup --locked` 3 项通过，覆盖角色配置分离、绝不覆盖既有输出、签发的证书精确 IP 校验和有效期；只生成测试夹具。Windows x64 目标的权限检查源码通过编译和 Clippy，尚未在 Windows 真机运行生成器或权限测试。
 - Windows x64 MSVC 目标：桌面常规 `p3-lan`、可选 `v2-loopback-diagnostic` 、`v2-verified-lan` 和 `v2-private-wss-lan` 交叉检查、诊断、配对及已验证设备 LAN 构建严格 Clippy、WebRTC 目标测试代码检查通过；未在 Windows 真机运行诊断版。交叉检查本身不是真机证据。
-- Windows 实机（用户报告，2026-11-23；`e51491c` 测试包）：两台 Windows 在同一局域网选择「私网 WSS 信令（仅视频）」。中继运行时观看端有画面；关闭中继后无法建立新连接。该报告未单独确认共享端手动停止、两端回收或既有会话在中继中断后的行为，不覆盖公网、TURN 或键鼠。
+- Windows 实机（用户报告，2026-11-23；`e51491c` 测试包）：两台 Windows 在同一局域网选择「私网 WSS 信令（仅视频）」。中继运行时观看端有画面；共享端点「停止并回收」后，两端均正常结束；关闭中继后无法建立新连接。未验证中继中断对已建立会话的影响，不覆盖公网、TURN 或键鼠。
 - Windows 实机（用户报告，2026-11-22；`c8122d2` 测试包）：两台电脑在同一局域网互相核验对端配对卡和完整指纹后，观看端画面正常；共享端点「停止并回收」后，观看端也结束。补测通过：不手动停止时，两端在会话时限后结束；一端未核验当前对端时拒绝会话、无画面且未退回普通模式。未覆盖双机错误公钥/篡改、键鼠、公网与 TURN。
 - Windows 实机（用户报告，2026-11-22）：两台电脑在同一局域网使用同一份 `77479f2` Windows x64 包，按约定回归场景测试均正常（画面、自然结束及英文键入后手动停止）。这不覆盖公网、TURN、安装器或 R06 的全量可靠性验证。
 
