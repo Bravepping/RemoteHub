@@ -216,7 +216,10 @@ describe('public video viewer controller', () => {
     await vi.advanceTimersByTimeAsync(500);
     expect(renderer.stop).toHaveBeenCalledTimes(1);
     expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
-    expect(update).toHaveBeenLastCalledWith('failed', 'PUBLIC_VIDEO_OP_FAILED');
+    expect(update).toHaveBeenLastCalledWith(
+      'failed',
+      'PUBLIC_VIDEO_STATUS_IPC_FAILED',
+    );
     expect(JSON.stringify(update.mock.calls)).not.toContain('secret fixture');
   });
 
@@ -237,6 +240,62 @@ describe('public video viewer controller', () => {
       'PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE',
     );
   });
+
+  it.each([
+    'PUBLIC_VIDEO_H264_BOOTSTRAP',
+    'PUBLIC_VIDEO_H264_CLOSED',
+    'PUBLIC_VIDEO_H264_LIMIT',
+    'PUBLIC_VIDEO_H264_MALFORMED',
+    'PUBLIC_VIDEO_ICE_BOUNDARY_CLOSED',
+    'PUBLIC_VIDEO_ICE_BOUNDARY_PEER',
+    'PUBLIC_VIDEO_ICE_BOUNDARY_SETUP',
+    'PUBLIC_VIDEO_ICE_CONFIG_MISMATCH',
+    'PUBLIC_VIDEO_ICE_DRIVER',
+    'PUBLIC_VIDEO_ICE_DRIVER_TIMEOUT',
+    'PUBLIC_VIDEO_ICE_GRANT_MISMATCH',
+    'PUBLIC_VIDEO_MEDIA_CLOSED',
+    'PUBLIC_VIDEO_RTP_GAP',
+    'PUBLIC_VIDEO_RTP_INVALID',
+    'PUBLIC_VIDEO_RTP_SOURCE',
+    'PUBLIC_VIDEO_RTP_TIMESTAMP',
+  ])(
+    'reports the fixed frame-IPC diagnostic %s only after clearing and stopping',
+    async (code) => {
+      const { bridge, renderer, ingress, update, session } = harness();
+      const nativeStop = deferred<unknown>();
+      bridge.nextFrame.mockRejectedValueOnce(code);
+      bridge.stop.mockReturnValueOnce(nativeStop.promise);
+      session.start('viewer');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ingress).not.toHaveBeenCalled();
+      expect(renderer.stop).toHaveBeenCalledTimes(1);
+      expect(renderer.stop).toHaveBeenCalledBefore(bridge.stop);
+      expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+      expect(update).toHaveBeenLastCalledWith('stopping');
+      nativeStop.resolve(undefined);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(update).toHaveBeenLastCalledWith('failed', code);
+    },
+  );
+
+  it.each([
+    ['status', 'PUBLIC_VIDEO_STATUS_IPC_FAILED'],
+    ['nextFrame', 'PUBLIC_VIDEO_FRAME_IPC_FAILED'],
+  ] as const)(
+    'scopes and redacts unknown %s IPC failures',
+    async (method, code) => {
+      const { bridge, ingress, update, session } = harness();
+      bridge[method].mockRejectedValueOnce(
+        'PUBLIC_VIDEO_H264_MALFORMED leaked-fixture',
+      );
+      session.start('viewer');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(ingress).not.toHaveBeenCalled();
+      expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+      expect(update).toHaveBeenLastCalledWith('failed', code);
+      expect(JSON.stringify(update.mock.calls)).not.toContain('leaked-fixture');
+    },
+  );
 
   it.each([
     ['PUBLIC_VIDEO_BUSY', 'PUBLIC_VIDEO_BUSY'],
@@ -265,6 +324,20 @@ describe('public video viewer controller', () => {
     expect(update).toHaveBeenLastCalledWith(
       'failed',
       'PUBLIC_VIDEO_RESPONSE_INVALID',
+    );
+  });
+
+  it('separates an unexpected renderer rejection from frame IPC failure', async () => {
+    const { bridge, renderer, ingress, session, update } = harness();
+    bridge.nextFrame.mockResolvedValueOnce(raw());
+    ingress.mockReturnValueOnce(false);
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(renderer.stop).toHaveBeenCalledTimes(1);
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    expect(update).toHaveBeenLastCalledWith(
+      'failed',
+      'PUBLIC_VIDEO_DISPLAY_FAILED',
     );
   });
 

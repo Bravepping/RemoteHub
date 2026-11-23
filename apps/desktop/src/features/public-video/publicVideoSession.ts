@@ -36,9 +36,21 @@ const NATIVE_DIAGNOSTICS = [
   'PUBLIC_VIDEO_CAPTURE_WORKER_FAILED',
   'PUBLIC_VIDEO_CLOSED_UNEXPECTEDLY',
   'PUBLIC_VIDEO_FRAME_SIZE',
+  'PUBLIC_VIDEO_H264_BOOTSTRAP',
+  'PUBLIC_VIDEO_H264_CLOSED',
+  'PUBLIC_VIDEO_H264_LIMIT',
+  'PUBLIC_VIDEO_H264_MALFORMED',
+  'PUBLIC_VIDEO_ICE_BOUNDARY_CLOSED',
+  'PUBLIC_VIDEO_ICE_BOUNDARY_PEER',
+  'PUBLIC_VIDEO_ICE_BOUNDARY_SETUP',
+  'PUBLIC_VIDEO_ICE_CONFIG_MISMATCH',
+  'PUBLIC_VIDEO_ICE_DRIVER',
+  'PUBLIC_VIDEO_ICE_DRIVER_TIMEOUT',
+  'PUBLIC_VIDEO_ICE_GRANT_MISMATCH',
   'PUBLIC_VIDEO_ICE_PAIR_REJECTED',
   'PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE',
   'PUBLIC_VIDEO_MEDIA_BACKPRESSURE',
+  'PUBLIC_VIDEO_MEDIA_CLOSED',
   'PUBLIC_VIDEO_MEDIA_INVALID_AU',
   'PUBLIC_VIDEO_PEER_MISMATCH',
   'PUBLIC_VIDEO_PROFILE_CA_PIN',
@@ -48,6 +60,10 @@ const NATIVE_DIAGNOSTICS = [
   'PUBLIC_VIDEO_PROFILE_UNAVAILABLE',
   'PUBLIC_VIDEO_PULL_BUSY',
   'PUBLIC_VIDEO_ROLE_OR_ROUTE',
+  'PUBLIC_VIDEO_RTP_GAP',
+  'PUBLIC_VIDEO_RTP_INVALID',
+  'PUBLIC_VIDEO_RTP_SOURCE',
+  'PUBLIC_VIDEO_RTP_TIMESTAMP',
   'PUBLIC_VIDEO_RTP_UNAVAILABLE',
   'PUBLIC_VIDEO_VERIFY_PEER_FIRST',
   'PUBLIC_VIDEO_WSS_ADMISSION',
@@ -62,6 +78,9 @@ type NativeDiagnostic = (typeof NATIVE_DIAGNOSTICS)[number];
 const nativeDiagnostics: ReadonlySet<string> = new Set(NATIVE_DIAGNOSTICS);
 type PublicVideoError =
   | 'PUBLIC_VIDEO_OP_FAILED'
+  | 'PUBLIC_VIDEO_STATUS_IPC_FAILED'
+  | 'PUBLIC_VIDEO_FRAME_IPC_FAILED'
+  | 'PUBLIC_VIDEO_DISPLAY_FAILED'
   | 'PUBLIC_VIDEO_RESPONSE_INVALID'
   | 'PUBLIC_VIDEO_IPC_TIMEOUT'
   | NativeDiagnostic
@@ -151,7 +170,9 @@ function phase(value: unknown): NativePhase {
   return parsed.phase;
 }
 
-function errorCode(cause: unknown): PublicVideoError {
+type DiagnosticPhase = 'start' | 'status' | 'frame' | 'display';
+
+function errorCode(cause: unknown, phase: DiagnosticPhase): PublicVideoError {
   if (cause instanceof InvalidResponse) return 'PUBLIC_VIDEO_RESPONSE_INVALID';
   if (cause instanceof IpcTimeout) return 'PUBLIC_VIDEO_IPC_TIMEOUT';
   // Native Result<_, String> rejections and the typed status wrapper use
@@ -160,6 +181,9 @@ function errorCode(cause: unknown): PublicVideoError {
   if (typeof native === 'string' && nativeDiagnostics.has(native))
     return native as NativeDiagnostic;
   // Never put raw native IPC failures, profile values, or transport data in UI.
+  if (phase === 'status') return 'PUBLIC_VIDEO_STATUS_IPC_FAILED';
+  if (phase === 'frame') return 'PUBLIC_VIDEO_FRAME_IPC_FAILED';
+  if (phase === 'display') return 'PUBLIC_VIDEO_DISPLAY_FAILED';
   return 'PUBLIC_VIDEO_OP_FAILED';
 }
 
@@ -226,12 +250,14 @@ export class PublicVideoSession {
   }
 
   private async work(run: Run): Promise<void> {
+    let diagnosticPhase: DiagnosticPhase = 'start';
     try {
       const generation = await withDeadline(run.generation);
       let statusAt = -Infinity;
       let ready = false;
       while (this.active(run)) {
         if (performance.now() - statusAt >= STATUS_INTERVAL_MS) {
+          diagnosticPhase = 'status';
           const current = phase(
             await withDeadline(this.bridge.status(generation)),
           );
@@ -247,6 +273,7 @@ export class PublicVideoSession {
             if (run.role === 'host') {
               this.update('sharing');
             } else {
+              diagnosticPhase = 'display';
               run.renderer = this.createRenderer(
                 (code) => {
                   if (this.active(run)) void this.retire(run, 'failed', code);
@@ -268,6 +295,7 @@ export class PublicVideoSession {
         }
         // A previous generation's IPC may settle after its stop acknowledgement.
         // Keep a global one-pull bound without delivering that old response.
+        diagnosticPhase = 'frame';
         if (this.outstandingFrame) {
           await withDeadline(
             this.outstandingFrame.then(
@@ -288,10 +316,14 @@ export class PublicVideoSession {
         if (!this.active(run)) return;
         const frame = parsePublicVideoFrame(bytes);
         if (!frame) await this.delay(run, EMPTY_FRAME_DELAY_MS);
-        else if (!run.ingress(frame)) throw new Error('Decoder rejected frame');
+        else {
+          diagnosticPhase = 'display';
+          if (!run.ingress(frame)) throw new Error('Decoder rejected frame');
+        }
       }
     } catch (cause) {
-      if (this.active(run)) await this.retire(run, 'failed', errorCode(cause));
+      if (this.active(run))
+        await this.retire(run, 'failed', errorCode(cause, diagnosticPhase));
     }
   }
 
