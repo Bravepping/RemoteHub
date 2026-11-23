@@ -1,11 +1,13 @@
 //! Loopback TLS fixture for the public-video proof protocol. It does not
-//! connect to the public address carried in the proof, confer consent, parse
-//! media SDP, or grant use of any ICE route.
+//! connect to the public address carried in the proof, confer consent, or
+//! open an ICE or media connection.
 
 use crate::{
     authenticated_relay::{AuthenticatedLoopbackRelay, AuthenticatedRelayEvent, ClientError},
+    direct_policy::{self, Candidate, Kind, PathSummary, VerifiedCandidates},
     lan_wire::Key,
     public_video::{PublicVideoProof, PublicVideoScope},
+    public_video_ice,
 };
 use hub_identity::{
     pairing::VerifiedPeer,
@@ -14,12 +16,13 @@ use hub_identity::{
 };
 use serde::{Deserialize, Serialize};
 use std::{
-    net::SocketAddr,
+    net::{SocketAddr, SocketAddrV4},
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::time::{timeout_at, Instant};
 use uuid::Uuid;
+use webrtc::peer_connection::{RTCIceCandidate, RTCIceCandidateType, RTCIceProtocol};
 
 pub use crate::authenticated_relay::{LoopbackTlsTrust, RelayToken, Role, SignalKind};
 
@@ -31,6 +34,7 @@ const PROTOCOL: &str = "PUBLIC_VIDEO_WSS_PROTOCOL";
 const ENDPOINT: &str = "PUBLIC_VIDEO_WSS_LOOPBACK_REQUIRED";
 const CLOSED: &str = "PUBLIC_VIDEO_WSS_CLOSED";
 const TIMEOUT: &str = "PUBLIC_VIDEO_WSS_TIMEOUT";
+const PAIR_REJECTED: &str = "PUBLIC_VIDEO_ICE_PAIR_REJECTED";
 const TRANSPORT: &str = "PUBLIC_VIDEO_WSS_TRANSPORT";
 
 /// TLS and relay data are for an actual loopback fixture. The independently
@@ -67,7 +71,7 @@ pub struct PendingPublicVideoWss<'a> {
 }
 
 /// Calling code only receives the exact bytes that passed the public-video
-/// device proof. This is not media/route validation or authorization.
+/// device proof and the video-only ICE policy. This is not media consent.
 pub enum PublicVideoWssEvent {
     Signal {
         kind: SignalKind,
@@ -82,7 +86,10 @@ pub struct PublicVideoWss<'a> {
     proof: PublicVideoProof<'a>,
     role: Role,
     peer_challenge: Option<SessionChallenge>,
-    received: bool,
+    room: Uuid,
+    scope: PublicVideoScope,
+    local_candidates: Option<VerifiedCandidates>,
+    remote_candidates: Option<VerifiedCandidates>,
     deadline: Instant,
     scope_expires_at: u64,
     scope_deadline: Instant,
@@ -151,6 +158,7 @@ impl<'a> PublicVideoWss<'a> {
         if Instant::now() >= self.deadline {
             return Err(TIMEOUT);
         }
+        let values = public_video_ice::validate(&sdp, self.scope, kind == SignalKind::Answer, now)?;
         let signature = self.proof.seal(challenge, &sdp, now)?;
         let data = serde_json::to_string(&SignedSdp {
             payload: sdp,
@@ -162,6 +170,10 @@ impl<'a> PublicVideoWss<'a> {
             .map_err(|_| TIMEOUT)?
             .map_err(relay_error)?;
         self.check_scope()?;
+        self.local_candidates = Some(VerifiedCandidates {
+            values,
+            scope: self.room,
+        });
         self.relay = Some(relay);
         Ok(())
     }
@@ -175,7 +187,7 @@ impl<'a> PublicVideoWss<'a> {
         let mut relay = self.relay.take().ok_or(CLOSED)?;
         let scope_remaining = self.scope_expires_at - self.check_scope()?;
         let now = Instant::now();
-        let incomplete = !self.received || self.peer_challenge.is_some();
+        let incomplete = self.remote_candidates.is_none() || self.local_candidates.is_none();
         if now >= self.scope_deadline || (incomplete && now >= self.deadline) {
             return Err(TIMEOUT);
         }
@@ -190,7 +202,7 @@ impl<'a> PublicVideoWss<'a> {
         let event = match incoming {
             Ok(AuthenticatedRelayEvent::PeerLeft) => return Ok(PublicVideoWssEvent::PeerLeft),
             Ok(AuthenticatedRelayEvent::Signal { kind, data })
-                if !self.received && kind == sdp_kind(self.role.peer()) =>
+                if self.remote_candidates.is_none() && kind == sdp_kind(self.role.peer()) =>
             {
                 if Instant::now() >= self.deadline {
                     return Err(TIMEOUT);
@@ -198,8 +210,17 @@ impl<'a> PublicVideoWss<'a> {
                 let signed: SignedSdp = serde_json::from_str(&data).map_err(|_| PROTOCOL)?;
                 let signature = signed.signature.try_into().map_err(|_| PROTOCOL)?;
                 self.proof.open(&signed.payload, &signature, received_at)?;
+                let values = public_video_ice::validate(
+                    &signed.payload,
+                    self.scope,
+                    kind == SignalKind::Answer,
+                    received_at,
+                )?;
                 self.check_scope()?;
-                self.received = true;
+                self.remote_candidates = Some(VerifiedCandidates {
+                    values,
+                    scope: self.room,
+                });
                 PublicVideoWssEvent::Signal {
                     kind,
                     data: signed.payload,
@@ -214,6 +235,29 @@ impl<'a> PublicVideoWss<'a> {
         };
         self.relay = Some(relay);
         Ok(event)
+    }
+
+    /// Accept only the exact component-1 UDP pair selected by the ICE transport.
+    /// A future media caller must read the live pair before use and again after
+    /// a path change. No cached approval survives an error or session closure.
+    pub fn check_selected_pair(
+        &mut self,
+        actual_local: &RTCIceCandidate,
+        actual_remote: &RTCIceCandidate,
+    ) -> Result<PathSummary, &'static str> {
+        let relay = self.relay.take().ok_or(CLOSED)?;
+        self.check_scope()?;
+        let local = self.local_candidates.as_ref().ok_or(PAIR_REJECTED)?;
+        let remote = self.remote_candidates.as_ref().ok_or(PAIR_REJECTED)?;
+        let path = direct_policy::selected(
+            to_candidate(actual_local)?,
+            to_candidate(actual_remote)?,
+            local,
+            remote,
+        )
+        .map_err(|_| PAIR_REJECTED)?;
+        self.relay = Some(relay);
+        Ok(path)
     }
 
     fn check_scope(&self) -> Result<u64, &'static str> {
@@ -326,7 +370,10 @@ impl<'a> PendingPublicVideoWss<'a> {
             proof,
             role: ctx.role,
             peer_challenge: Some(peer_challenge),
-            received: false,
+            room: ctx.room,
+            scope: ctx.scope,
+            local_candidates: None,
+            remote_candidates: None,
             deadline,
             scope_expires_at: ctx.scope.expires_at,
             scope_deadline,
@@ -343,6 +390,23 @@ impl<'a> PendingPublicVideoWss<'a> {
 struct SignedSdp {
     payload: String,
     signature: Vec<u8>,
+}
+
+fn to_candidate(actual: &RTCIceCandidate) -> Result<Candidate, &'static str> {
+    if actual.protocol != RTCIceProtocol::Udp || actual.component != 1 {
+        return Err(PAIR_REJECTED);
+    }
+    let ip = actual.address.parse().map_err(|_| PAIR_REJECTED)?;
+    let kind = match actual.typ {
+        RTCIceCandidateType::Host => Kind::Host,
+        RTCIceCandidateType::Srflx => Kind::Srflx,
+        RTCIceCandidateType::Relay => Kind::Relay,
+        _ => return Err(PAIR_REJECTED),
+    };
+    Ok(Candidate {
+        address: SocketAddrV4::new(ip, actual.port),
+        kind,
+    })
 }
 
 fn parse_challenge(data: &str, now: u64) -> Result<SessionChallenge, &'static str> {

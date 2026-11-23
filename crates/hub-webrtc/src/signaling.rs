@@ -29,6 +29,8 @@ pub fn validate_control_description(
 }
 enum DescriptionScope {
     Existing(crate::scope::NetworkScope),
+    #[cfg(feature = "v2-public-video-wss")]
+    PublicVideo(crate::public_video::PublicVideoScope),
     #[cfg(feature = "p006-direct-probe")]
     Direct(std::sync::Arc<crate::direct_policy::DirectGrant>, bool),
     #[cfg(feature = "p006-turn-probe")]
@@ -38,6 +40,8 @@ impl DescriptionScope {
     fn requires_fingerprint(&self) -> bool {
         match self {
             Self::Existing(scope) => scope.is_lan(),
+            #[cfg(feature = "v2-public-video-wss")]
+            Self::PublicVideo(_) => true,
             #[cfg(feature = "p006-direct-probe")]
             Self::Direct(..) => true,
             #[cfg(feature = "p006-turn-probe")]
@@ -47,6 +51,8 @@ impl DescriptionScope {
     fn permits_peer(&self, ip: IpAddr) -> bool {
         match self {
             Self::Existing(scope) => scope.permits_peer(ip),
+            #[cfg(feature = "v2-public-video-wss")]
+            Self::PublicVideo(_) => false, // Only a neutral c= placeholder is allowed.
             #[cfg(feature = "p006-direct-probe")]
             Self::Direct(grant, local) => match ip {
                 IpAddr::V4(ip) => grant.permits_address(ip, *local),
@@ -59,6 +65,10 @@ impl DescriptionScope {
     fn candidate(&self, ip: IpAddr, port: u16, kind: &str) -> bool {
         match self {
             Self::Existing(scope) => kind == "host" && scope.permits_peer(ip) && port > 0,
+            #[cfg(feature = "v2-public-video-wss")]
+            Self::PublicVideo(scope) => {
+                crate::public_video_ice::candidate_allowed(*scope, ip, port, kind)
+            }
             #[cfg(feature = "p006-direct-probe")]
             Self::Direct(grant, local) => match (ip, kind) {
                 (IpAddr::V4(ip), "host" | "srflx" | "relay") => {
@@ -101,6 +111,8 @@ impl DescriptionScope {
                     "host/loopback/udp"
                 }
             }
+            #[cfg(feature = "v2-public-video-wss")]
+            Self::PublicVideo(_) => "public-video/approved/udp",
             #[cfg(feature = "p006-direct-probe")]
             Self::Direct(..) => "direct-or-relay/approved/udp",
             #[cfg(feature = "p006-turn-probe")]
@@ -108,6 +120,15 @@ impl DescriptionScope {
         }
     }
 }
+#[cfg(feature = "v2-public-video-wss")]
+pub(crate) fn validate_public_video_description(
+    sdp: &str,
+    scope: crate::public_video::PublicVideoScope,
+    answer: bool,
+) -> Result<Negotiation, String> {
+    validate_policy(sdp, DescriptionScope::PublicVideo(scope), answer, false)
+}
+
 #[cfg(feature = "p006-direct-probe")]
 pub fn validate_direct_video_description(
     sdp: &str,

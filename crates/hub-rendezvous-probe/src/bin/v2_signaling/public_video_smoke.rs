@@ -16,9 +16,43 @@ use hub_webrtc::{
 };
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep, timeout};
+use webrtc::peer_connection::{RTCIceCandidate, RTCIceCandidateType, RTCIceProtocol};
 
-const OFFER: &str = "v=0\r\ns=public fixture offer\r\n";
-const ANSWER: &str = "v=0\r\ns=public fixture answer\r\n";
+fn fixture_sdp(answer: bool, candidate: &RTCIceCandidate) -> String {
+    let direction = if answer { "sendonly" } else { "recvonly" };
+    let setup = if answer { "active" } else { "actpass" };
+    let hash = vec!["AA"; 32].join(":");
+    format!(
+        concat!("v=0\r\no=- 1 1 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\na=group:BUNDLE 0\r\n",
+        "m=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\na={}\r\na=setup:{}\r\n",
+        "a=ice-ufrag:abcd\r\na=ice-pwd:abcdefghijklmnopqrstuvwx\r\na=fingerprint:sha-256 {}\r\n",
+        "a=rtcp-mux\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\n",
+        "a=candidate:x 1 udp 1 {} {} typ {} raddr 0.0.0.0 rport 0\r\na=end-of-candidates\r\n"),
+        direction, setup, hash, candidate.address, candidate.port, candidate.typ
+    )
+}
+
+fn packet_candidate(relay: bool, answer: bool) -> RTCIceCandidate {
+    RTCIceCandidate {
+        address: if relay {
+            "93.184.216.34"
+        } else if answer {
+            "8.8.4.4"
+        } else {
+            "8.8.8.8"
+        }
+        .into(),
+        port: if answer { 49172 } else { 49171 },
+        typ: if relay {
+            RTCIceCandidateType::Relay
+        } else {
+            RTCIceCandidateType::Srflx
+        },
+        protocol: RTCIceProtocol::Udp,
+        component: 1,
+        ..Default::default()
+    }
+}
 const WAIT: Duration = Duration::from_secs(3);
 
 fn pin(local: &Identity, peer: &Identity) -> VerifiedPeer {
@@ -44,6 +78,9 @@ async fn assert_room_released(app: &App) {
 #[derive(Clone, Copy)]
 enum Scenario {
     RoundTrip,
+    RelayOnly,
+    UnsignedSelectedPort,
+    BadLocalSdp,
     WrongTlsTrust,
     OtherRouteScope,
     OtherPinnedDevice,
@@ -84,7 +121,11 @@ async fn exchange(scenario: Scenario) {
             .unwrap(),
         turn: "93.184.216.34:3478".parse().unwrap(),
         relay_ports: (49152, 49200),
-        mode: IceMode::DirectPreferred,
+        mode: if matches!(scenario, Scenario::RelayOnly) {
+            IceMode::RelayOnly
+        } else {
+            IceMode::DirectPreferred
+        },
         expires_at: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -145,11 +186,32 @@ async fn exchange(scenario: Scenario) {
     .unwrap();
     let (h, v) = tokio::join!(host_pending.establish(), viewer_pending.establish());
     let (mut h, mut v) = (h.unwrap(), v.unwrap());
-    v.send_signal(SignalKind::Offer, OFFER.into())
-        .await
-        .unwrap();
+    let is_relay = matches!(scenario, Scenario::RelayOnly | Scenario::OtherRouteScope);
+    let offer_candidate = packet_candidate(is_relay, false);
+    let mut answer_candidate = packet_candidate(is_relay, true);
+    let offer = fixture_sdp(false, &offer_candidate);
+    let answer = fixture_sdp(true, &answer_candidate);
+    if matches!(scenario, Scenario::BadLocalSdp) {
+        assert_eq!(
+            v.send_signal(
+                SignalKind::Offer,
+                offer.replace("a=rtcp-mux", "a=sctp-port:5000")
+            )
+            .await,
+            Err("PUBLIC_VIDEO_SDP_POLICY")
+        );
+        assert!(matches!(
+            h.next_event(WAIT).await.unwrap(),
+            PublicVideoWssEvent::PeerLeft
+        ));
+    } else {
+        v.send_signal(SignalKind::Offer, offer.clone())
+            .await
+            .unwrap();
+    }
     match scenario {
         Scenario::WrongTlsTrust => unreachable!(),
+        Scenario::BadLocalSdp => (),
         Scenario::OtherRouteScope | Scenario::OtherPinnedDevice => {
             assert!(matches!(
                 h.next_event(WAIT).await,
@@ -164,14 +226,18 @@ async fn exchange(scenario: Scenario) {
                 PublicVideoWssEvent::PeerLeft
             ));
         }
-        Scenario::RoundTrip | Scenario::DuplicateOffer | Scenario::PeerLeavesBeforeAnswer => {
+        Scenario::RoundTrip
+        | Scenario::RelayOnly
+        | Scenario::UnsignedSelectedPort
+        | Scenario::DuplicateOffer
+        | Scenario::PeerLeavesBeforeAnswer => {
             assert!(matches!(
                 h.next_event(WAIT).await.unwrap(),
-                PublicVideoWssEvent::Signal { kind: SignalKind::Offer, data } if data == OFFER
+                PublicVideoWssEvent::Signal { kind: SignalKind::Offer, data } if data == offer
             ));
             if matches!(scenario, Scenario::DuplicateOffer) {
                 assert_eq!(
-                    v.send_signal(SignalKind::Offer, OFFER.into()).await,
+                    v.send_signal(SignalKind::Offer, offer).await,
                     Err("PUBLIC_VIDEO_WSS_PROTOCOL")
                 );
                 assert!(matches!(
@@ -185,14 +251,35 @@ async fn exchange(scenario: Scenario) {
                     PublicVideoWssEvent::PeerLeft
                 ));
             } else {
-                h.send_signal(SignalKind::Answer, ANSWER.into())
+                h.send_signal(SignalKind::Answer, answer.clone())
                     .await
                     .unwrap();
                 assert!(matches!(
                     v.next_event(WAIT).await.unwrap(),
-                    PublicVideoWssEvent::Signal { kind: SignalKind::Answer, data } if data == ANSWER
+                    PublicVideoWssEvent::Signal { kind: SignalKind::Answer, data } if data == answer
                 ));
-                h.leave().await.unwrap();
+                let expected = if is_relay { "relay" } else { "direct" };
+                assert_eq!(
+                    v.check_selected_pair(&offer_candidate, &answer_candidate)
+                        .unwrap()
+                        .path,
+                    expected
+                );
+                assert_eq!(
+                    h.check_selected_pair(&answer_candidate, &offer_candidate)
+                        .unwrap()
+                        .path,
+                    expected
+                );
+                if matches!(scenario, Scenario::UnsignedSelectedPort) {
+                    answer_candidate.port += 1;
+                    assert!(matches!(
+                        h.check_selected_pair(&answer_candidate, &offer_candidate),
+                        Err("PUBLIC_VIDEO_ICE_PAIR_REJECTED")
+                    ));
+                } else {
+                    h.leave().await.unwrap();
+                }
                 assert!(matches!(
                     v.next_event(WAIT).await.unwrap(),
                     PublicVideoWssEvent::PeerLeft
@@ -225,4 +312,15 @@ async fn public_video_wss_rejects_duplicate_offer_and_ends_on_peer_disconnect() 
 #[tokio::test]
 async fn public_video_wss_rejects_an_untrusted_tls_ca() {
     exchange(Scenario::WrongTlsTrust).await;
+}
+
+#[tokio::test]
+async fn public_video_wss_checks_relay_only_and_rejects_unsigned_selected_port() {
+    exchange(Scenario::RelayOnly).await;
+    exchange(Scenario::UnsignedSelectedPort).await;
+}
+
+#[tokio::test]
+async fn public_video_wss_refuses_invalid_local_video_before_sending() {
+    exchange(Scenario::BadLocalSdp).await;
 }
