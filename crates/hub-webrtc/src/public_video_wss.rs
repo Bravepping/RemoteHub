@@ -8,7 +8,6 @@ use crate::{
     direct_policy::{self, Candidate, Kind, PathSummary, VerifiedCandidates},
     lan_wire::Key,
     public_video::{PublicVideoProof, PublicVideoScope},
-    public_video_ice,
 };
 use hub_identity::{
     pairing::VerifiedPeer,
@@ -104,8 +103,6 @@ pub struct PublicVideoWss<'a> {
     proof: PublicVideoProof<'a>,
     role: Role,
     peer_challenge: Option<SessionChallenge>,
-    room: Uuid,
-    scope: PublicVideoScope,
     local_candidates: Option<VerifiedCandidates>,
     remote_candidates: Option<VerifiedCandidates>,
     deadline: Instant,
@@ -176,8 +173,7 @@ impl<'a> PublicVideoWss<'a> {
         if Instant::now() >= self.deadline {
             return Err(TIMEOUT);
         }
-        let values = public_video_ice::validate(&sdp, self.scope, kind == SignalKind::Answer, now)?;
-        let signature = self.proof.seal(challenge, &sdp, now)?;
+        let (signature, verified) = self.proof.seal_video_sdp(challenge, &sdp, now)?;
         let data = serde_json::to_string(&SignedSdp {
             payload: sdp,
             signature: signature.to_vec(),
@@ -188,10 +184,7 @@ impl<'a> PublicVideoWss<'a> {
             .map_err(|_| TIMEOUT)?
             .map_err(relay_error)?;
         self.check_scope()?;
-        self.local_candidates = Some(VerifiedCandidates {
-            values,
-            scope: self.room,
-        });
+        self.local_candidates = Some(verified);
         self.relay = Some(relay);
         Ok(())
     }
@@ -227,18 +220,11 @@ impl<'a> PublicVideoWss<'a> {
                 }
                 let signed: SignedSdp = serde_json::from_str(&data).map_err(|_| PROTOCOL)?;
                 let signature = signed.signature.try_into().map_err(|_| PROTOCOL)?;
-                self.proof.open(&signed.payload, &signature, received_at)?;
-                let values = public_video_ice::validate(
-                    &signed.payload,
-                    self.scope,
-                    kind == SignalKind::Answer,
-                    received_at,
-                )?;
+                let verified =
+                    self.proof
+                        .verify_video_sdp(&signed.payload, &signature, received_at)?;
                 self.check_scope()?;
-                self.remote_candidates = Some(VerifiedCandidates {
-                    values,
-                    scope: self.room,
-                });
+                self.remote_candidates = Some(verified);
                 PublicVideoWssEvent::Signal {
                     kind,
                     data: signed.payload,
@@ -577,8 +563,6 @@ impl<'a> PendingPublicVideoWss<'a> {
             proof,
             role: ctx.role,
             peer_challenge: Some(peer_challenge),
-            room: ctx.room,
-            scope: ctx.scope,
             local_candidates: None,
             remote_candidates: None,
             deadline,

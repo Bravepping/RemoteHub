@@ -2,6 +2,8 @@
 //! and approved route context, not end-user consent or candidate eligibility.
 use crate::ice_policy::{public_v4, IceConfig, IceMode, RelayGrant};
 pub use crate::public_video_route::PublicVideoIcePlan;
+#[cfg(feature = "v2-public-video-wss")]
+pub use crate::public_video_scoped_ice::PublicVideoScopedIce;
 use hub_identity::{
     pairing::VerifiedPeer,
     session::{
@@ -137,6 +139,62 @@ impl<'a> PublicVideoProof<'a> {
         now: u64,
     ) -> Result<PublicVideoIcePlan, &'static str> {
         PublicVideoIcePlan::prepare(self.scope, self.room, grant, config, now)
+    }
+
+    /// Prepare the physical UDP boundary for this exact proof. Does not
+    /// bind/dial sockets or authorize capture, and is not a TURN peer gate.
+    #[cfg(feature = "v2-public-video-wss")]
+    pub fn stage_ice(
+        self,
+        grant: RelayGrant,
+        config: IceConfig,
+        now: u64,
+    ) -> Result<PublicVideoScopedIce<'a>, &'static str> {
+        let plan = self.prepare_ice(grant, config, now)?;
+        PublicVideoScopedIce::new(self, plan, now)
+    }
+
+    #[cfg(feature = "v2-public-video-wss")]
+    pub(crate) fn seal_video_sdp(
+        &mut self,
+        challenge: SessionChallenge,
+        sdp: &str,
+        now: u64,
+    ) -> Result<([u8; 64], crate::direct_policy::VerifiedCandidates), &'static str> {
+        let values = crate::public_video_ice::validate(
+            sdp,
+            self.scope,
+            self.role == SessionRole::Host,
+            now,
+        )?;
+        let signature = self.seal(challenge, sdp, now)?;
+        Ok((
+            signature,
+            crate::direct_policy::VerifiedCandidates {
+                values,
+                scope: self.room,
+            },
+        ))
+    }
+
+    #[cfg(feature = "v2-public-video-wss")]
+    pub(crate) fn verify_video_sdp(
+        &mut self,
+        sdp: &str,
+        signature: &[u8; 64],
+        now: u64,
+    ) -> Result<crate::direct_policy::VerifiedCandidates, &'static str> {
+        let sdp = self.open(sdp, signature, now)?;
+        let values = crate::public_video_ice::validate(
+            sdp,
+            self.scope,
+            self.role == SessionRole::Viewer,
+            now,
+        )?;
+        Ok(crate::direct_policy::VerifiedCandidates {
+            values,
+            scope: self.room,
+        })
     }
 
     pub fn challenge(&self) -> Option<SessionChallenge> {

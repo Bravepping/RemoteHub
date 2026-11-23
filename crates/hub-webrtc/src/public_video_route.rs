@@ -12,7 +12,7 @@ use webrtc::peer_connection::RTCConfiguration;
 const GRANT_MISMATCH: &str = "PUBLIC_VIDEO_ICE_GRANT_MISMATCH";
 const CONFIG_MISMATCH: &str = "PUBLIC_VIDEO_ICE_CONFIG_MISMATCH";
 
-enum RouteGrant {
+pub(crate) enum RouteGrant {
     Direct(DirectGrant),
     Relay(RelayGrant),
 }
@@ -23,7 +23,7 @@ enum RouteGrant {
 pub struct PublicVideoIcePlan {
     scope: PublicVideoScope,
     local: Ipv4Addr,
-    grant: RouteGrant,
+    pub(crate) grant: RouteGrant,
     config: IceConfig,
 }
 
