@@ -2,6 +2,7 @@
 //! admitted AU, or stop; it cannot supply endpoints, keys, captures or input.
 use crate::{
     public_video_capture::{self, CaptureEnd, CaptureOutcome},
+    public_video_launch::LaunchMode,
     public_video_profile::PublicVideoProfile,
 };
 use hub_webrtc::{
@@ -34,7 +35,7 @@ const PULL_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_FRAME_BYTES: usize = 256 * 1024;
 
 pub(crate) struct DesktopVideoState {
-    profile: Option<PathBuf>,
+    launch: LaunchMode,
     active: Mutex<Option<Arc<Session>>>,
     used: AtomicBool,
     closing: AtomicBool,
@@ -43,33 +44,24 @@ pub(crate) struct DesktopVideoState {
 impl DesktopVideoState {
     pub(crate) fn new() -> Self {
         Self {
-            profile: launch_profile(std::env::args_os().skip(1)),
+            launch: LaunchMode::parse(std::env::args_os().skip(1)),
             active: Mutex::new(None),
             used: AtomicBool::new(false),
             closing: AtomicBool::new(false),
         }
     }
     pub(crate) fn available(&self) -> bool {
-        self.profile.is_some()
+        self.launch.is_public_video()
     }
 }
 
-fn launch_profile(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<PathBuf> {
-    let mut args = args.into_iter();
-    let mut profile = None;
-    while let Some(arg) = args.next() {
-        if arg == "--public-video-profile" {
-            if profile.is_some() {
-                return None;
-            }
-            let path = PathBuf::from(args.next()?);
-            if !path.is_absolute() {
-                return None;
-            }
-            profile = Some(path);
-        }
-    }
-    profile
+pub(crate) fn require_lan(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .try_state::<Arc<DesktopVideoState>>()
+        .ok_or("PUBLIC_VIDEO_STATE")?
+        .launch
+        .require_lan()
+        .map_err(str::to_owned)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -256,10 +248,14 @@ pub(crate) fn public_video_start(window: WebviewWindow, role: String) -> Result<
         _ => return Err("PUBLIC_VIDEO_ROLE".into()),
     };
     let state = window.state::<Arc<DesktopVideoState>>().inner().clone();
+    if !state.available() {
+        return Err("PUBLIC_VIDEO_PROFILE_REQUIRED".into());
+    }
     let profile = state
-        .profile
-        .clone()
-        .ok_or("PUBLIC_VIDEO_PROFILE_REQUIRED")?;
+        .launch
+        .profile()
+        .ok_or("PUBLIC_VIDEO_PROFILE_UNAVAILABLE")?
+        .to_path_buf();
     let mut active = state.active.lock().map_err(|_| "PUBLIC_VIDEO_STATE")?;
     if state.closing.load(Ordering::Acquire) || state.used.load(Ordering::Acquire) {
         return Err("PUBLIC_VIDEO_PROFILE_UNAVAILABLE".into());

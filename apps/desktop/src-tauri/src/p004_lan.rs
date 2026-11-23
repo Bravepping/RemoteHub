@@ -131,6 +131,8 @@ fn find(state: &LanState, id: &str) -> Result<Arc<LanSession>, String> {
 #[tauri::command]
 pub fn p004_lan_local_ip(window: WebviewWindow, peer_ip: String) -> Result<String, String> {
     crate::p004::origin(&window)?;
+    #[cfg(feature = "v2-public-video-desktop")]
+    crate::public_video_desktop::require_lan(&window)?;
     let peer: Ipv4Addr = peer_ip.parse().map_err(|_| "INVALID_PEER_IP")?;
     if !peer.is_private() {
         return Err("PRIVATE_IPV4_REQUIRED".into());
@@ -155,6 +157,8 @@ pub async fn p004_lan_start(
     config: Config,
 ) -> Result<Started, String> {
     crate::p004::origin(&window)?;
+    #[cfg(feature = "v2-public-video-desktop")]
+    crate::public_video_desktop::require_lan(&window)?;
     let scope = config.validate()?;
     #[cfg(feature = "v2-private-wss-lan")]
     let wss_settings = if config.verified_wss {

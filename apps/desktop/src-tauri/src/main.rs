@@ -30,6 +30,8 @@ mod public_video_capture;
 #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
 mod public_video_desktop;
 #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
+mod public_video_launch;
+#[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
 mod public_video_profile;
 
 #[cfg(not(feature = "p006-relay"))]
