@@ -135,7 +135,7 @@ impl Peer {
         let settings = SettingEngineBuilder::new()
             .with_network_types(vec![NetworkType::Udp4])
             .with_multicast_dns_mode(MulticastDnsMode::Disabled)
-            .with_include_loopback_candidate(false)
+            .with_include_loopback_candidate(cfg!(test) && grant.local().is_loopback())
             .with_sctp_max_message_size(
                 rtc::peer_connection::configuration::setting_engine::SctpMaxMessageSize::Bounded(
                     16384,
@@ -496,6 +496,33 @@ mod tests {
             Some("DIRECT_SELECTED_PAIR_SCOPE_MISMATCH")
         );
         assert!(scoped_sdp(&sdp(50000), &a, &b, 1300).is_err());
+    }
+
+    #[tokio::test]
+    async fn loopback_peers_exchange_text_and_verify_actual_selected_pair() {
+        let start = now();
+        let ip = std::net::Ipv4Addr::LOCALHOST;
+        assert!(DirectGrant::local_diagnostic(ip, start + 120, true, start).is_err());
+        let a = DirectGrant::loopback_test(start);
+        let b = DirectGrant::loopback_test(start);
+        assert_ne!(a.scope(), b.scope());
+
+        let report = run(a, None, b, None, Case::Direct).await;
+        assert_eq!(report.error, None);
+        assert!(report.resources_released);
+        assert_eq!(report.media_tracks, 0);
+        assert_eq!(report.physical_machines, 1);
+        assert_eq!(report.selected_phase, Some("after_traffic"));
+        assert_eq!(
+            (report.sent, report.received, report.acknowledged),
+            (100, 100, 100)
+        );
+        for pair in [report.selected_a.unwrap(), report.selected_b.unwrap()] {
+            assert_eq!(
+                (pair.path, pair.local_type, pair.remote_type, pair.protocol),
+                ("direct", Kind::Host, Kind::Host, "udp")
+            );
+        }
     }
 
     #[tokio::test]

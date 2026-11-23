@@ -63,6 +63,18 @@ impl DirectGrant {
             scope: uuid::Uuid::new_v4(),
         })
     }
+    /// Real sockets in unit tests only; production grants still reject loopback.
+    #[cfg(test)]
+    pub(crate) fn loopback_test(now: u64) -> Self {
+        Self {
+            relay: None,
+            local: Ipv4Addr::LOCALHOST,
+            private_peers: vec![Ipv4Addr::LOCALHOST],
+            expires_at: now + 120,
+            scope: uuid::Uuid::new_v4(),
+        }
+    }
+
     #[cfg(feature = "p006-session-probe")]
     pub fn local_session_diagnostic(
         local: Ipv4Addr,

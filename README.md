@@ -113,7 +113,7 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 ## 本分支已执行验证
 
-- Linux：`cargo test -p hub-webrtc --features p006-direct-probe --lib --locked --offline` 39 项通过，覆盖两端不同授权范围、实际候选分类输出和未授权候选拒绝；`cargo check -p hub-webrtc --features p006-session-probe --locked --offline` 通过。未启动公网 STUN/TURN，未做跨网双机验证。
+- Linux：`cargo test -p hub-webrtc --features p006-direct-probe --lib --locked --offline` 40 项通过。新增自动回归只绑定 `127.0.0.1`，使用两端各自的授权范围建立真实原生 WebRTC DataChannel，100 条合成文本全部收齐并收到 ACK；读取两端实际选中的 UDP 主机候选对后，双方正常关闭。测试入口不编入正式探测器；`cargo check -p hub-webrtc --features p006-direct-probe --bin ice-path-probe --locked --offline` 通过。此前 `p006-session-probe` 编译检查也已通过。未启动 STUN/TURN，未做跨网双机验证。
 - Linux PowerShell 7.4：`pwsh -NoProfile -File scripts/test-private-wss-launcher.ps1` 通过；覆盖角色与入口匹配、指纹错误、错误角色与损坏配置拒绝、子进程环境隔离。使用替身文件，不启动程序或中继；新脚本尚未在 Windows 实机验证。
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（135 项）、`pnpm lint`、`pnpm build` 通过。
 - Linux：`cargo test -p hub-webrtc --features v2-private-wss-lan,v2-verified-signaling --locked` 36 项通过、1 项忽略；覆盖 WSS/TCP 会话引导、不同模式/中继拒绝、精确 answer 的 TCP 确认及旧 LAN v1 帧逐字节兼容。
