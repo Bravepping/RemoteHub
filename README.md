@@ -88,49 +88,28 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 `host/host.json` 和中继私钥只留在共享端，生成后不要移动该目录（其中使用绝对路径）。只把 `viewer/viewer.json` 通过可信的私下方式交给观看端，勿发到聊天、提交仓库或放在公用目录。生成器仅显示公开的 CA SHA-256，不显示令牌。观看端应通过独立可信渠道核对生成器显示的指纹；不要把令牌当作设备身份，也不要从 TLS 提示中接受临时证书。中继路径默认 TCP 48620，设备既有直接 TCP 会话用 48604。遇到 Windows 防火墙/权限提示先停下，不改设置。
 
-在观看端加载 `viewer.json` 或启动程序之前，必须复算 CA 指纹，并与共享端显示的完整指纹独立核对；不一致就停止。把下面路径换为收到的 `viewer.json`，命令只打印公开指纹，不打印令牌：
+### 用角色启动脚本，免手动加载环境变量
 
-```powershell
-$profile = Get-Content -LiteralPath '.\viewer.json' -Raw -Encoding UTF8 | ConvertFrom-Json
-$hex = $profile.REMOTEHUB_V2_DESKTOP_CA_DER_HEX
-if ($hex -notmatch '^(?:[0-9a-f]{2}){1,16384}$') { throw 'Invalid CA bytes' }
-[byte[]]$der = for ($i = 0; $i -lt $hex.Length; $i += 2) { [Convert]::ToByte($hex.Substring($i, 2), 16) }
-$sha = [Security.Cryptography.SHA256]::Create()
-try { ([BitConverter]::ToString($sha.ComputeHash($der))).Replace('-', '').ToLowerInvariant() }
-finally { $sha.Dispose() }
-```
+将仓库的 `scripts/start-private-wss.ps1` 放到解压后的测试包目录，与 EXE 同级。实际测试先取得同意，再从该目录分别运行下列命令。每条独立执行；路径在提示出现后粘贴，不加引号。若脚本被本机执行策略拦截，先停下，不修改策略。
 
-实际测试须另获同意。获准后用独立的 PowerShell 窗口为中继、共享端客户端和观看端客户端分别加载配置（只写该窗口的进程环境，不写用户或系统环境），再人工启动相应程序。下面函数每个窗口需单独粘贴；它只读取该角色用到的固定键：
+- 共享端第一个 PowerShell 窗口，选择刚生成的 `host.json`。保持窗口打开，结束时按 Ctrl+C。
+  ```powershell
+  .\start-private-wss.ps1 -Role Relay -Profile (Read-Host 'host.json path')
+  ```
+- 共享端第二个窗口，选择同一份 `host.json`。
+  ```powershell
+  .\start-private-wss.ps1 -Role Host -Profile (Read-Host 'host.json path')
+  ```
+- 观看端选择私下收到的 `viewer.json`。脚本要求输入共享端生成器显示的完整 CA SHA-256，不一致就拒绝启动。
+  ```powershell
+  .\start-private-wss.ps1 -Role Viewer -Profile (Read-Host 'viewer.json path')
+  ```
 
-```powershell
-function Import-RemoteHubWssProfile([string]$path, [switch]$Relay) {
-    $profile = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
-    $names = if ($Relay) {
-        'REMOTEHUB_V2_MODE','REMOTEHUB_V2_BIND','REMOTEHUB_V2_TLS_CERT','REMOTEHUB_V2_TLS_KEY',
-        'REMOTEHUB_V2_LAN_HOST_IP','REMOTEHUB_V2_LAN_VIEWER_IP',
-        'REMOTEHUB_V2_LAN_HOST_TOKEN','REMOTEHUB_V2_LAN_VIEWER_TOKEN'
-    } else {
-        'REMOTEHUB_V2_DESKTOP_RELAY','REMOTEHUB_V2_DESKTOP_CA_DER_HEX','REMOTEHUB_V2_DESKTOP_TOKEN'
-    }
-    foreach ($name in $names) {
-        $value = $profile.PSObject.Properties[$name].Value
-        if ($value -isnot [string] -or [string]::IsNullOrEmpty($value)) {
-            throw 'RemoteHub profile incomplete'
-        }
-    }
-    foreach ($name in $names) {
-        [Environment]::SetEnvironmentVariable($name, $profile.PSObject.Properties[$name].Value, 'Process')
-    }
-}
-```
-
-- 共享端中继窗口：`Import-RemoteHubWssProfile '<测试目录>\host\host.json' -Relay`，再运行 `.\v2_signaling.exe`；保持窗口打开，结束后按 Ctrl+C。
-- 共享端客户端窗口：用同一份 `host\host.json` 调用函数但不加 `-Relay`，再运行 `.\remotehub-desktop.exe`。
-- 观看端客户端窗口：对私下收到的 `viewer.json` 调用函数（不加 `-Relay`），再运行 `.\remotehub-desktop.exe`。两端核验对端设备指纹、明确选择「私网 WSS 信令（仅视频）」并分别确认本次会话。只共享空白记事本的测试画面；点「停止并回收」、关闭两端程序和中继窗口。不启用键鼠。
-- 测试通过须看到画面并确认停止后双方结束；单独复测中继不可用时不建立连接、不回退。只反馈成功/失败和固定错误码，不上传截图、配置、临时配对码、证书私钥或令牌。
+脚本仅为所选进程传递该角色需要的固定环境变量，不把令牌写入命令参数、打印到终端或改写系统环境。它不修改证书信任、防火墙或启动远控会话。启动后仍需双方核验设备完整指纹、手动选择「私网 WSS 信令（仅视频）」并分别批准本次会话。只共享空白记事本的测试画面；点「停止并回收」，关闭两端程序和中继窗口。不启用键鼠。只反馈结果和固定错误码，不上传截图、配置、临时配对码、证书私钥或令牌。
 
 ## 本分支已执行验证
 
+- Linux PowerShell 7.4：`pwsh -NoProfile -File scripts/test-private-wss-launcher.ps1` 通过；覆盖角色与入口匹配、指纹错误、错误角色与损坏配置拒绝、子进程环境隔离。使用替身文件，不启动程序或中继；新脚本尚未在 Windows 实机验证。
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（135 项）、`pnpm lint`、`pnpm build` 通过。
 - Linux：`cargo test -p hub-webrtc --features v2-private-wss-lan,v2-verified-signaling --locked` 36 项通过、1 项忽略；覆盖 WSS/TCP 会话引导、不同模式/中继拒绝、精确 answer 的 TCP 确认及旧 LAN v1 帧逐字节兼容。
 - Linux：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked` 23 项通过，覆盖私网规则、真实回环 TLS 套接字的来源和角色检查、WS/WSS 的原生 WebRTC 回环链路、双向挑战顺序与防重放、设备签名后应用 SDP/ICE、内联候选及错误设备公钥的拒绝、取消清理和禁止降级；未采集屏幕或注入键鼠。`cargo test -p hub-signal-v2 --locked` 6 项、`cargo fmt --all -- --check` 通过。
