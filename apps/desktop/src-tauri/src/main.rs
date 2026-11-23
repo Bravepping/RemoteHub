@@ -80,6 +80,8 @@ struct RuntimeInfo {
     capture_backend: &'static str,
     remote_access_enabled: bool,
     p3_enabled: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    lan_input_queue_test: bool,
     v2_loopback_diagnostic_enabled: bool,
     v2_peer_pairing_enabled: bool,
     #[cfg(all(
@@ -128,6 +130,10 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
         },
         remote_access_enabled: false,
         p3_enabled: cfg!(all(feature = "p3-lan", not(feature = "p006-relay"))),
+        lan_input_queue_test: cfg!(all(
+            feature = "p3-lan-input-queue-test",
+            not(feature = "p006-relay")
+        )),
         v2_loopback_diagnostic_enabled: cfg!(all(
             feature = "v2-loopback-diagnostic",
             not(feature = "p006-relay")

@@ -14,10 +14,24 @@ use tokio::{
 };
 use webrtc::data_channel::{DataChannel, DataChannelEvent};
 
+#[cfg(feature = "p3-lan-input-queue-test")]
+use crate::{
+    input_approval::{Error as ApprovalError, State as ApprovalState},
+    input_queue::{Control as InputControl, Error as QueueError},
+    lan_input_queue::{Error as LanInputError, LanInputQueue, LanInputScope},
+};
+
 #[cfg(feature = "p3-lan")]
-struct InputLane {
-    protocol: crate::remote_input::Protocol,
-    injector: crate::remote_input::Injector,
+enum InputLane {
+    Legacy {
+        protocol: crate::remote_input::Protocol,
+        injector: crate::remote_input::Injector,
+    },
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    Queued {
+        binding: LanInputScope,
+        owner: LanInputQueue<crate::remote_input::Injector>,
+    },
 }
 
 #[cfg(all(test, feature = "p3-lan"))]
@@ -60,6 +74,126 @@ mod input_tests {
         assert!(!stop.is_stopped());
         assert!(endpoint.cleanup_complete());
     }
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    #[test]
+    fn test_endpoint_requires_exact_pair_and_does_not_resume_after_transport_loss() {
+        use crate::scope::LanScope;
+        let id = uuid::Uuid::new_v4();
+        let scope = LanScope::new(
+            "192.168.9.10".parse().unwrap(),
+            "192.168.9.11".parse().unwrap(),
+        )
+        .unwrap();
+        let binding = LanInputScope::from_verified_lan(id, scope).unwrap();
+        let stop = StopToken::default();
+        let endpoint = Endpoint::new_input_test(
+            id.to_string(),
+            stop.clone(),
+            30,
+            binding,
+            Instant::now() + Duration::from_secs(30),
+        )
+        .unwrap();
+        // release_all with an empty session-owned injector does not call SendInput.
+        let release = serde_json::json!({
+            "v":1,"seq":1,"session_id":id.to_string(),"event":{"kind":"release_all"},
+        })
+        .to_string();
+        endpoint.approve_verified_path();
+        assert!(endpoint.process(release.as_bytes(), true).is_err());
+        assert_eq!(endpoint.stats().accepted_moves, 0);
+        endpoint.approve_lan_input_path(scope).unwrap();
+        assert!(matches!(
+            endpoint.process(release.as_bytes(), true).unwrap(),
+            crate::control::Message::Ack { ack_seq: 1, .. }
+        ));
+        endpoint.input_test_transport_lost();
+        assert!(stop.is_stopped());
+        assert!(endpoint.approve_lan_input_path(scope).is_err());
+        assert!(endpoint.process(release.as_bytes(), true).is_err());
+        assert!(endpoint.cleanup_complete());
+    }
+
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    #[test]
+    fn test_endpoint_wrong_pair_is_terminal_even_without_any_native_input() {
+        use crate::scope::LanScope;
+        let id = uuid::Uuid::new_v4();
+        let scope = LanScope::new(
+            "192.168.9.10".parse().unwrap(),
+            "192.168.9.11".parse().unwrap(),
+        )
+        .unwrap();
+        let binding = LanInputScope::from_verified_lan(id, scope).unwrap();
+        let stop = StopToken::default();
+        let until = Instant::now() + Duration::from_secs(5);
+        assert!(
+            Endpoint::new_input_test(id.to_string(), stop.clone(), 5, binding, Instant::now())
+                .is_err()
+        );
+        let endpoint = Endpoint::new_input_test(id.to_string(), stop, 5, binding, until).unwrap();
+        let opposite = LanScope::new(scope.peer, scope.local).unwrap();
+        assert!(endpoint.approve_lan_input_path(opposite).is_err());
+        assert!(endpoint.approve_lan_input_path(scope).is_err());
+        endpoint.begin_input_drain();
+        assert!(endpoint.cleanup_complete());
+    }
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    #[test]
+    fn test_endpoint_preserves_uncertain_release_across_later_transport_errors() {
+        use crate::scope::LanScope;
+        let id = uuid::Uuid::new_v4();
+        let scope = LanScope::new(
+            "192.168.9.10".parse().unwrap(),
+            "192.168.9.11".parse().unwrap(),
+        )
+        .unwrap();
+        let binding = LanInputScope::from_verified_lan(id, scope).unwrap();
+        let endpoint = Endpoint::new_input_test(
+            id.to_string(),
+            StopToken::default(),
+            5,
+            binding,
+            Instant::now() + Duration::from_secs(5),
+        )
+        .unwrap();
+        endpoint.latch_release_uncertain();
+        endpoint.fail("CONTROL_CHANNEL_ERROR");
+        endpoint.revoke_input(); // empty injector, no input occurs
+        assert!(!endpoint.cleanup_complete());
+        assert_eq!(
+            endpoint.stats().last_error.as_deref(),
+            Some("INPUT_RELEASE_FAILED")
+        );
+    }
+
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    #[tokio::test]
+    async fn test_deadline_preempts_a_pending_transport_operation() {
+        use crate::scope::LanScope;
+        let id = uuid::Uuid::new_v4();
+        let scope = LanScope::new(
+            "192.168.9.10".parse().unwrap(),
+            "192.168.9.11".parse().unwrap(),
+        )
+        .unwrap();
+        let binding = LanInputScope::from_verified_lan(id, scope).unwrap();
+        let stop = StopToken::default();
+        let until = Instant::now() + Duration::from_millis(100);
+        let endpoint =
+            Endpoint::new_input_test(id.to_string(), stop.clone(), 5, binding, until).unwrap();
+        endpoint.approve_lan_input_path(scope).unwrap();
+        timeout(
+            Duration::from_secs(1),
+            endpoint.while_test_input_current(std::future::pending()),
+        )
+        .await
+        .expect("input timeout should not wait on transport")
+        .unwrap();
+        assert!(stop.is_stopped());
+        assert!(endpoint.approve_lan_input_path(scope).is_err());
+        assert!(endpoint.cleanup_complete());
+    }
 }
 pub struct Endpoint {
     #[cfg(feature = "p3-lan")]
@@ -68,6 +202,8 @@ pub struct Endpoint {
     input_quiesced: AtomicBool,
     #[cfg(feature = "p3-lan")]
     input: Mutex<Option<InputLane>>,
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    input_test_until: Option<Instant>,
     close_grace: Duration,
     stop: StopToken,
     claimed: AtomicBool,
@@ -84,33 +220,171 @@ impl Endpoint {
         seconds: u32,
     ) -> Result<Arc<Self>, String> {
         let this = Self::with_permission(session.clone(), stop, seconds, false)?;
-        *this.input.lock().map_err(|_| "INPUT_STATE_FAILED")? = Some(InputLane {
+        *this.input.lock().map_err(|_| "INPUT_STATE_FAILED")? = Some(InputLane::Legacy {
             protocol: crate::remote_input::Protocol::new(session, seconds + 15),
             injector: Default::default(),
         });
         Ok(this)
     }
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    pub(crate) fn new_input_test(
+        id: String,
+        stop: StopToken,
+        seconds: u32,
+        binding: LanInputScope,
+        until: Instant,
+    ) -> Result<Arc<Self>, String> {
+        if binding.room().to_string() != id || Instant::now() >= until {
+            return Err("LAN_INPUT_TEST_BINDING_OR_EXPIRY".into());
+        }
+        let mut this = Self::with_permission(id, stop, seconds, false)?;
+        let inner = Arc::get_mut(&mut this).ok_or("CONTROL_ALREADY_SHARED")?;
+        inner.input_test_until = Some(until);
+        inner.input = Mutex::new(Some(InputLane::Queued {
+            binding,
+            owner: LanInputQueue::view_only(binding, until, Default::default()),
+        }));
+        Ok(this)
+    }
+
+    #[cfg(feature = "p3-lan")]
+    fn is_input_queue_test(&self) -> bool {
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        {
+            self.input_test_until.is_some()
+        }
+        #[cfg(not(feature = "p3-lan-input-queue-test"))]
+        {
+            false
+        }
+    }
+
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    fn latch_release_uncertain(&self) {
+        self.input_release_failed.store(true, Ordering::Release);
+        self.update(|s| s.last_error = Some("INPUT_RELEASE_FAILED".into()));
+    }
+
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    fn queue_error(&self, error: LanInputError) -> String {
+        match error {
+            LanInputError::Queue(QueueError::Approval(ApprovalError::ReleaseUnconfirmed)) => {
+                self.latch_release_uncertain();
+                "INPUT_RELEASE_FAILED".into()
+            }
+            LanInputError::Queue(QueueError::Approval(ApprovalError::ApplyFailed)) => {
+                "INPUT_APPLY_FAILED".into()
+            }
+            LanInputError::Queue(QueueError::Approval(ApprovalError::WrongScope))
+            | LanInputError::InvalidScope => "LAN_INPUT_TEST_SCOPE".into(),
+            LanInputError::Queue(QueueError::Approval(ApprovalError::NotAllowed))
+            | LanInputError::NotAllowed => "INPUT_NOT_AUTHORIZED".into(),
+            LanInputError::Queue(QueueError::Full) => "INPUT_QUEUE_OVERFLOW".into(),
+            LanInputError::Protocol(error) => error,
+            LanInputError::InvalidState => "INPUT_STATE_FAILED".into(),
+        }
+    }
+
+    #[cfg(feature = "p3-lan")]
+    fn input_state_failed(&self) -> &'static str {
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        if self.input_test_until.is_some() {
+            self.latch_release_uncertain();
+        }
+        "INPUT_STATE_FAILED"
+    }
+
     #[cfg(feature = "p3-lan")]
     pub(crate) fn is_input(&self) -> bool {
         self.input.lock().map(|v| v.is_some()).unwrap_or(true)
     }
     #[cfg(feature = "p3-lan")]
     pub(crate) fn revoke_input(&self) {
-        if !self.is_input() {
+        self.end_input(false);
+    }
+
+    #[cfg(feature = "p3-lan")]
+    fn end_input(&self, disconnected: bool) {
+        #[cfg(not(feature = "p3-lan-input-queue-test"))]
+        let _ = disconnected;
+        if !self.is_input_queue_test() && !self.is_input() {
             return;
         }
         self.permitted.store(false, Ordering::Release);
-        if let Ok(mut lane) = self.input.lock() {
-            if let Some(lane) = lane.as_mut() {
-                if lane.injector.release().is_err() {
+        let Ok(mut lane) = self.input.lock() else {
+            self.input_state_failed();
+            return;
+        };
+        match lane.as_mut() {
+            Some(InputLane::Legacy { injector, .. }) => {
+                if injector.release().is_err() {
                     self.input_release_failed.store(true, Ordering::Release);
                     self.update(|s| s.last_error = Some("INPUT_RELEASE_FAILED".into()));
                 } else {
                     self.input_release_failed.store(false, Ordering::Release);
                 }
             }
+            #[cfg(feature = "p3-lan-input-queue-test")]
+            Some(InputLane::Queued { owner, .. }) => {
+                let control = if disconnected {
+                    InputControl::TransportLost
+                } else {
+                    InputControl::Revoke
+                };
+                if let Err(error) = owner.advance(control) {
+                    self.queue_error(error);
+                }
+            }
+            None => (),
         }
     }
+
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    pub(crate) fn input_test_transport_lost(&self) {
+        if self.input_test_until.is_some() {
+            self.stop.stop();
+            self.end_input(true);
+        }
+    }
+
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    fn advance_test_input(&self) -> Result<(), String> {
+        if self.input_test_until.is_none() {
+            return Ok(());
+        }
+        let mut lane = self.input.lock().map_err(|_| self.input_state_failed())?;
+        let Some(InputLane::Queued { owner, .. }) = lane.as_mut() else {
+            return Err("INPUT_STATE_FAILED".into());
+        };
+        let state = owner
+            .advance(InputControl::Continue)
+            .map_err(|error| self.queue_error(error))?;
+        if matches!(state, ApprovalState::Ended(_)) {
+            self.permitted.store(false, Ordering::Release);
+        }
+        Ok(())
+    }
+
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    async fn while_test_input_current(
+        &self,
+        operation: impl Future<Output = Result<(), String>>,
+    ) -> Result<(), String> {
+        let Some(until) = self.input_test_until else {
+            return operation.await;
+        };
+        // The entire SCTP operation (including a backpressured ACK) is
+        // subordinate to the same absolute authorization deadline.
+        tokio::select! {
+            biased;
+            _ = tokio::time::sleep_until(until.into()) => {
+                self.stop.stop();
+                self.advance_test_input()
+            }
+            outcome = operation => outcome,
+        }
+    }
+
     #[cfg(feature = "p3-lan")]
     pub(crate) fn begin_input_drain(&self) {
         self.input_quiesced.store(true, Ordering::Release);
@@ -148,19 +422,45 @@ impl Endpoint {
     fn process(&self, bytes: &[u8], text: bool) -> Result<crate::control::Message, String> {
         #[cfg(feature = "p3-lan")]
         {
-            let mut lane = self.input.lock().map_err(|_| "INPUT_STATE_FAILED")?;
+            let mut lane = self.input.lock().map_err(|_| self.input_state_failed())?;
             if let Some(lane) = lane.as_mut() {
                 // Read revocation after acquiring the same lock used by release/stop.
                 let permitted = !self.stop.is_stopped()
                     && !self.input_quiesced()
                     && self.permitted.load(Ordering::Acquire);
-                let result = lane.protocol.process(
-                    bytes,
-                    text,
-                    permitted,
-                    Instant::now(),
-                    &mut lane.injector,
-                );
+                let result = match lane {
+                    InputLane::Legacy { protocol, injector } => {
+                        protocol.process(bytes, text, permitted, Instant::now(), injector)
+                    }
+                    #[cfg(feature = "p3-lan-input-queue-test")]
+                    InputLane::Queued { binding, owner } => (|| {
+                        if !permitted {
+                            if self.stop.is_stopped()
+                                || self.input_quiesced()
+                                || owner.state() == ApprovalState::Allowed
+                            {
+                                owner
+                                    .advance(InputControl::Revoke)
+                                    .map_err(|error| self.queue_error(error))?;
+                            }
+                            Err("INPUT_NOT_AUTHORIZED".into())
+                        } else {
+                            owner
+                                .process_v1(binding, bytes, text, || {
+                                    if self.stop.is_stopped()
+                                        || self.input_quiesced()
+                                        || !self.permitted.load(Ordering::Acquire)
+                                    {
+                                        InputControl::Revoke
+                                    } else {
+                                        InputControl::Continue
+                                    }
+                                })
+                                .map_err(|error| self.queue_error(error))?
+                                .ok_or_else(|| "INPUT_NOT_AUTHORIZED".into())
+                        }
+                    })(),
+                };
                 let seq = match result {
                     Ok(seq) => seq,
                     Err(e) => {
@@ -213,8 +513,44 @@ impl Endpoint {
             .close_grace = Duration::from_secs(2);
         Ok(endpoint)
     }
+    #[cfg(feature = "p3-lan")]
+    pub(crate) fn approve_lan_input_path(
+        &self,
+        scope: crate::scope::LanScope,
+    ) -> Result<(), String> {
+        #[cfg(not(feature = "p3-lan-input-queue-test"))]
+        let _ = scope;
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        if self.input_test_until.is_some() {
+            let mut lane = self.input.lock().map_err(|_| self.input_state_failed())?;
+            let Some(InputLane::Queued { binding, owner }) = lane.as_mut() else {
+                return Err("INPUT_STATE_FAILED".into());
+            };
+            if self.stop.is_stopped() || self.input_quiesced() {
+                return Err("INPUT_NOT_AUTHORIZED".into());
+            }
+            if !binding.matches_pair(scope) {
+                owner
+                    .advance(InputControl::TransportLost)
+                    .map_err(|error| self.queue_error(error))?;
+                return Err("LAN_INPUT_TEST_SCOPE".into());
+            }
+            owner
+                .decide_locally(true)
+                .map_err(|error| self.queue_error(error))?;
+            self.permitted.store(true, Ordering::Release);
+            return Ok(());
+        }
+        self.approve_verified_path();
+        Ok(())
+    }
+
     #[cfg(any(feature = "p006-relay", feature = "p3-lan"))]
     pub(crate) fn approve_verified_path(&self) {
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        if self.input_test_until.is_some() {
+            return;
+        }
         if !self.stop.is_stopped() && !self.input_quiesced() {
             self.permitted.store(true, Ordering::Release);
         }
@@ -233,6 +569,8 @@ impl Endpoint {
             input_quiesced: AtomicBool::new(false),
             #[cfg(feature = "p3-lan")]
             input: Mutex::new(None),
+            #[cfg(feature = "p3-lan-input-queue-test")]
+            input_test_until: None,
             close_grace: Duration::ZERO,
             stop,
             claimed: AtomicBool::new(false),
@@ -279,6 +617,12 @@ impl Endpoint {
         }
     }
     fn fail(&self, error: &str) {
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        let error = if self.input_test_until.is_some() && !self.cleanup_complete() {
+            "INPUT_RELEASE_FAILED"
+        } else {
+            error
+        };
         self.update(|s| {
             s.last_error = Some(error.into());
             s.state = "failed".into();
@@ -295,9 +639,12 @@ impl Endpoint {
         let channel = loop {
             tokio::select! {v=rx.recv()=>{match v{Some(c)=>break c,None=>return}},_=sleep(Duration::from_millis(25))=>{if self.stop.is_stopped(){self.update(|s|s.state="closed".into());return;}}}
         };
+        #[cfg(not(feature = "p3-lan-input-queue-test"))]
         let result = self.events(&channel).await;
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        let result = self.while_test_input_current(self.events(&channel)).await;
         #[cfg(feature = "p3-lan")]
-        self.revoke_input();
+        self.end_input(true);
         if let Err(error) = result {
             self.fail(&error);
         }
@@ -381,6 +728,8 @@ impl Endpoint {
             if self.stop.is_stopped() {
                 return Ok(());
             }
+            #[cfg(feature = "p3-lan-input-queue-test")]
+            self.advance_test_input()?;
             let event = tokio::select! {
                 event = poll() => event,
                 _ = sleep(Duration::from_millis(25)) => continue,

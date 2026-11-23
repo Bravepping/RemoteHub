@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { LanProbe, type LanStatus, type LanReceiver } from '../p004/lan';
 const props = defineProps<{
+  lanInputQueueTest?: boolean;
   v2LoopbackDiagnosticEnabled?: boolean;
   v2VerifiedLanEnabled?: boolean;
   v2PrivateWssLanEnabled?: boolean;
@@ -35,6 +36,12 @@ const displayedMode = computed(() =>
 );
 const videoOnly = computed(() => displayedMode.value !== 'legacy');
 const privateWss = computed(() => displayedMode.value === 'private-wss');
+const testHostInput = computed(
+  () =>
+    props.lanInputQueueTest === true &&
+    !videoOnly.value &&
+    role.value === 'sender',
+);
 watch(
   [mode, modeAllowed],
   () => {
@@ -160,13 +167,18 @@ async function start() {
     },
     (e) => {
       const errorCode = e.replace(/^Error: /, '');
-      error.value = verified
-        ? Object.hasOwn(knownErrors, errorCode)
-          ? knownErrors[errorCode]
-          : wss
-            ? '私网 WSS 视频会话未建立或已中断。请检查本机启动配置、临时配对码和两端的会话设置。没有切换到其他模式。'
-            : '已验证设备视频会话未建立或已中断。请检查本机地址、临时配对码和两端的会话设置。'
-        : safeError(e);
+      error.value =
+        props.lanInputQueueTest === true &&
+        !verified &&
+        errorCode === 'LAN_TEST_INPUT_CONSENT_DENIED'
+          ? '本次键鼠控制未获原生批准，会话已中止，不会自动退回仅视频模式。'
+          : verified
+            ? Object.hasOwn(knownErrors, errorCode)
+              ? knownErrors[errorCode]
+              : wss
+                ? '私网 WSS 视频会话未建立或已中断。请检查本机启动配置、临时配对码和两端的会话设置。没有切换到其他模式。'
+                : '已验证设备视频会话未建立或已中断。请检查本机地址、临时配对码和两端的会话设置。'
+            : safeError(e);
     },
     (c) => {
       invitation.value = c;
@@ -309,7 +321,11 @@ onBeforeUnmount(() => {
 <template>
   <section class="product-card remote-workspace" aria-label="局域网远程会话">
     <div class="card-header">
-      <h2>局域网远程会话</h2>
+      <h2>
+        局域网远程会话<span v-if="lanInputQueueTest === true"
+          >（键鼠队列测试版）</span
+        >
+      </h2>
       <button class="outline-button" :disabled="!busy" @click="stop">
         停止并回收
       </button>
@@ -322,6 +338,10 @@ onBeforeUnmount(() => {
     <p v-if="busy && role === 'sender'" class="remote-warning">
       <template v-if="videoOnly">
         本机主屏正在共享或等待共享，仅允许观看。可点“停止并回收”或关闭窗口。
+      </template>
+      <template v-else-if="testHostInput">
+        键鼠须在批准视频后，通过另一个默认选择“否”的原生对话框单独批准。拒绝会中止本次会话，不会降级为仅视频。
+        可点“停止并回收”、关闭窗口，或在本机按 Ctrl+Alt+F12 紧急停止。
       </template>
       <template v-else>
         本机主屏正在共享或等待共享，并已批准本次实际键鼠控制。可点“停止并回收”、关闭窗口，或在本机按
@@ -400,11 +420,16 @@ onBeforeUnmount(() => {
       <p v-if="!modeAllowed">
         当前启动未启用所选模式。请明确选择其他模式或重新配置客户端。
       </p>
+      <p v-if="testHostInput">
+        视频获批后，实际键鼠控制另有原生确认，默认选择“否”。拒绝会中止本次会话，不会降级为仅视频。
+      </p>
       <label
         ><input v-model="consent" type="checkbox" />{{
           videoOnly
             ? '我同意本次与指定设备建立局域网主屏视频会话，仅观看，不授权键鼠。'
-            : '我同意本次指定电脑的主屏视频和实际鼠标、基本键盘控制；不授予无人值守或管理员权限。'
+            : testHostInput
+              ? '我同意与指定电脑建立本次主屏视频会话。此勾选不授权键鼠控制。'
+              : '我同意本次指定电脑的主屏视频和实际鼠标、基本键盘控制；不授予无人值守或管理员权限。'
         }}</label
       >
       <p>

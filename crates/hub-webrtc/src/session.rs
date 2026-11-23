@@ -135,6 +135,17 @@ impl PeerConnectionEventHandler for Handler {
         if value == "connected" {
             self.0.connected.store(true, Ordering::Release);
         }
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        if matches!(
+            state,
+            RTCPeerConnectionState::Disconnected
+                | RTCPeerConnectionState::Failed
+                | RTCPeerConnectionState::Closed
+        ) {
+            if let Some(control) = &self.1 {
+                control.input_test_transport_lost();
+            }
+        }
         if value == "failed" {
             self.0
                 .update(|s| s.error = Some("PEER_CONNECTION_FAILED".into()));
@@ -143,6 +154,17 @@ impl PeerConnectionEventHandler for Handler {
     }
     async fn on_ice_connection_state_change(&self, state: RTCIceConnectionState) {
         self.0.update(|s| s.native_ice_state = state.to_string());
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        if matches!(
+            state,
+            RTCIceConnectionState::Disconnected
+                | RTCIceConnectionState::Failed
+                | RTCIceConnectionState::Closed
+        ) {
+            if let Some(control) = &self.1 {
+                control.input_test_transport_lost();
+            }
+        }
     }
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
         if state.to_string() == "complete" {
@@ -221,7 +243,9 @@ impl Session {
         let mut session = Self::new_relay(seconds, relay, control_session)?;
         let inner = Arc::get_mut(&mut session).ok_or("SESSION_ALREADY_SHARED")?;
         inner.synthetic = true;
-        inner.shared.update(|s| s.source_kind = "synthetic_nv12".into());
+        inner
+            .shared
+            .update(|s| s.source_kind = "synthetic_nv12".into());
         Ok(session)
     }
     pub fn new(seconds: u32) -> Result<Arc<Self>, String> {
@@ -260,6 +284,33 @@ impl Session {
         )?);
         Ok(this)
     }
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    pub(crate) fn new_lan_input_test(
+        seconds: u32,
+        scope: crate::scope::LanScope,
+        binding: crate::lan_input_queue::LanInputScope,
+        until: Instant,
+    ) -> Result<Arc<Self>, String> {
+        if !binding.matches_pair(scope) {
+            return Err("LAN_INPUT_TEST_SCOPE".into());
+        }
+        let id = binding.room().to_string();
+        let mut this = Self::configured(
+            seconds,
+            crate::scope::NetworkScope::Lan(scope),
+            Some(id.clone()),
+        )?;
+        let inner = Arc::get_mut(&mut this).ok_or("SESSION_ALREADY_SHARED")?;
+        inner.control = Some(crate::control_channel::Endpoint::new_input_test(
+            id,
+            inner.shared.stop.clone(),
+            seconds,
+            binding,
+            until,
+        )?);
+        Ok(this)
+    }
+
     fn with_network(
         seconds: u32,
         network: crate::scope::NetworkScope,
@@ -634,9 +685,8 @@ impl Session {
         }
         #[cfg(feature = "p006-direct")]
         if let Some(d) = &self.direct {
-            builder = builder.with_host_candidates(
-                d.grant.host_candidates_allowed(d.publish_private_local),
-            );
+            builder = builder
+                .with_host_candidates(d.grant.host_candidates_allowed(d.publish_private_local));
         }
         #[cfg(feature = "p006-direct")]
         if let Some(boundary) = &self.direct_boundary {
@@ -839,7 +889,7 @@ impl Session {
                 if !pair_ok {
                     return Err("INPUT_SELECTED_PAIR_NOT_APPROVED".into());
                 }
-                c.approve_verified_path();
+                c.approve_lan_input_path(scope)?;
             }
         }
         let (tx, mut rx) = mpsc::channel(3);

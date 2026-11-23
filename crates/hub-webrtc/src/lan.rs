@@ -112,7 +112,7 @@ fn reversed_scope(scope: LanScope) -> LanScope {
     }
 }
 
-#[cfg(feature = "v2-verified-lan")]
+#[cfg(any(feature = "v2-verified-lan", feature = "p3-lan-input-queue-test"))]
 fn check_verified_socket(
     socket: &TcpStream,
     scope: LanScope,
@@ -130,9 +130,29 @@ fn check_verified_socket(
     Ok(())
 }
 
+/// One host-local, affirmative share + input decision for the explicit private
+/// LAN test. This is a native caller assertion, not remote identity proof.
+#[cfg(feature = "p3-lan-input-queue-test")]
+pub struct HostInputTestApproval(Instant);
+
+#[cfg(feature = "p3-lan-input-queue-test")]
+impl HostInputTestApproval {
+    pub fn after_native_consent(
+        share_approved: bool,
+        input_approved: bool,
+    ) -> Result<Self, String> {
+        if !share_approved || !input_approved {
+            return Err("LAN_INPUT_NATIVE_CONSENT_REQUIRED".into());
+        }
+        Ok(Self(Instant::now()))
+    }
+}
+
 pub struct LanSession {
     #[cfg(feature = "p3-lan")]
     input_enabled: AtomicBool,
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    input_test_until: Option<Instant>,
     control_enabled: bool,
     control_session: Mutex<Option<String>>,
     scope: LanScope,
@@ -177,6 +197,8 @@ impl LanSession {
         Ok(Arc::new(Self {
             #[cfg(feature = "p3-lan")]
             input_enabled: AtomicBool::new(false),
+            #[cfg(feature = "p3-lan-input-queue-test")]
+            input_test_until: None,
             control_enabled,
             control_session: Mutex::new(if control_enabled && role == "receiver" {
                 Some(uuid::Uuid::new_v4().to_string())
@@ -234,6 +256,28 @@ impl LanSession {
         port: u16,
     ) -> Result<(Arc<Self>, String), String> {
         Self::host_mode(scope, seconds, port, true, true).await
+    }
+    /// Separate opt-in host path. It never substitutes the ordinary input lane.
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    pub async fn host_input_test(
+        scope: LanScope,
+        seconds: u32,
+        port: u16,
+        approval: HostInputTestApproval,
+    ) -> Result<(Arc<Self>, String), String> {
+        let scope = LanScope::new(scope.local, scope.peer)?;
+        let key = Key::generate();
+        let display = key.display();
+        let mut this = Self::new_mode(scope, seconds, port, "sender", key, true)?;
+        let until = approval.0 + Duration::from_secs(u64::from(seconds));
+        if Instant::now() >= until {
+            return Err("LAN_INPUT_TEST_APPROVAL_EXPIRED".into());
+        }
+        let inner = Arc::get_mut(&mut this).ok_or("LAN_ALREADY_SHARED")?;
+        inner.input_enabled.store(true, Ordering::Release);
+        inner.input_test_until = Some(until);
+        this.start_host().await?;
+        Ok((this, display))
     }
     #[cfg(feature = "p3-lan")]
     pub fn receiver_input(
@@ -510,6 +554,10 @@ impl LanSession {
         #[cfg(feature = "v2-verified-lan")]
         let mut signed_sdp = None;
         let deadline = Instant::now() + Duration::from_secs(120);
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        let deadline = self
+            .input_test_until
+            .map_or(deadline, |until| deadline.min(until));
         let mut accepted = None;
         let mut attempts = 0;
         while Instant::now() < deadline && !self.cancelled.load(Ordering::Acquire) && attempts < 5 {
@@ -550,7 +598,15 @@ impl LanSession {
                 accepted = Some((socket, codec, offer));
                 break;
             }
-            let frame = tokio::select! {r=timeout(Duration::from_secs(5),lan_wire::read(&mut socket))=>match r{Ok(Ok(f))=>f,_=>continue},_=self.cancelled()=>return Ok(())};
+            let frame_wait = Duration::from_secs(5);
+            #[cfg(feature = "p3-lan-input-queue-test")]
+            let frame_wait = if self.input_test_until.is_some() {
+                check_verified_socket(&socket, self.scope, self.port, true)?;
+                frame_wait.min(deadline.saturating_duration_since(Instant::now()))
+            } else {
+                frame_wait
+            };
+            let frame = tokio::select! {r=timeout(frame_wait,lan_wire::read(&mut socket))=>match r{Ok(Ok(f))=>f,_=>continue},_=self.cancelled()=>return Ok(())};
             let mut codec = match Codec::new(self.secret()?, frame.nonce.clone(), true) {
                 Ok(c) => c,
                 Err(_) => continue,
@@ -599,11 +655,27 @@ impl LanSession {
         });
         #[cfg(feature = "p3-lan")]
         let input_source = if self.input_enabled.load(Ordering::Acquire) {
-            Some(Session::new_lan_input(
-                self.seconds,
-                self.scope,
-                self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?,
-            )?)
+            let room = self.control_session().ok_or("CONTROL_CONTEXT_MISSING")?;
+            let source = || Session::new_lan_input(self.seconds, self.scope, room.clone());
+            #[cfg(feature = "p3-lan-input-queue-test")]
+            let source = || {
+                if let Some(until) = self.input_test_until {
+                    if Instant::now() >= until {
+                        return Err("LAN_INPUT_TEST_APPROVAL_EXPIRED".into());
+                    }
+                    let id = uuid::Uuid::parse_str(&room).map_err(|_| "CONTROL_SESSION_INVALID")?;
+                    if id.to_string() != room {
+                        return Err("CONTROL_SESSION_INVALID".into());
+                    }
+                    let binding =
+                        crate::lan_input_queue::LanInputScope::from_verified_lan(id, self.scope)
+                            .map_err(|_| "LAN_INPUT_TEST_SCOPE")?;
+                    Session::new_lan_input_test(self.seconds, self.scope, binding, until)
+                } else {
+                    source()
+                }
+            };
+            Some(source()?)
         } else {
             None
         };
@@ -931,6 +1003,10 @@ impl LanSession {
     }
    }
   }.await;
+        #[cfg(feature = "p3-lan-input-queue-test")]
+        if self.input_test_until.is_some() {
+            self.cancel();
+        }
         reader.abort();
         let _ = reader.await;
         use tokio::io::AsyncWriteExt;

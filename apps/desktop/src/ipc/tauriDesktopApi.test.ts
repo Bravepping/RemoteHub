@@ -25,6 +25,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
       v2_peer_pairing_enabled: true,
       v2_verified_lan_enabled: true,
       v2_private_wss_lan_enabled: true,
+      lan_input_queue_test: true,
       p007b_diag_enabled: false,
     });
     const result = await tauriDesktopApi.readRuntime();
@@ -36,6 +37,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
       v2_peer_pairing_enabled: true,
       v2_verified_lan_enabled: true,
       v2_private_wss_lan_enabled: true,
+      lan_input_queue_test: true,
       p007b_diag_enabled: false,
     });
     expect(Object.isFrozen(result)).toBe(true);
@@ -68,6 +70,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
     { ...fixture, v2_peer_pairing_enabled: 'true' },
     { ...fixture, v2_verified_lan_enabled: 'true' },
     { ...fixture, v2_private_wss_lan_enabled: 'true' },
+    { ...fixture, lan_input_queue_test: 'true' },
     { ...fixture, unexpected_private_field: 'private-fixture' },
     Object.create(fixture),
   ])(
@@ -82,6 +85,7 @@ describe('typed read-only Tauri IPC (SDK transport is a test fixture)', () => {
   it('keeps absent optional flags absent and copies the decoded object', () => {
     const result = decodeRuntimeInfo(fixture);
     expect('p004_enabled' in result).toBe(false);
+    expect('lan_input_queue_test' in result).toBe(false);
     expect(result).not.toBe(fixture);
   });
   it('redacts arbitrary native failures and reconstitutes known error messages', async () => {

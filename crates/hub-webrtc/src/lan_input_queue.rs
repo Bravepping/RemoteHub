@@ -1,5 +1,5 @@
-//! Feature-gated local adapter for fake-sink exercise only. This module
-//! neither opens a LAN connection nor authenticates, approves or injects input.
+//! Feature-gated serialized input owner for an explicitly approved LAN test.
+//! This module does not open connections or authenticate peers.
 
 use crate::{
     input_approval::{Binding, SessionSink, State},
@@ -37,6 +37,16 @@ impl LanInputScope {
             peer: pair.peer,
         })
     }
+
+    #[cfg(windows)]
+    pub(super) fn matches_pair(&self, pair: LanScope) -> bool {
+        self.local == pair.local && self.peer == pair.peer
+    }
+
+    #[cfg(windows)]
+    pub(super) fn room(&self) -> Uuid {
+        self.room
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -57,7 +67,7 @@ impl From<input_queue::Error> for Error {
 /// One validated v1 event may be outstanding. A successful enqueue grants
 /// no ACK and reserves no sequence permanently. The serialized owner must
 /// service local revoke/transport loss before dispatch, or call `advance`
-/// immediately when there is no event. This accepts no OS injector.
+/// immediately when there is no event. Tests use only fake sinks.
 pub struct LanInputQueue<S: SessionSink<Event = Event>> {
     scope: LanInputScope,
     protocol: Protocol,
@@ -142,6 +152,25 @@ impl<S: SessionSink<Event = Event>> LanInputQueue<S> {
                 }
             },
         }
+    }
+
+    /// Poll local revocation again after parsing/enqueueing and immediately
+    /// before dispatch. The caller holds its one input-owner mutex throughout.
+    #[cfg(any(windows, test))]
+    pub(super) fn process_v1(
+        &mut self,
+        scope: &LanInputScope,
+        bytes: &[u8],
+        text: bool,
+        mut controls: impl FnMut() -> Control,
+    ) -> Result<Option<u64>, Error> {
+        let control = controls();
+        if control != Control::Continue {
+            self.advance(control)?;
+            return Ok(None);
+        }
+        self.enqueue_v1(scope, bytes, text)?;
+        self.dispatch_next(scope, controls())
     }
 
     /// Drive on a timer even while idle, and on any local loss/revoke signal.
@@ -280,6 +309,30 @@ mod tests {
         );
         assert_eq!(queue.dispatch_next(&scope, Control::Continue), Ok(None));
         assert_eq!(sink.borrow().attempts, 1);
+    }
+
+    #[test]
+    fn synchronous_owner_resamples_revocation_after_enqueuing_before_any_apply() {
+        for cause in [Control::Revoke, Control::TransportLost] {
+            let (scope, mut queue, sink) = fixture();
+            queue.decide_locally(true).unwrap();
+            assert_eq!(
+                queue.process_v1(&scope, &wire(ROOM, 1, DOWN), true, || Control::Continue),
+                Ok(Some(1))
+            );
+            let mut samples = [Control::Continue, cause].into_iter();
+            assert_eq!(
+                queue.process_v1(&scope, &wire(ROOM, 2, UP), true, || samples.next().unwrap()),
+                Ok(None)
+            );
+            assert!(samples.next().is_none());
+            assert_eq!(queue.dispatch_next(&scope, Control::Continue), Ok(None));
+            let sink = sink.borrow();
+            assert_eq!(sink.attempts, 1);
+            assert_eq!(sink.release_calls, 1);
+            assert_eq!(sink.released, 1);
+            assert!(sink.local_press);
+        }
     }
 
     #[test]

@@ -43,6 +43,7 @@ const selector = '[aria-label="局域网会话模式"]';
 it('leaves the legacy flow unchanged when the verified capability is absent', async () => {
   const view = mount(RemoteWorkspace);
   expect(view.find(selector).exists()).toBe(false);
+  expect(view.text()).not.toContain('键鼠队列测试版');
   const [peer, local, pin, consent] = view.findAll('input');
   await peer.setValue('192.168.1.3');
   await local.setValue('192.168.1.2');
@@ -63,6 +64,50 @@ it('leaves the legacy flow unchanged when the verified capability is absent', as
     realControl: true,
     controlSim: false,
   });
+  view.unmount();
+});
+
+it('describes independent default-No host input approval in the opt-in test build', async () => {
+  const view = mount(RemoteWorkspace, { props: { lanInputQueueTest: true } });
+  expect(view.text()).toContain('键鼠队列测试版');
+  expect(view.text()).not.toContain('默认选择“否”');
+  await view.get('select').setValue('sender');
+  expect(view.text()).toContain('视频获批后，实际键鼠控制另有原生确认');
+  expect(view.text()).toContain('默认选择“否”');
+  expect(view.text()).toContain('此勾选不授权键鼠控制');
+  const [peer, local, consent] = view.findAll('input');
+  await peer.setValue('192.168.1.3');
+  await local.setValue('192.168.1.2');
+  await consent.setValue(true);
+  await view
+    .findAll('button')
+    .find((b) => b.text() === '确认后等待配对')!
+    .trigger('click');
+  expect(mocked.start).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      role: 'sender',
+      realControl: true,
+      consent: true,
+    }),
+  );
+  expect(view.text()).not.toContain('已批准本次实际键鼠控制');
+  mocked.reportError?.('Error: LAN_TEST_INPUT_CONSENT_DENIED');
+  await flushPromises();
+  expect(view.get('[role="alert"]').text()).toContain(
+    '本次键鼠控制未获原生批准，会话已中止，不会自动退回仅视频模式',
+  );
+  expect(mocked.start).toHaveBeenCalledTimes(1);
+  view.unmount();
+});
+
+it('does not show keyboard approval guidance in verified video, even on the test build', async () => {
+  const view = mount(RemoteWorkspace, {
+    props: { lanInputQueueTest: true, v2VerifiedLanEnabled: true },
+  });
+  await view.findAll('select')[1].setValue('sender');
+  await view.get(selector).setValue('verified');
+  expect(view.text()).toContain('仅观看，不授权键鼠');
+  expect(view.text()).not.toContain('默认选择“否”');
   view.unmount();
 });
 

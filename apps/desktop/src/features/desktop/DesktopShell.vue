@@ -121,6 +121,7 @@ onUnmounted(() => {
       <PublicVideoPanel v-if="runtime?.public_video_available" />
       <RemoteWorkspace
         v-else-if="runtime?.p3_enabled"
+        :lan-input-queue-test="runtime?.lan_input_queue_test === true"
         :v2-loopback-diagnostic-enabled="
           runtime?.v2_loopback_diagnostic_enabled === true
         "

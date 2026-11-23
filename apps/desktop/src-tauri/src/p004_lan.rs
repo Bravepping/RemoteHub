@@ -214,8 +214,12 @@ pub async fn p004_lan_start(
     } else {
         "接收并播放来自"
     };
+    let separate_input_consent =
+        cfg!(feature = "p3-lan-input-queue-test") && config.real_control && config.role == "sender";
     let control_text = if config.real_control {
-        if config.role == "sender" {
+        if separate_input_consent {
+            "\n这一项只批准本次视频；本机随后会单独询问是否允许键鼠。若拒绝键鼠测试，本轮会取消，不会开启共享。"
+        } else if config.role == "sender" {
             "\n允许指定对端在本次短会话通过 DataChannel 实际操作本机主屏鼠标和基本键盘。可随时点停止、关窗或在本机按 Ctrl+Alt+F12 紧急结束。不会授予无人值守或管理员权限。"
         } else {
             "\n本机将接收另一台主屏画面；只有你主动启用本次键鼠控制后，操作才经 DataChannel 发送给被控电脑。本机不会接收输入注入。Esc或画面失焦会暂停控制。"
@@ -230,7 +234,9 @@ pub async fn p004_lan_start(
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
             &HSTRING::from(message),
-            &HSTRING::from(if cfg!(feature = "p3-lan") {
+            &HSTRING::from(if separate_input_consent {
+                "RemoteHub · 局域网测试：画面授权"
+            } else if cfg!(feature = "p3-lan") {
                 "RemoteHub · 本次局域网远控授权"
             } else {
                 "RemoteHub · 本次双机视频实验"
@@ -246,6 +252,34 @@ pub async fn p004_lan_start(
     if state.closing.load(Ordering::Acquire) {
         return Err("WINDOW_CLOSING".into());
     }
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    let input_approval = if separate_input_consent {
+        crate::p004::origin(&window)?;
+        let prompt = format!(
+            "允许指定对端 {} 在本次局域网测试中操作本机主屏鼠标和基本键盘吗？\n\n权限最长 {} 秒，不授予管理员或无人值守权限。可点击「停止并回收」、关闭窗口，或在本机按 Ctrl+Alt+F12 紧急结束。\n\n选「否」将取消本轮，不会开始共享。",
+            scope.peer, config.seconds
+        );
+        let input_allowed = tauri::async_runtime::spawn_blocking(move || unsafe {
+            MessageBoxW(
+                Some(HWND(hwnd as *mut _)),
+                &HSTRING::from(prompt),
+                &HSTRING::from("RemoteHub · 局域网测试：独立键鼠授权"),
+                MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION,
+            ) == IDYES
+        })
+        .await
+        .map_err(|_| "CONSENT_DIALOG_FAILED")?;
+        if !input_allowed {
+            return Err("LAN_TEST_INPUT_CONSENT_DENIED".into());
+        }
+        if state.closing.load(Ordering::Acquire) {
+            return Err("WINDOW_CLOSING".into());
+        }
+        crate::p004::origin(&window)?;
+        Some(hub_webrtc::lan::HostInputTestApproval::after_native_consent(allowed, input_allowed)?)
+    } else {
+        None
+    };
     #[cfg(feature = "v2-verified-lan")]
     let verified_session = if let Some(peer) = verified {
         let identity = tauri::async_runtime::spawn_blocking(hub_identity::open_existing_default)
@@ -302,7 +336,18 @@ pub async fn p004_lan_start(
     } else if config.role == "sender" {
         #[cfg(feature = "p3-lan")]
         let input = if config.real_control {
-            Some(LanSession::host_input(scope, config.seconds, config.port).await?)
+            #[cfg(feature = "p3-lan-input-queue-test")]
+            {
+                let activation = input_approval.ok_or("LAN_TEST_INPUT_CONSENT_DENIED")?;
+                Some(
+                    LanSession::host_input_test(scope, config.seconds, config.port, activation)
+                        .await?,
+                )
+            }
+            #[cfg(not(feature = "p3-lan-input-queue-test"))]
+            {
+                Some(LanSession::host_input(scope, config.seconds, config.port).await?)
+            }
         } else {
             None
         };

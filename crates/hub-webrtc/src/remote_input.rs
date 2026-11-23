@@ -343,6 +343,19 @@ impl Sink for Injector {
         }
     }
 }
+#[cfg(all(windows, feature = "p3-lan-input-queue-test"))]
+impl crate::input_approval::SessionSink for Injector {
+    type Event = Event;
+
+    fn apply(&mut self, event: &Event) -> Result<(), crate::input_approval::SinkError> {
+        Sink::apply(self, event).map_err(|_| crate::input_approval::SinkError)
+    }
+
+    fn release_owned(&mut self) -> Result<(), crate::input_approval::SinkError> {
+        self.release().map_err(|_| crate::input_approval::SinkError)
+    }
+}
+
 #[cfg(windows)]
 impl Drop for Injector {
     fn drop(&mut self) {
