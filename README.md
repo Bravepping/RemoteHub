@@ -127,6 +127,7 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 ## 本分支已执行验证
 
+- R06 首轮公网尝试（用户操作）：信令 TCP 和 TURN UDP 均已监听，但发送端未进入等待对端便报 `P006_WSS_CLOSED`，未验证实际选路或画面。旧信令程序缺少 `direct_preferred` 标记；历史 `977f97f` 的握手严格拒绝这个字段。当前源码 `e186880` 的静态 Linux x64 信令程序已通过本机 WSS 实测：R06 发送端收到 `waiting`、双角色收到 `ready`，旧格式不带模式字段也可等待；`cargo test --locked --offline -p hub-rendezvous-probe --bin hub-rendezvous-probe` 6 项通过。新程序未上传云端或部署，未验证公网、TURN 转发或实际画面。
 - Windows x64 便携合成诊断包：应用源码 `6e149c7` 已用 `cargo build -p remotehub-desktop --target x86_64-pc-windows-gnullvm --profile probe --features p007b-diag,custom-protocol --locked` 交叉链接。已静态检查 AMD64 PE、动态依赖及 ZIP 内容；LLVM 版同目录提供匹配的 `WebView2Loader.dll` 和文件校验清单，未签名，不附私有配置，未在 Windows 实机运行。ZIP SHA-256：`61b2eb30ae68c57591938311b456112d52139af30f77e5d5d3072aa0cef7c11b`。此构建不等于公网验收。
 - `scripts/build-r06.ps1` 在 PowerShell 7 用替身编译器验证了 ZIP 文件白名单、可核对的 SHA-256、临时文件清理及拒绝覆盖/脏工作树；没有用替身产物冒充可执行包。前端冻结依赖、构建及 135 项测试通过。
 - Linux：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 通过（42 项）；覆盖发送、接收各自配置、错角色、双令牌拒绝及单机双令牌格式保持。后续已通过 `cargo check -p remotehub-desktop --target x86_64-pc-windows-msvc --features p007b-diag,custom-protocol --locked --offline`；这是编译检查，不等同于链接出正式 MSVC EXE 或实机测试。
