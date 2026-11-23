@@ -72,6 +72,7 @@ impl Session {
             s.diagnostic_transport = Some(DiagnosticTransport {
                 drop_direct,
                 dropped_packets: 0,
+                dropped_direct_checks: 0,
             })
         });
         Ok(s)
@@ -234,6 +235,17 @@ impl Session {
             local.as_ref().ok_or("DIRECT_LOCAL_CANDIDATES_MISSING")?,
             remote.as_ref().ok_or("DIRECT_REMOTE_CANDIDATES_MISSING")?,
         )?;
+        #[cfg(feature = "p006-session-probe")]
+        if self.redact_direct_sdp
+            && self
+                .direct_boundary
+                .as_ref()
+                .is_some_and(|b| b.drops_direct())
+            && summary.local_type != crate::direct_policy::Kind::Relay
+        {
+            self.shared.update(|s| s.native_path = None);
+            return Err("R06_FALLBACK_LOCAL_RELAY_REQUIRED".into());
+        }
         self.shared.update(|s| s.native_path = Some(summary));
         if let Some(control) = &self.control {
             control.approve_verified_path();

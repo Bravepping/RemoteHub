@@ -67,6 +67,22 @@ impl PrivateConfig {
     ) -> Result<Arc<Self>, String> {
         Self::load_inner(path, false, Some(role))
     }
+    #[cfg(feature = "p006-session-probe")]
+    pub fn load_operator_role_synthetic_with_fault(
+        path: &std::path::Path,
+        role: Role,
+        mode: PathMode,
+        drop_direct: bool,
+    ) -> Result<Arc<Self>, String> {
+        if drop_direct && (role != Role::Sender || mode != PathMode::DirectPreferred) {
+            return Err("R06_FALLBACK_SENDER_DIRECT_ONLY".into());
+        }
+        let mut config = Self::load_operator_role_synthetic(path, role)?;
+        Arc::get_mut(&mut config)
+            .ok_or("LOCAL_CONFIG_ALREADY_SHARED")?
+            .diagnostic_drop_direct = drop_direct;
+        Ok(config)
+    }
     pub(crate) fn invitation(&self, role: Role) -> Result<&str, String> {
         match role {
             Role::Sender => self.sender_invitation.as_deref(),
@@ -77,7 +93,10 @@ impl PrivateConfig {
     pub(crate) fn authorize_start(&self, role: Role, mode: PathMode) -> Result<(), String> {
         self.invitation(role)?;
         #[cfg(feature = "p006-session-probe")]
-        if self.synthetic_source && mode == PathMode::RelayOnly && !self.operator_role_scoped {
+        if self.synthetic_source
+            && mode == PathMode::RelayOnly
+            && (!self.operator_role_scoped || self.diagnostic_drop_direct)
+        {
             return Err("P006_SYNTHETIC_REQUIRES_DIRECT_MODE".into());
         }
         let _ = mode;

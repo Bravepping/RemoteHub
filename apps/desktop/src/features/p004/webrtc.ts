@@ -13,6 +13,11 @@ export interface NativeStats {
     remote_type: string;
     protocol: string;
   };
+  diagnostic_transport?: {
+    drop_direct: boolean;
+    dropped_packets: number;
+    dropped_direct_checks?: number;
+  } | null;
   source_kind?: string;
   state: string;
   elapsed_ms: number;

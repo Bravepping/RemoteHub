@@ -95,6 +95,7 @@ pub struct Stats {
 pub struct DiagnosticTransport {
     pub drop_direct: bool,
     pub dropped_packets: u64,
+    pub dropped_direct_checks: u64,
 }
 
 struct Shared {
@@ -337,6 +338,7 @@ impl Session {
             #[cfg(feature = "p006-session-probe")]
             if let Some(f) = &mut stats.diagnostic_transport {
                 f.dropped_packets = b.counters.fault_dropped.load(Ordering::Relaxed);
+                f.dropped_direct_checks = b.counters.fault_direct_checks.load(Ordering::Relaxed);
             }
         }
         stats

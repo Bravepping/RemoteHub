@@ -50,6 +50,9 @@ pub struct Config {
     seconds: u32,
     local_ip: Ipv4Addr,
     pairing_code: Option<String>,
+    #[cfg(feature = "p007b-diag")]
+    #[serde(default)]
+    diagnostic_drop_direct: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -129,7 +132,7 @@ pub async fn p006_start(
         return Err("P006_CONFIG_INVALID".into());
     }
     #[cfg(feature = "p007b-diag")]
-    crate::p007b_diag::validate(config.mode, config.seconds)?;
+    crate::p007b_diag::validate(config.mode, config.seconds, config.role, config.diagnostic_drop_direct)?;
     if (config.mode == PathMode::DirectPreferred && !cfg!(feature = "p006-direct"))
         || config.peer_ip.is_some_and(|ip| !ip.is_private())
         || (config.mode == PathMode::RelayOnly && config.peer_ip.is_some())
@@ -161,7 +164,7 @@ pub async fn p006_start(
             "p006b-private.json"
         });
     #[cfg(feature = "p007b-diag")]
-    let private = crate::p007b_diag::load(&path, config.role)?;
+    let private = crate::p007b_diag::load(&path, config.role, config.mode, config.diagnostic_drop_direct)?;
     #[cfg(not(feature = "p007b-diag"))]
     let private = PrivateConfig::load(&path)?;
     drop(
@@ -199,7 +202,15 @@ pub async fn p006_start(
     } else {
         "仅加密 TURN 中继，不尝试直连"
     };
-    let message=format!("本次将{action}，视频最长{}秒。\n连接策略：{strategy}。{private_peer}\n\n信令服务器：{}:{}（应用专用证书）。只记录脱敏统计，不保存画面，不执行键盘鼠标输入。\n配对最长等待120秒，随时停止，断线终止。\n\n是否批准本次实验？",config.seconds, private.server_ipv4, private.signaling_port);
+    #[cfg(feature = "p007b-diag")]
+    let simulated_fault = if config.diagnostic_drop_direct {
+        "\n本轮仅在发送端实验进程内模拟直连不可用。仍使用优先直连策略，保留 TURN，不修改系统网络。"
+    } else {
+        ""
+    };
+    #[cfg(not(feature = "p007b-diag"))]
+    let simulated_fault = "";
+    let message=format!("本次将{action}，视频最长{}秒。\n连接策略：{strategy}。{private_peer}{simulated_fault}\n\n信令服务器：{}:{}（应用专用证书）。只记录脱敏统计，不保存画面，不执行键盘鼠标输入。\n配对最长等待120秒，随时停止，断线终止。\n\n是否批准本次实验？",config.seconds, private.server_ipv4, private.signaling_port);
     let allowed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),

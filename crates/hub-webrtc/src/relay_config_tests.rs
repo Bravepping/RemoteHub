@@ -83,6 +83,29 @@ fn synthetic_dual_pc_configs_never_need_the_other_roles_invitation() {
             Some("P006_INVITATION_ROLE_MISMATCH")
         );
         assert!(cfg.authorize_start(role, PathMode::RelayOnly).is_ok());
+        let fault = PrivateConfig::load_operator_role_synthetic_with_fault(
+            &path,
+            role,
+            PathMode::DirectPreferred,
+            true,
+        );
+        if role == Role::Sender {
+            let fault = fault.unwrap();
+            assert!(fault.diagnostic_drop_direct);
+            assert!(fault
+                .authorize_start(role, PathMode::DirectPreferred)
+                .is_ok());
+            assert!(fault.authorize_start(role, PathMode::RelayOnly).is_err());
+        } else {
+            assert!(fault.is_err());
+        }
+        assert!(PrivateConfig::load_operator_role_synthetic_with_fault(
+            &path,
+            role,
+            PathMode::RelayOnly,
+            true,
+        )
+        .is_err());
         assert!(cfg
             .authorize_start(role.opposite(), PathMode::RelayOnly)
             .is_err());

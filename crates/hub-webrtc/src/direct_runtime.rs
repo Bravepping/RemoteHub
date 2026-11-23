@@ -23,12 +23,13 @@ pub struct Counters {
     pub rejected_rx: AtomicU64,
     pub rejected_tx: AtomicU64,
     pub fault_dropped: AtomicU64,
+    pub fault_direct_checks: AtomicU64,
 }
 pub struct Boundary {
     local: Ipv4Addr,
     scope: uuid::Uuid,
     server: Option<SocketAddr>,
-    peers: RwLock<Option<Vec<SocketAddr>>>,
+    peers: RwLock<Option<Vec<(SocketAddr, crate::direct_policy::Kind)>>>,
     deadline: Instant,
     stopped: AtomicBool,
     drop_direct: bool,
@@ -100,7 +101,7 @@ impl Boundary {
             checked
                 .values
                 .iter()
-                .map(|c| SocketAddr::V4(c.address))
+                .map(|c| (SocketAddr::V4(c.address), c.kind))
                 .collect(),
         );
         Ok(())
@@ -114,12 +115,42 @@ impl Boundary {
     fn allowed(&self, addr: SocketAddr) -> bool {
         self.active()
             && (Some(addr) == self.server
-                || self
-                    .peers
-                    .read()
-                    .ok()
-                    .is_some_and(|p| p.as_ref().is_some_and(|p| p.contains(&addr))))
+                || self.peers.read().ok().is_some_and(|p| {
+                    p.as_ref()
+                        .is_some_and(|p| p.iter().any(|(a, _)| *a == addr))
+                }))
     }
+    #[cfg(all(windows, feature = "p006-session-probe"))]
+    pub(crate) fn drops_direct(&self) -> bool {
+        self.drop_direct
+    }
+
+    fn record_dropped_direct_check(&self, addr: SocketAddr, data: &[u8]) {
+        use crate::direct_policy::Kind;
+        if !self.drop_direct
+            || Some(addr) == self.server
+            || data.len() < 20
+            || data[..2] != [0, 1]
+            || data[4..8] != [0x21, 0x12, 0xa4, 0x42]
+        {
+            return;
+        }
+        let signed_direct = self.peers.read().ok().is_some_and(|p| {
+            p.as_ref().is_some_and(|ps| {
+                ps.iter()
+                    .any(|(a, kind)| *a == addr && matches!(kind, Kind::Host | Kind::Srflx))
+                    && !ps
+                        .iter()
+                        .any(|(a, kind)| *a == addr && *kind == Kind::Relay)
+            })
+        });
+        if signed_direct {
+            self.counters
+                .fault_direct_checks
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
     fn dropped(&self, addr: SocketAddr) -> bool {
         if Some(addr) == self.server {
             self.drop_turn
@@ -224,6 +255,8 @@ impl AsyncUdpSocket for Socket {
             )));
         }
         if self.boundary.dropped(t.destination) {
+            self.boundary
+                .record_dropped_direct_check(t.destination, t.contents);
             self.boundary
                 .counters
                 .fault_dropped
@@ -347,6 +380,79 @@ mod tests {
             .wrap_udp_socket(std::net::UdpSocket::bind("0.0.0.0:0").unwrap())
             .is_err());
     }
+    #[tokio::test]
+    async fn sender_fault_drops_signed_direct_checks_but_preserves_the_turn_socket() {
+        let turn = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let relay = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let server = turn.local_addr().unwrap();
+        let peer_addr = peer.local_addr().unwrap();
+        let relay_addr = relay.local_addr().unwrap();
+        let mut boundary = Boundary::build(
+            Ipv4Addr::LOCALHOST,
+            Some(server),
+            Duration::from_secs(5),
+            uuid::Uuid::new_v4(),
+        )
+        .unwrap();
+        assert!(!boundary.dropped(peer_addr));
+        Arc::get_mut(&mut boundary).unwrap().drop_direct = true;
+        let candidate = |a, kind| match a {
+            SocketAddr::V4(address) => Candidate { address, kind },
+            _ => unreachable!(),
+        };
+        boundary
+            .install_peer(VerifiedCandidates {
+                scope: boundary.scope,
+                values: vec![
+                    candidate(peer_addr, Kind::Srflx),
+                    candidate(relay_addr, Kind::Relay),
+                ],
+            })
+            .unwrap();
+        let rt = DirectRuntime {
+            inner: webrtc::runtime::default_runtime().unwrap(),
+            boundary: boundary.clone(),
+        };
+        let raw = std::net::UdpSocket::bind("127.0.0.1:0").unwrap();
+        raw.set_nonblocking(true).unwrap();
+        let socket = rt.wrap_udp_socket(raw).unwrap();
+        let mut binding = [0u8; 20];
+        binding[1] = 1;
+        binding[4..8].copy_from_slice(&[0x21, 0x12, 0xa4, 0x42]);
+        assert_eq!(
+            socket.send_to(&binding, peer_addr).await.unwrap(),
+            binding.len()
+        );
+        assert!(peer.try_recv_from(&mut [0; 32]).is_err());
+        socket.send_to(&binding, relay_addr).await.unwrap();
+        socket.send_to(b"not a binding", peer_addr).await.unwrap();
+        assert_eq!(boundary.counters.fault_dropped.load(Ordering::Relaxed), 3);
+        assert_eq!(
+            boundary
+                .counters
+                .fault_direct_checks
+                .load(Ordering::Relaxed),
+            1
+        );
+        socket.send_to(&binding, server).await.unwrap();
+        let mut buf = [0; 32];
+        let (n, _) = tokio::time::timeout(Duration::from_secs(1), turn.recv_from(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(&buf[..n], &binding);
+        assert_eq!(
+            boundary
+                .counters
+                .fault_direct_checks
+                .load(Ordering::Relaxed),
+            1
+        );
+        boundary.stop();
+        assert!(socket.send_to(&binding, server).await.is_err());
+    }
+
     #[test]
     fn foreign_session_and_expired_grants_fail_closed() {
         let grant = DirectGrant::local_diagnostic("192.168.1.2".parse().unwrap(), 1300, true, 1000)

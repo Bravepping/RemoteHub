@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
+import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { RelayProbe, type RelayMode } from './relay';
@@ -25,12 +25,32 @@ const localIp = ref('');
 const inputCode = ref('');
 const hostCode = ref('');
 const consent = ref(false);
+const simulateDrop = ref(false);
+const dropRequested = ref(false);
+const dropAllowed = computed(
+  () =>
+    props.diagnosticOnly === true &&
+    props.directEnabled === true &&
+    mode.value === 'direct_preferred' &&
+    role.value === 'sender',
+);
 const busy = ref(false);
 const state = ref('idle');
 const error = ref('');
 const saved = ref('');
 const status = ref<LanStatus>();
 const receiver = ref<LanReceiver>();
+const dropEvidence = computed(() => {
+  if (!props.diagnosticOnly || role.value !== 'sender') return undefined;
+  const evidence = status.value?.source?.diagnostic_transport;
+  return typeof evidence?.drop_direct === 'boolean' ? evidence : undefined;
+});
+const nativePath = computed(() => {
+  const path = status.value?.source?.native_path;
+  return path?.path === 'direct' || path?.path === 'relay'
+    ? path.path
+    : undefined;
+});
 let probe: RelayProbe | undefined;
 let unlistenClose: UnlistenFn | undefined;
 watch(mode, () => {
@@ -38,6 +58,26 @@ watch(mode, () => {
   consent.value = false;
   if (mode.value !== 'direct_preferred') peerIp.value = '';
 });
+watch(
+  dropAllowed,
+  () => {
+    simulateDrop.value = false;
+    consent.value = false;
+  },
+  { flush: 'sync' },
+);
+watch(
+  simulateDrop,
+  () => {
+    consent.value = false;
+  },
+  { flush: 'sync' },
+);
+function count(value: number | undefined) {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : '未获得';
+}
 function modeLabel(selected: RelayMode | '') {
   if (selected === 'direct_preferred') return '优先直连，需要时自动中继';
   if (selected === 'relay_only') return '两端强制 TURN';
@@ -89,6 +129,8 @@ async function start() {
   )
     return;
   busy.value = true;
+  const dropDirect = dropAllowed.value && simulateDrop.value;
+  dropRequested.value = dropDirect;
   error.value = '';
   saved.value = '';
   status.value = undefined;
@@ -120,6 +162,7 @@ async function start() {
     seconds: props.diagnosticOnly ? 8 : 30,
     pairingCode: inputCode.value,
     mode: picked,
+    ...(dropDirect ? { diagnosticDropDirect: true as const } : {}),
     peerIp:
       picked === 'direct_preferred' && peerIp.value.trim()
         ? peerIp.value.trim()
@@ -127,6 +170,7 @@ async function start() {
   };
   inputCode.value = '';
   consent.value = false;
+  simulateDrop.value = false;
   await probe.start(config, props.diagnosticOnly === true);
 }
 onBeforeUnmount(() => {
@@ -210,8 +254,22 @@ onBeforeUnmount(() => {
           autocomplete="off"
       /></label>
     </div>
+    <template v-if="dropAllowed && !busy">
+      <label>
+        <input
+          id="r06-diagnostic-drop-direct"
+          v-model="simulateDrop"
+          type="checkbox"
+        />
+        模拟直连不可用（仅本次合成诊断）
+      </label>
+      <p>
+        两端都选“优先直连，允许中继”。只在发送端勾选此项，接收端照常确认本轮诊断。
+      </p>
+    </template>
     <label
       ><input
+        id="p006-consent"
         v-model="consent"
         type="checkbox"
         :disabled="busy || (props.diagnosticOnly && !mode)"
@@ -279,6 +337,19 @@ onBeforeUnmount(() => {
       远端
       {{ status?.source?.direct_pair_diagnostic?.remote.reason ?? '未获得' }}。
       独立最终统计会在停止时保存；缺失不会显示为通过。
+    </p>
+    <p v-if="props.diagnosticOnly && dropRequested && busy">
+      本轮已请求模拟直连不可用，是否生效以原生统计为准。
+    </p>
+    <p v-if="dropEvidence" aria-label="原生直连模拟统计">
+      原生报告：模拟直连不可用{{
+        dropEvidence.drop_direct ? '已启用' : '未启用'
+      }}； 拦截直连 ICE 检查 {{ count(dropEvidence.dropped_direct_checks) }}；
+      拦截数据包总数 {{ count(dropEvidence.dropped_packets) }}。
+      此统计不表示中继已通过。
+    </p>
+    <p v-if="props.diagnosticOnly && nativePath">
+      发送端实际路径：{{ nativePath === 'direct' ? '直连' : '中继' }}。
     </p>
     <p v-if="saved">统计已保存：{{ saved }}</p>
     <video ref="video" autoplay muted playsinline></video>

@@ -167,11 +167,22 @@ export class RelayProbe {
       pairingCode?: string;
       mode?: RelayMode;
       peerIp?: string;
+      diagnosticDropDirect?: true;
     },
     diagnostic = false,
   ) {
     this.receiverRole = config.role === 'receiver';
     try {
+      if (
+        config.diagnosticDropDirect &&
+        (!diagnostic ||
+          !this.directFeatureEnabled ||
+          config.role !== 'sender' ||
+          config.mode !== 'direct_preferred' ||
+          config.seconds !== 8 ||
+          !config.consent)
+      )
+        throw new Error('R06_EXPLICIT_MODE_REQUIRED');
       if (diagnostic) {
         if (
           config.seconds !== 8 ||
