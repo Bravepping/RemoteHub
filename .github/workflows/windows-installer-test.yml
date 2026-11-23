@@ -1,0 +1,60 @@
+name: Windows x64 installer test
+
+# Onboarding build: ordinary source pushes do not run this workflow.
+on:
+  push:
+    branches: [v2/clean-core]
+    paths: [.github/workflows/windows-installer-test.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-2025
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          package-manager-cache: false
+
+      - name: Install locked build dependencies
+        shell: pwsh
+        run: |
+          npm install --global pnpm@11.25.0
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          rustup show
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build the unsigned per-user LAN installer
+        shell: pwsh
+        run: pnpm installer:windows
+
+      - name: Stage only the installer and its checksum
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -LiteralPath 'target/x86_64-pc-windows-msvc/release/bundle/nsis' -File -Filter '*-setup.exe')
+          if ($installers.Count -ne 1) { throw "Expected one NSIS installer; found $($installers.Count)." }
+          $out = Join-Path $env:RUNNER_TEMP 'remotehub-installer-artifact'
+          New-Item -Path $out -ItemType Directory -ErrorAction Stop | Out-Null
+          $name = 'RemoteHub-Windows-x64-LAN-Setup.exe'
+          $file = Join-Path $out $name
+          Copy-Item -LiteralPath $installers[0].FullName -Destination $file
+          $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath (Join-Path $out 'SHA256SUMS.txt') -Value "$hash  $name" -Encoding ascii
+          Write-Output "$hash  $name"
+
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: RemoteHub-Windows-x64-LAN-Installer
+          path: |
+            ${{ runner.temp }}/remotehub-installer-artifact/RemoteHub-Windows-x64-LAN-Setup.exe
+            ${{ runner.temp }}/remotehub-installer-artifact/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 1
