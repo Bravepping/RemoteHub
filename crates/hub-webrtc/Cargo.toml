@@ -27,6 +27,11 @@ path = "src/bin/turn-allocate-probe.rs"
 required-features = ["p006-turn-probe"]
 
 [[bin]]
+name = "remotehub-input-local-check"
+path = "src/bin/remotehub-input-local-check.rs"
+required-features = ["v2-input-approval"]
+
+[[bin]]
 name = "ice-path-probe"
 path = "src/bin/ice-path-probe.rs"
 required-features = ["p006-direct-probe"]
