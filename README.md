@@ -127,6 +127,7 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 ## 本分支已执行验证
 
+- Windows x64 便携合成诊断包：应用源码 `6e149c7` 已用 `cargo build -p remotehub-desktop --target x86_64-pc-windows-gnullvm --profile probe --features p007b-diag,custom-protocol --locked` 交叉链接。已静态检查 AMD64 PE、动态依赖及 ZIP 内容；LLVM 版同目录提供匹配的 `WebView2Loader.dll` 和文件校验清单，未签名，不附私有配置，未在 Windows 实机运行。ZIP SHA-256：`61b2eb30ae68c57591938311b456112d52139af30f77e5d5d3072aa0cef7c11b`。此构建不等于公网验收。
 - `scripts/build-r06.ps1` 在 PowerShell 7 用替身编译器验证了 ZIP 文件白名单、可核对的 SHA-256、临时文件清理及拒绝覆盖/脏工作树；没有用替身产物冒充可执行包。前端冻结依赖、构建及 135 项测试通过。
 - Linux：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 通过（42 项）；覆盖发送、接收各自配置、错角色、双令牌拒绝及单机双令牌格式保持。后续已通过 `cargo check -p remotehub-desktop --target x86_64-pc-windows-msvc --features p007b-diag,custom-protocol --locked --offline`；这是编译检查，不等同于链接出正式 MSVC EXE 或实机测试。
 - Linux：`cargo test -p hub-webrtc --features p006-direct-probe --lib --locked --offline` 40 项通过。新增自动回归只绑定 `127.0.0.1`，使用两端各自的授权范围建立真实原生 WebRTC DataChannel，100 条合成文本全部收齐并收到 ACK；读取两端实际选中的 UDP 主机候选对后，双方正常关闭。测试入口不编入正式探测器；`cargo check -p hub-webrtc --features p006-direct-probe --bin ice-path-probe --locked --offline` 通过。此前 `p006-session-probe` 编译检查也已通过。未启动 STUN/TURN，未做跨网双机验证。
