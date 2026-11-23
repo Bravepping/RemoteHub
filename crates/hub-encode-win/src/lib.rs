@@ -97,3 +97,53 @@ impl EncoderConfig {
         )
     }
 }
+
+/// Only the consented public video test producer uses this fixed duration.
+#[cfg(feature = "v2-public-video-60s-test")]
+pub const PUBLIC_VIDEO_TEST_SECONDS: u32 = 60;
+
+#[cfg(all(feature = "v2-public-video-60s-test", any(windows, test)))]
+fn public_video_test_config(approved: bool) -> Result<(EncoderConfig, u32), EncodeError> {
+    let config = EncoderConfig::default();
+    config.validate(approved)?;
+    // The Media Foundation opener also validates this ordinary media
+    // configuration. The experiment's duration is a separate pacing budget.
+    Ok((config, PUBLIC_VIDEO_TEST_SECONDS * config.fps))
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_encoder_config_is_still_bounded_to_thirty_seconds() {
+        for (seconds, valid) in [(0, false), (1, true), (30, true), (31, false), (60, false)] {
+            assert_eq!(
+                EncoderConfig {
+                    seconds,
+                    ..Default::default()
+                }
+                .validate(true)
+                .is_ok(),
+                valid
+            );
+        }
+    }
+
+    #[cfg(feature = "v2-public-video-60s-test")]
+    #[test]
+    fn long_public_video_experiment_has_fixed_format_and_requires_consent() {
+        assert!(matches!(
+            public_video_test_config(false),
+            Err(EncodeError::ConsentRequired)
+        ));
+        let (config, ticks) = public_video_test_config(true).unwrap();
+        assert_eq!(
+            (config.width, config.height, config.fps, config.bitrate),
+            (1280, 720, 30, 4_000_000)
+        );
+        assert_eq!(PUBLIC_VIDEO_TEST_SECONDS, 60);
+        assert_eq!(ticks, 1800);
+        assert!(config.validate(true).is_ok(), "must pass MF validation");
+    }
+}

@@ -114,7 +114,7 @@ pub(super) struct FixtureTurn {
 
 impl FixtureTurn {
     pub(super) async fn start(lifetime_seconds: u32) -> io::Result<Self> {
-        if !(1..=30).contains(&lifetime_seconds) {
+        if !(1..=90).contains(&lifetime_seconds) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "fixture TTL out of range",

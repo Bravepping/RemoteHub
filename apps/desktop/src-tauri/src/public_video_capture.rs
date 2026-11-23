@@ -14,7 +14,11 @@ use tokio::{
     time::{timeout, Instant},
 };
 
+#[cfg(not(feature = "v2-public-video-60s-test"))]
 pub(crate) const CAPTURE_WINDOW: Duration = Duration::from_secs(15);
+#[cfg(feature = "v2-public-video-60s-test")]
+pub(crate) const CAPTURE_WINDOW: Duration =
+    Duration::from_secs(hub_encode_win::PUBLIC_VIDEO_TEST_SECONDS as u64);
 const PATH_WAIT: Duration = Duration::from_secs(25);
 const SEND_WAIT: Duration = Duration::from_millis(250);
 // Bound the native handoff before packetization allocates anything. The scoped
@@ -59,12 +63,22 @@ pub(crate) async fn run(
     stop: watch::Receiver<bool>,
     phase: watch::Receiver<ScopedWssState>,
 ) -> CaptureOutcome {
-    use hub_encode_win::{EncodeError, EncoderConfig};
-    use std::sync::atomic::AtomicBool;
+    use hub_encode_win::stream::{self, StreamReport};
+    use hub_encode_win::EncodeError;
+    #[cfg(not(feature = "v2-public-video-60s-test"))]
+    use {hub_encode_win::EncoderConfig, std::sync::atomic::AtomicBool};
 
     run_with_source(sender, stop, phase, CAPTURE_WINDOW, |handoff| {
         let mut handoff_error = None;
-        let result = hub_encode_win::stream::run(
+        let publish = |_: &StreamReport| handoff.mark_started();
+        let sink = |frame| {
+            handoff.push(frame).map_err(|code| {
+                handoff_error = Some(code);
+                EncodeError::Native(code.into())
+            })
+        };
+        #[cfg(not(feature = "v2-public-video-60s-test"))]
+        let result = stream::run(
             true,
             EncoderConfig {
                 seconds: CAPTURE_WINDOW.as_secs() as u32,
@@ -72,14 +86,11 @@ pub(crate) async fn run(
             },
             handoff.cancel.clone(),
             &AtomicBool::new(false),
-            |_| handoff.mark_started(),
-            |frame| {
-                handoff.push(frame).map_err(|code| {
-                    handoff_error = Some(code);
-                    EncodeError::Native(code.into())
-                })
-            },
+            publish,
+            sink,
         );
+        #[cfg(feature = "v2-public-video-60s-test")]
+        let result = stream::run_public_video_60s_test(true, handoff.cancel.clone(), publish, sink);
         result
             .map(|_| ())
             .map_err(|_| handoff_error.unwrap_or("PUBLIC_VIDEO_CAPTURE_ENCODER_FAILED"))
@@ -129,7 +140,10 @@ async fn run_with_source(
         (result, MonotonicInstant::now())
     });
 
+    #[cfg(not(feature = "v2-public-video-60s-test"))]
     let mut packetizer = Packetizer::default();
+    #[cfg(feature = "v2-public-video-60s-test")]
+    let mut packetizer = Packetizer::public_video_60s_test();
     let end = tokio::select! {
         biased;
         _ = stop.wait_for(|&stop| stop) => Ok(CaptureEnd::LocalStop),
@@ -263,6 +277,16 @@ mod tests {
             is_idr: true,
             encode_elapsed_ms: 0.0,
         }
+    }
+
+    #[test]
+    fn capture_window_is_compile_time_only() {
+        let expected = if cfg!(feature = "v2-public-video-60s-test") {
+            60
+        } else {
+            15
+        };
+        assert_eq!(CAPTURE_WINDOW.as_secs(), expected);
     }
 
     #[tokio::test]

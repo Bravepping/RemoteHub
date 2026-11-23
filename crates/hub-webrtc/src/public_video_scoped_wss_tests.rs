@@ -42,6 +42,9 @@ use turn_fixture::{FixtureDirectSide, FixtureTurn, RELAY_LABEL, RELAY_PORTS};
 
 const WAIT: Duration = Duration::from_secs(6);
 const TURN_TTL_SECS: u32 = 8;
+#[cfg(feature = "v2-public-video-60s-test")]
+const MINUTE_TURN_TTL_SECS: u32 = 75;
+const MINUTE_MEDIA_SECS: u64 = 60;
 const LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -229,15 +232,20 @@ enum TestMedia {
     None,
     Burst,
     Sustained,
+    #[cfg(feature = "v2-public-video-60s-test")]
+    SustainedMinute,
 }
 
 async fn exercise(abrupt: bool, path: TestPath, traffic: TestMedia) {
     let mut tls = RelayFixture::start().await;
     let relay_only = path == TestPath::RelayOnly;
-    let turn_ttl = if traffic == TestMedia::Sustained {
-        12
-    } else {
-        TURN_TTL_SECS
+    let turn_ttl = match traffic {
+        TestMedia::Sustained => 12,
+        // The fixed fixture lease must cover ICE/DTLS setup and the
+        // minute of media. The signed scoped WSS lifetime is still 120s.
+        #[cfg(feature = "v2-public-video-60s-test")]
+        TestMedia::SustainedMinute => MINUTE_TURN_TTL_SECS,
+        _ => TURN_TTL_SECS,
     };
     let (nat, turn) = if path == TestPath::DirectOnly {
         (Some(FixtureNat::start().await.unwrap()), None)
@@ -419,10 +427,11 @@ async fn exercise(abrupt: bool, path: TestPath, traffic: TestMedia) {
             host_stop.send_replace(true);
         }
     };
-    let active_budget = if traffic == TestMedia::Sustained {
-        Duration::from_secs(10)
-    } else {
-        WAIT
+    let active_budget = match traffic {
+        TestMedia::Sustained => Duration::from_secs(10),
+        #[cfg(feature = "v2-public-video-60s-test")]
+        TestMedia::SustainedMinute => Duration::from_secs(73),
+        _ => WAIT,
     };
     let (host_result, viewer_result, ()) = timeout(active_budget, async {
         tokio::join!(
@@ -569,11 +578,21 @@ async fn loopback_access_units(
     let (count, cadence, step_us, budget) = match traffic {
         TestMedia::Burst => (64, 5, 25_000, 2500),
         TestMedia::Sustained => (100, 40, 40_000, 7000),
+        #[cfg(feature = "v2-public-video-60s-test")]
+        TestMedia::SustainedMinute => (MINUTE_MEDIA_SECS * 25, 40, 40_000, 66_000),
         TestMedia::None => unreachable!("no media fixture"),
     };
     let (annex_b, _) = normalize(AU, Framing::AnnexB).unwrap();
-    let begin = Instant::now();
-    let mut packetizer = crate::video::Packetizer::default();
+    let begin = std::time::Instant::now();
+    let period = Duration::from_millis(cadence);
+    let mut tick = tokio::time::interval_at(Instant::now() + period, period);
+    // No catch-up burst after a delayed poll of the one-minute fixture.
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    let (mut packetizer, minute) = match traffic {
+        #[cfg(feature = "v2-public-video-60s-test")]
+        TestMedia::SustainedMinute => (crate::video::Packetizer::public_video_60s_test(), true),
+        _ => (crate::video::Packetizer::default(), false),
+    };
     let mut packets_for = |ordinal: u64| {
         let frame = EncodedVideoFrame {
             annex_b: AU.to_vec(),
@@ -591,13 +610,18 @@ async fn loopback_access_units(
         tokio::join!(
             async {
                 for ordinal in 0..count {
+                    if minute {
+                        tick.tick().await;
+                    }
                     producer
                         .send_access_unit(packets_for(ordinal))
                         .await
                         .unwrap();
-                    // Give the finite display queue room without throttling
-                    // to the signaling poll interval for each RTP packet.
-                    tokio::time::sleep(Duration::from_millis(cadence)).await;
+                    if !minute {
+                        // Give the finite display queue room without polling
+                        // the signaling path serially for each RTP packet.
+                        tokio::time::sleep(period).await;
+                    }
                 }
             },
             async {
@@ -613,8 +637,15 @@ async fn loopback_access_units(
     })
     .await
     .expect("continuous synthetic H.264 must not wait for WSS per packet");
-    if traffic == TestMedia::Sustained {
-        assert!(begin.elapsed() >= Duration::from_secs(3));
+    if traffic == TestMedia::Sustained || minute {
+        let elapsed = begin.elapsed();
+        let minimum = if minute {
+            eprintln!("verified {count} paced loopback TURN access units in {elapsed:?}");
+            MINUTE_MEDIA_SECS
+        } else {
+            3
+        };
+        assert!(elapsed >= Duration::from_secs(minimum));
         producer.send_access_unit(packets_for(count)).await.unwrap();
         timeout(Duration::from_secs(1), async {
             while !consumer.fixture_has_queued_frame() {
@@ -644,4 +675,11 @@ async fn scoped_wss_carries_continuous_synthetic_h264_through_mock_turn() {
 #[tokio::test]
 async fn scoped_wss_clears_media_when_signaling_drops_during_sustained_mock_turn() {
     exercise(true, TestPath::RelayOnly, TestMedia::Sustained).await;
+}
+
+#[cfg(feature = "v2-public-video-60s-test")]
+#[tokio::test]
+#[ignore = "real-time 60 s loopback TURN soak test, followed by allocation expiry"]
+async fn scoped_wss_sustains_minute_of_h264_over_mock_turn_and_revokes_on_stop() {
+    exercise(false, TestPath::RelayOnly, TestMedia::SustainedMinute).await;
 }

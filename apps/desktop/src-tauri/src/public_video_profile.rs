@@ -26,7 +26,12 @@ use zeroize::Zeroizing;
 const MAX_FILE: usize = 32 * 1024;
 const MAX_CA_DER: usize = 16 * 1024;
 const MAX_TTL: u64 = 600;
+#[cfg(not(feature = "v2-public-video-60s-test"))]
 const MIN_TURN_TTL: u64 = 60;
+// The extended build must have enough already-approved lease time for
+// pairing, path verification and a full 60-second capture. Never renew.
+#[cfg(feature = "v2-public-video-60s-test")]
+const MIN_TURN_TTL: u64 = 150;
 const INVALID: &str = "PUBLIC_VIDEO_PROFILE_INVALID";
 const FILE: &str = "PUBLIC_VIDEO_PROFILE_FILE";
 const SIZE: &str = "PUBLIC_VIDEO_PROFILE_SIZE";
@@ -426,6 +431,7 @@ mod tests {
     use serde_json::{json, Value};
 
     const NOW: u64 = 10_000;
+    const FIXTURE_TURN_TTL: u64 = MIN_TURN_TTL + 40;
     const ROOM: &str = "12345678-1234-4234-8234-123456789abc";
     // Public, independently generated test CA; no corresponding key is stored.
     const FIXTURE_CA: &str = "MIIBpzCCAU2gAwIBAgIUZF+y9UzgIF1CLzMjQUhR/B5D5S4wCgYIKoZIzj0EAwIwKTEnMCUGA1UEAwweUmVtb3RlSHViLXByb2ZpbGUtZml4dHVyZS1vbmx5MB4XDTI2MTEyMzEwMDA1OFoXDTI3MTEyMzEwMDA1OFowKTEnMCUGA1UEAwweUmVtb3RlSHViLXByb2ZpbGUtZml4dHVyZS1vbmx5MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEi3gv4JryBxxuCU9DDEICKUJafSQ3O/uKz8CrHciFnMOVSPS9rupgHZeyMogWSOEQ4HSz43yO2dHac0HcIZ99+KNTMFEwHQYDVR0OBBYEFHNCmZBsyU07uAny4QluUTX070w9MB8GA1UdIwQYMBaAFHNCmZBsyU07uAny4QluUTX070w9MA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIhAIdgwr/NL8t/fpSawiLUKOuZvS4inrClYYEb2KOsYrGsAiAsUCOv4eUoKHwcYOdR63r5PHPcKi+QOyRgWt6qkLfoLw==";
@@ -436,7 +442,7 @@ mod tests {
             "version": 1,
             "role": "host",
             "room": ROOM,
-            "expires_at": NOW + 120,
+            "expires_at": NOW + FIXTURE_TURN_TTL + 20,
             "local_ipv4": "192.168.2.3",
             "wss": "93.184.216.34:8443",
             "turn": "93.184.216.34:3478",
@@ -449,14 +455,31 @@ mod tests {
             "pairing_key": "6789".repeat(8),
             "wire_nonce": "12345678-1234-4234-8234-123456789abd",
             "session_nonce": "ab".repeat(32),
-            "turn_username": format!("{}:{ROOM}", NOW + 100),
+            "turn_username": format!("{}:{ROOM}", NOW + FIXTURE_TURN_TTL),
             "turn_credential": STANDARD.encode([7; 20]),
-            "turn_expires_at": NOW + 100
+            "turn_expires_at": NOW + FIXTURE_TURN_TTL
         })
     }
 
     fn parse_fixture(input: &Value, now: u64) -> Result<PublicVideoProfile, &'static str> {
         PublicVideoProfile::parse(&serde_json::to_vec(input).unwrap(), now)
+    }
+
+    #[test]
+    fn minimum_remaining_lease_is_checked_without_widening_the_maximum() {
+        assert_eq!(
+            ensure_fresh(NOW + 600, NOW + MIN_TURN_TTL - 1, NOW),
+            Err(EXPIRED)
+        );
+        assert_eq!(ensure_fresh(NOW + 600, NOW + MIN_TURN_TTL, NOW), Ok(()));
+        assert_eq!(
+            ensure_fresh(NOW + 601, NOW + MIN_TURN_TTL, NOW),
+            Err(EXPIRED)
+        );
+        assert_eq!(
+            ensure_fresh(NOW + MIN_TURN_TTL, NOW + MIN_TURN_TTL + 1, NOW),
+            Err(EXPIRED)
+        );
     }
 
     #[test]

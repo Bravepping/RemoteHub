@@ -6,7 +6,11 @@ pub const FMTP: &str = "level-asymmetry-allowed=1;packetization-mode=1;profile-l
 pub const SSRC: u32 = 0x5248_0004;
 
 pub fn timestamp(pts: i64) -> Result<u32, String> {
-    if !(0..=300_000_000).contains(&pts) {
+    timestamp_with_limit(pts, 300_000_000)
+}
+
+fn timestamp_with_limit(pts: i64, max_pts: i64) -> Result<u32, String> {
+    if !(0..=max_pts).contains(&pts) {
         return Err("INVALID_MEDIA_PTS".into());
     }
     Ok(((pts as u64 * 9 + 500) / 1000) as u32)
@@ -18,10 +22,29 @@ pub struct Packetizer {
     sequence: u16,
     last_pts: Option<i64>,
     initialized: bool,
+    #[cfg(feature = "v2-public-video-60s-test")]
+    public_video_60s_test: bool,
     pub source_sps_profile_level_id: Option<String>,
     pub ignored_constraint_set5: bool,
 }
 impl Packetizer {
+    /// Only the separately consented 60-second video test uses this clock.
+    #[cfg(feature = "v2-public-video-60s-test")]
+    pub fn public_video_60s_test() -> Self {
+        Self {
+            public_video_60s_test: true,
+            ..Self::default()
+        }
+    }
+
+    fn frame_timestamp(&self, pts: i64) -> Result<u32, String> {
+        #[cfg(feature = "v2-public-video-60s-test")]
+        if self.public_video_60s_test {
+            return timestamp_with_limit(pts, 600_000_000);
+        }
+        timestamp(pts)
+    }
+
     pub fn packets(
         &mut self,
         frame: EncodedVideoFrame,
@@ -30,6 +53,7 @@ impl Packetizer {
         if self.last_pts.is_some_and(|last| frame.pts_100ns <= last) || frame.duration_100ns <= 0 {
             return Err("NON_MONOTONIC_MEDIA_PTS".into());
         }
+        let ts = self.frame_timestamp(frame.pts_100ns)?;
         let (normalized, types) =
             normalize(&frame.annex_b, Framing::AnnexB).map_err(|e| e.to_string())?;
         if !self.initialized {
@@ -61,7 +85,6 @@ impl Packetizer {
             self.ignored_constraint_set5 = profile[1] & 0x04 != 0;
             self.initialized = true;
         }
-        let ts = timestamp(frame.pts_100ns)?;
         // The pinned RFC 6184 payloader consumes Annex B and emits single NAL/STAP-A/FU-A payloads.
         let payloads = self
             .payloader
@@ -112,6 +135,29 @@ mod tests {
             is_idr: true,
             encode_elapsed_ms: 0.0,
         }
+    }
+
+    #[test]
+    fn default_clock_rejects_pts_beyond_thirty_seconds() {
+        assert_eq!(timestamp(300_000_000).unwrap(), 2_700_000);
+        assert!(timestamp(300_000_001).is_err());
+        let mut default = Packetizer::default();
+        default.packets(frame(0), 102).unwrap();
+        assert!(default.packets(frame(300_000_001), 102).is_err());
+    }
+
+    #[cfg(feature = "v2-public-video-60s-test")]
+    #[test]
+    fn explicit_extended_packetizer_admits_sixty_seconds_but_not_more() {
+        let mut long = Packetizer::public_video_60s_test();
+        long.packets(frame(0), 102).unwrap();
+        assert_eq!(
+            long.packets(frame(600_000_000), 102).unwrap()[0]
+                .header
+                .timestamp,
+            5_400_000
+        );
+        assert!(long.packets(frame(600_000_001), 102).is_err());
     }
     #[test]
     fn exact_clock_and_fua_payloads_preserve_access_unit() {

@@ -431,11 +431,16 @@ async fn run(
         public_video_capture::CAPTURE_WINDOW.as_secs(),
         approval.scope.wss, approval.scope.turn, peer.fingerprint(),
     );
+    let title = if cfg!(feature = "v2-public-video-60s-test") {
+        "RemoteHub · 公网仅视频（60 秒测试版）"
+    } else {
+        "RemoteHub · 公网短时仅视频"
+    };
     let confirmed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
             &HSTRING::from(message),
-            &HSTRING::from("RemoteHub · 公网短时仅视频"),
+            &HSTRING::from(title),
             MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION,
         ) == IDYES
     })

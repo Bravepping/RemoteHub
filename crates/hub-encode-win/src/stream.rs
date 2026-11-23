@@ -37,15 +37,58 @@ pub struct StreamReport {
     pub stopped: bool,
 }
 
+const STANDARD_OUTPUT_FRAMES: u32 = 900;
+
 pub fn run(
     consent: bool,
     config: EncoderConfig,
     stop: StopToken,
     keyframe: &AtomicBool,
+    publish: impl FnMut(&StreamReport),
+    sink: impl FnMut(EncodedVideoFrame) -> Result<(), EncodeError>,
+) -> Result<StreamReport, EncodeError> {
+    config.validate(consent)?;
+    run_validated(
+        config,
+        config.seconds * config.fps,
+        STANDARD_OUTPUT_FRAMES,
+        stop,
+        keyframe,
+        publish,
+        sink,
+    )
+}
+
+/// Fixed-length experiment entry point for the approved native public-video
+/// host. It does not change the limits of ordinary callers or probes.
+#[cfg(feature = "v2-public-video-60s-test")]
+pub fn run_public_video_60s_test(
+    consent: bool,
+    stop: StopToken,
+    publish: impl FnMut(&StreamReport),
+    sink: impl FnMut(EncodedVideoFrame) -> Result<(), EncodeError>,
+) -> Result<StreamReport, EncodeError> {
+    let (config, ticks) = crate::public_video_test_config(consent)?;
+    run_validated(
+        config,
+        ticks,
+        ticks,
+        stop,
+        &AtomicBool::new(false),
+        publish,
+        sink,
+    )
+}
+
+fn run_validated(
+    config: EncoderConfig,
+    max_ticks: u32,
+    max_frames: u32,
+    stop: StopToken,
+    keyframe: &AtomicBool,
     mut publish: impl FnMut(&StreamReport),
     mut sink: impl FnMut(EncodedVideoFrame) -> Result<(), EncodeError>,
 ) -> Result<StreamReport, EncodeError> {
-    config.validate(consent)?;
     let setup = Instant::now();
     let _exclusive = ProcessLease::acquire()?;
     let runtime = MfRuntime::new()?;
@@ -83,7 +126,7 @@ pub fn run(
     let start = Instant::now();
     publish(&report);
     let mut tick = 0;
-    while tick < (config.seconds * config.fps) as u64 && !stop.is_stopped() {
+    while tick < u64::from(max_ticks) && !stop.is_stopped() {
         let target = Duration::from_nanos(tick * 1_000_000_000 / config.fps as u64);
         while start.elapsed() < target && !stop.is_stopped() {
             std::thread::sleep(
@@ -98,7 +141,7 @@ pub fn run(
         let (selected, missed, reuse) = config.schedule(tick, start.elapsed());
         tick = selected;
         report.missed_ticks += missed;
-        if tick >= (config.seconds * config.fps) as u64 {
+        if tick >= u64::from(max_ticks) {
             break;
         }
         let update = if reuse { None } else { capture.next_frame(0)? };
@@ -130,7 +173,7 @@ pub fn run(
             if stop.is_stopped() {
                 break;
             }
-            if let Err(error) = deliver(frame, &mut report, &mut sink) {
+            if let Err(error) = deliver(frame, &mut report, max_frames, &mut sink) {
                 publish(&report);
                 return Err(error);
             }
@@ -141,7 +184,7 @@ pub fn run(
     }
     if !stop.is_stopped() {
         for frame in encoder.drain()? {
-            if let Err(error) = deliver(frame, &mut report, &mut sink) {
+            if let Err(error) = deliver(frame, &mut report, max_frames, &mut sink) {
                 publish(&report);
                 return Err(error);
             }
@@ -157,9 +200,10 @@ pub fn run(
 fn deliver(
     frame: EncodedVideoFrame,
     report: &mut StreamReport,
+    max_frames: u32,
     sink: &mut impl FnMut(EncodedVideoFrame) -> Result<(), EncodeError>,
 ) -> Result<(), EncodeError> {
-    if report.frames_encoded >= 900
+    if report.frames_encoded >= max_frames
         || report.bytes_encoded + frame.annex_b.len() as u64 > 128 * 1024 * 1024
     {
         return Err(EncodeError::Native("LIVE_OUTPUT_LIMIT".into()));
@@ -245,7 +289,7 @@ pub fn run_synthetic(
             if stop.is_stopped() {
                 break;
             }
-            deliver(frame, &mut report, &mut sink)?;
+            deliver(frame, &mut report, STANDARD_OUTPUT_FRAMES, &mut sink)?;
         }
         report.media_wall_ms = started.elapsed().as_secs_f64() * 1000.0;
         publish(&report);
@@ -253,7 +297,7 @@ pub fn run_synthetic(
     }
     if !stop.is_stopped() {
         for frame in encoder.drain()? {
-            deliver(frame, &mut report, &mut sink)?;
+            deliver(frame, &mut report, STANDARD_OUTPUT_FRAMES, &mut sink)?;
         }
     }
     report.stopped = stop.is_stopped();
@@ -278,11 +322,34 @@ mod tests {
     #[test]
     fn live_sink_failure_aborts_and_time_cannot_reorder() {
         let mut report = StreamReport::default();
-        let error = deliver(frame(0), &mut report, &mut |_| {
+        let error = deliver(frame(0), &mut report, STANDARD_OUTPUT_FRAMES, &mut |_| {
             Err(EncodeError::Native("QUEUE_BACKPRESSURE".into()))
         });
         assert!(error.is_err());
-        assert!(deliver(frame(0), &mut report, &mut |_| Ok(())).is_err());
+        assert!(
+            deliver(frame(0), &mut report, STANDARD_OUTPUT_FRAMES, &mut |_| Ok(
+                ()
+            ))
+            .is_err()
+        );
         assert_eq!(report.frames_encoded, 1);
+    }
+
+    #[test]
+    fn output_never_exceeds_selected_frame_or_existing_byte_cap() {
+        for max_frames in [STANDARD_OUTPUT_FRAMES, 1800] {
+            let mut report = StreamReport {
+                frames_encoded: max_frames - 1,
+                ..Default::default()
+            };
+            deliver(frame(0), &mut report, max_frames, &mut |_| Ok(())).unwrap();
+            assert_eq!(report.frames_encoded, max_frames);
+            assert!(deliver(frame(1), &mut report, max_frames, &mut |_| Ok(())).is_err());
+            let mut report = StreamReport {
+                bytes_encoded: 128 * 1024 * 1024,
+                ..Default::default()
+            };
+            assert!(deliver(frame(0), &mut report, max_frames, &mut |_| Ok(())).is_err());
+        }
     }
 }
