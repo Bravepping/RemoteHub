@@ -130,6 +130,11 @@ impl<'a> PublicVideoProof<'a> {
         })
     }
 
+    #[cfg(feature = "v2-public-video-wss")]
+    pub(crate) fn role(&self) -> SessionRole {
+        self.role
+    }
+
     /// Validate a native-issued route grant against exactly this proof's
     /// reserved context, before using it for ICE. Does not authorize media.
     pub fn prepare_ice(

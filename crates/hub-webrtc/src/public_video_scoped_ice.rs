@@ -1,20 +1,21 @@
-//! Prepare a proof-owned UDP boundary without opening network sockets.
+//! Own the native ICE driver, signed SDP and its exact UDP boundaries.
 //! The physical socket and TURN relayer enforce separate address checks.
 
 use crate::{
-    direct_policy::VerifiedCandidates,
+    direct_policy::{self, PathSummary, VerifiedCandidates},
     direct_runtime::{Boundary, DirectRuntime},
     pinned_runtime::PinnedRuntime,
     public_video::{PublicVideoIcePlan, PublicVideoProof},
     public_video_route::RouteGrant,
+    public_video_wss::{read_authorizable_video_pair, Role},
     relay_runtime::RelayRuntime,
 };
-use hub_identity::session::SessionChallenge;
+use hub_identity::session::{SessionChallenge, SessionRole};
 use std::{
     fmt,
     future::Future,
     io,
-    net::{SocketAddr, TcpListener, UdpSocket},
+    net::{SocketAddr, SocketAddrV4, TcpListener, UdpSocket},
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -26,6 +27,28 @@ use std::{
 use webrtc::runtime::{
     AsyncInterval, AsyncTcpListener, AsyncTcpStream, AsyncUdpSocket, JoinHandle, Runtime,
 };
+
+use rtc::{
+    ice::{mdns::MulticastDnsMode, network_type::NetworkType},
+    rtp_transceiver::rtp_sender::{
+        RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
+        RtpCodecKind,
+    },
+};
+use tokio::{sync::watch, time::timeout};
+use webrtc::{
+    media_stream::{track_local::static_rtp::TrackLocalStaticRTP, MediaStreamTrack},
+    peer_connection::{
+        MediaEngine, PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler,
+        RTCConfiguration, RTCIceGatheringState, RTCSessionDescription, SettingEngineBuilder,
+    },
+    rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit},
+};
+
+const DRIVER: &str = "PUBLIC_VIDEO_ICE_DRIVER";
+const WAIT: &str = "PUBLIC_VIDEO_ICE_DRIVER_TIMEOUT";
+const DRIVER_WAIT: Duration = Duration::from_secs(8);
+const CLOSE_WAIT: Duration = Duration::from_secs(1);
 
 const CLOSED: &str = "PUBLIC_VIDEO_ICE_BOUNDARY_CLOSED";
 const SETUP: &str = "PUBLIC_VIDEO_ICE_BOUNDARY_SETUP";
@@ -153,13 +176,46 @@ impl Runtime for ScopedRuntime {
     }
 }
 
-/// Owns the transport and its one-shot device proof together. The provisional
-/// boundary stays in native memory and cannot be used to dial via this API.
+struct DriverStart {
+    config: RTCConfiguration,
+    local: SocketAddrV4,
+    host_candidates: bool,
+}
+
+struct Gather(watch::Sender<bool>);
+#[async_trait::async_trait]
+impl PeerConnectionEventHandler for Gather {
+    async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        if state == RTCIceGatheringState::Complete {
+            self.0.send_replace(true);
+        }
+    }
+}
+
+// Dropping a canceled or failed construction/negotiation future immediately
+// revokes the shared runtime, including while the driver is still running.
+struct RevokeOnCancel(Option<Arc<ScopedRuntime>>);
+impl Drop for RevokeOnCancel {
+    fn drop(&mut self) {
+        if let Some(runtime) = &self.0 {
+            runtime.stop();
+        }
+    }
+}
+
+/// Owns one scoped video ICE driver. No raw peer connection, track, or
+/// trickle API is exported. Call close on normal/terminal signaling exit.
 pub struct PublicVideoScopedIce<'a> {
     proof: PublicVideoProof<'a>,
     runtime: Arc<ScopedRuntime>,
     issued_at: u64,
     expires_at: u64,
+    start: Option<DriverStart>,
+    pc: Option<Arc<dyn PeerConnection>>,
+    gathered: Option<watch::Receiver<bool>>,
+    local_candidates: Option<VerifiedCandidates>,
+    remote_applied: bool,
+    path_verified: bool,
 }
 
 impl<'a> PublicVideoScopedIce<'a> {
@@ -172,7 +228,11 @@ impl<'a> PublicVideoScopedIce<'a> {
         // endpoint or optional unsecured runtime to substitute here.
         let expires_at = plan.expires_at();
         let deadline = Instant::now() + Duration::from_secs(expires_at.saturating_sub(now));
-        plan.rtc_configuration(now)?;
+        let start = DriverStart {
+            config: plan.rtc_configuration(now)?,
+            local: SocketAddrV4::new(plan.local_ip(), 0),
+            host_candidates: plan.host_candidates_allowed(),
+        };
         let inner = webrtc::runtime::default_runtime().ok_or(SETUP)?;
         let stopped = Arc::new(AtomicBool::new(false));
         let physical = match &plan.grant {
@@ -207,7 +267,277 @@ impl<'a> PublicVideoScopedIce<'a> {
             }),
             issued_at: now,
             expires_at,
+            start: Some(start),
+            pc: None,
+            gathered: None,
+            local_candidates: None,
+            remote_applied: false,
+            path_verified: false,
         })
+    }
+
+    #[cfg(test)]
+    fn new_loopback_fixture(
+        proof: PublicVideoProof<'a>,
+        room: uuid::Uuid,
+        local: SocketAddrV4,
+        server: SocketAddrV4,
+        config: RTCConfiguration,
+        inner: Arc<dyn Runtime>,
+        now: u64,
+    ) -> Result<Self, &'static str> {
+        assert_eq!(*local.ip(), std::net::Ipv4Addr::LOCALHOST);
+        let boundary = Boundary::loopback_fixture(server.into(), room);
+        let deadline = boundary.deadline();
+        Ok(Self {
+            proof,
+            runtime: Arc::new(ScopedRuntime {
+                physical: RouteRuntime::Direct(DirectRuntime { inner, boundary }),
+                peers: RwLock::new(None),
+                stopped: Arc::default(),
+                deadline,
+            }),
+            issued_at: now,
+            expires_at: now + 120,
+            start: Some(DriverStart {
+                config,
+                local,
+                host_candidates: false,
+            }),
+            pc: None,
+            gathered: None,
+            local_candidates: None,
+            remote_applied: false,
+            path_verified: false,
+        })
+    }
+
+    /// Bind one UDP4 interface only; caller must obtain native consent and
+    /// ensure the approved signaling lifetime owns the returned driver.
+    pub async fn start(&mut self, now: u64) -> Result<(), &'static str> {
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        self.check_current(now)?;
+        let start = self.start.take().ok_or(DRIVER)?;
+        let (gather_tx, gather_rx) = watch::channel(false);
+        let runtime = self.runtime.clone();
+        let pc = timeout(self.wait(DRIVER_WAIT), async {
+            let mut media = MediaEngine::default();
+            let codec = RTCRtpCodec {
+                mime_type: "video/H264".into(),
+                clock_rate: 90_000,
+                sdp_fmtp_line: crate::video::FMTP.into(),
+                ..Default::default()
+            };
+            media
+                .register_codec(
+                    RTCRtpCodecParameters {
+                        rtp_codec: codec.clone(),
+                        payload_type: 102,
+                    },
+                    RtpCodecKind::Video,
+                )
+                .map_err(|_| DRIVER)?;
+            let pc = PeerConnectionBuilder::new()
+                .with_configuration(start.config)
+                .with_host_candidates(start.host_candidates)
+                .with_udp_addrs(vec![start.local])
+                .with_setting_engine(
+                    SettingEngineBuilder::new()
+                        .with_multicast_dns_mode(MulticastDnsMode::Disabled)
+                        .with_network_types(vec![NetworkType::Udp4])
+                        .with_include_loopback_candidate(false)
+                        .build(),
+                )
+                .with_media_engine(media)
+                // The dedicated driver also terminates on PeerConnection drop
+                // if the caller cannot await the normal close path.
+                .with_dedicated_reactor_pool_size(1)
+                .with_runtime(runtime)
+                .with_handler(Arc::new(Gather(gather_tx)))
+                .build()
+                .await
+                .map_err(|_| DRIVER)?;
+            match self.proof.role() {
+                SessionRole::Host => {
+                    pc.add_track(Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
+                        "remotehub-video".into(),
+                        "remotehub-session".into(),
+                        "video".into(),
+                        RtpCodecKind::Video,
+                        vec![RTCRtpEncodingParameters {
+                            active: true,
+                            rtp_coding_parameters: RTCRtpCodingParameters {
+                                ssrc: Some(crate::video::SSRC),
+                                ..Default::default()
+                            },
+                            codec,
+                            ..Default::default()
+                        }],
+                    ))))
+                    .await
+                    .map_err(|_| DRIVER)?;
+                }
+                SessionRole::Viewer => {
+                    pc.add_transceiver_from_kind(
+                        RtpCodecKind::Video,
+                        Some(RTCRtpTransceiverInit {
+                            direction: RTCRtpTransceiverDirection::Recvonly,
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                    .map_err(|_| DRIVER)?;
+                }
+            }
+            Ok::<_, &'static str>(Arc::new(pc) as Arc<dyn PeerConnection>)
+        })
+        .await
+        .map_err(|_| WAIT)??;
+        self.check_current(now)?;
+        self.pc = Some(pc);
+        self.gathered = Some(gather_rx);
+        guard.0 = None;
+        Ok(())
+    }
+
+    /// Return the signed, complete local offer (viewer) or answer (host).
+    /// Never publish private related addresses from the driver's SDP.
+    pub async fn local_signal(
+        &mut self,
+        challenge: SessionChallenge,
+        now: u64,
+    ) -> Result<(String, [u8; 64]), &'static str> {
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        self.check_current(now)?;
+        let host = self.proof.role() == SessionRole::Host;
+        if self.local_candidates.is_some() || self.remote_applied != host {
+            return Err(DRIVER);
+        }
+        let pc = self.pc.as_ref().ok_or(DRIVER)?;
+        let gathered = self.gathered.as_mut().ok_or(DRIVER)?;
+        let wait = self
+            .runtime
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .min(DRIVER_WAIT);
+        let sdp = timeout(wait, async {
+            let desc = if host {
+                pc.create_answer(None).await
+            } else {
+                pc.create_offer(None).await
+            }
+            .map_err(|_| DRIVER)?;
+            pc.set_local_description(desc).await.map_err(|_| DRIVER)?;
+            gathered.wait_for(|done| *done).await.map_err(|_| DRIVER)?;
+            let desc = pc.local_description().await.ok_or(DRIVER)?;
+            redact_gathered_sdp(&desc.sdp)
+        })
+        .await
+        .map_err(|_| WAIT)??;
+        self.check_current(now)?;
+        let (signature, candidates) = self.proof.seal_video_sdp(challenge, &sdp, now)?;
+        self.local_candidates = Some(candidates);
+        guard.0 = None;
+        Ok((sdp, signature))
+    }
+
+    /// Install the exact device-signed UDP addresses before the RTC driver
+    /// can start checks from the corresponding remote offer/answer.
+    pub async fn apply_peer_signal(
+        &mut self,
+        sdp: &str,
+        signature: &[u8; 64],
+        now: u64,
+    ) -> Result<(), &'static str> {
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        self.check_current(now)?;
+        let host = self.proof.role() == SessionRole::Host;
+        if self.remote_applied || self.local_candidates.is_some() == host {
+            return Err(DRIVER);
+        }
+        let pc = self.pc.as_ref().ok_or(DRIVER)?;
+        let verified = self.proof.verify_video_sdp(sdp, signature, now)?;
+        let remote = if host {
+            RTCSessionDescription::offer(sdp.to_owned())
+        } else {
+            RTCSessionDescription::answer(sdp.to_owned())
+        }
+        .map_err(|_| DRIVER)?;
+        self.runtime.admit(verified)?;
+        timeout(self.wait(DRIVER_WAIT), pc.set_remote_description(remote))
+            .await
+            .map_err(|_| WAIT)?
+            .map_err(|_| DRIVER)?;
+        self.check_current(now)?;
+        self.remote_applied = true;
+        guard.0 = None;
+        Ok(())
+    }
+
+    /// Observe the actual video transport; no SDP-only success. The viewer
+    /// does not expose a receiver transport until the first RTP track.
+    pub async fn selected_path(&mut self, now: u64) -> Result<PathSummary, &'static str> {
+        self.check_current(now)?;
+        let pc = self.pc.as_ref().ok_or(DRIVER)?;
+        let role = if self.proof.role() == SessionRole::Host {
+            Role::Host
+        } else {
+            Role::Viewer
+        };
+        let pair = timeout(
+            self.wait(Duration::from_millis(500)),
+            read_authorizable_video_pair(pc.as_ref(), role),
+        )
+        .await
+        .map_err(|_| WAIT)
+        .and_then(|r| r);
+        let (local, remote) = match pair {
+            Ok(pair) => pair,
+            Err(error) => {
+                if self.path_verified || error == "PUBLIC_VIDEO_ICE_PAIR_REJECTED" {
+                    self.stop();
+                }
+                return Err(error);
+            }
+        };
+        let result = (|| {
+            self.check_current(now)?;
+            let approved_local = self.local_candidates.as_ref().ok_or(PEER)?;
+            let approved_remote = self.runtime.peers.read().map_err(|_| PEER)?;
+            direct_policy::selected(
+                local,
+                remote,
+                approved_local,
+                approved_remote.as_ref().ok_or(PEER)?,
+            )
+            .map_err(|_| PEER)
+        })();
+        if result.is_ok() {
+            self.path_verified = true;
+        } else {
+            self.stop();
+        }
+        result
+    }
+
+    /// Revoke first and wait for the local driver to shut down. This does
+    /// not claim that a remote TURN allocation was released immediately.
+    pub async fn close(&mut self) -> Result<(), &'static str> {
+        self.stop();
+        if let Some(pc) = self.pc.take() {
+            timeout(CLOSE_WAIT, pc.close())
+                .await
+                .map_err(|_| WAIT)?
+                .map_err(|_| DRIVER)?;
+        }
+        Ok(())
+    }
+
+    fn wait(&self, limit: Duration) -> Duration {
+        self.runtime
+            .deadline
+            .saturating_duration_since(Instant::now())
+            .min(limit)
     }
 
     pub fn challenge(&self) -> Option<SessionChallenge> {
@@ -217,7 +547,8 @@ impl<'a> PublicVideoScopedIce<'a> {
         self.proof.challenge()
     }
 
-    pub fn seal_local_sdp(
+    #[cfg(test)]
+    fn seal_local_sdp(
         &mut self,
         challenge: SessionChallenge,
         sdp: &str,
@@ -234,7 +565,8 @@ impl<'a> PublicVideoScopedIce<'a> {
 
     /// Admit only the exact signed SDP to the physical direct and logical
     /// TURN guards before the caller could apply this SDP to a peer connection.
-    pub fn admit_peer_sdp<'s>(
+    #[cfg(test)]
+    fn admit_peer_sdp<'s>(
         &mut self,
         sdp: &'s str,
         signature: &[u8; 64],
@@ -251,6 +583,7 @@ impl<'a> PublicVideoScopedIce<'a> {
 
     pub fn stop(&mut self) {
         self.runtime.stop();
+        self.start = None;
     }
 
     fn check_current(&self, now: u64) -> Result<(), &'static str> {
@@ -260,6 +593,7 @@ impl<'a> PublicVideoScopedIce<'a> {
         Ok(())
     }
 
+    #[cfg(test)]
     fn stop_on_error<T>(&mut self, result: Result<T, &'static str>) -> Result<T, &'static str> {
         if result.is_err() {
             self.stop();
@@ -272,6 +606,52 @@ impl Drop for PublicVideoScopedIce<'_> {
     fn drop(&mut self) {
         self.stop();
     }
+}
+
+// Strip only connection defaults and related-address metadata. The signed
+// SDP policy then rejects unknown fields and validates every exact candidate.
+fn redact_gathered_sdp(sdp: &str) -> Result<String, &'static str> {
+    if !sdp.is_ascii() || sdp.len() > hub_identity::session::MAX_SIGNAL_BYTES {
+        return Err(DRIVER);
+    }
+    let mut clean = String::with_capacity(sdp.len());
+    for line in sdp.lines() {
+        if let Some(value) = line.strip_prefix("o=") {
+            let fields: Vec<_> = value.split(' ').collect();
+            if fields.len() != 6 {
+                return Err(DRIVER);
+            }
+            clean.push_str(&format!("o=- {} {} IN IP4 0.0.0.0", fields[1], fields[2]));
+        } else if line.starts_with("c=") {
+            clean.push_str("c=IN IP4 0.0.0.0");
+        } else if line.starts_with("a=rtcp:") {
+            clean.push_str("a=rtcp:9 IN IP4 0.0.0.0");
+        } else if let Some(candidate) = line.strip_prefix("a=candidate:") {
+            let fields: Vec<_> = candidate.split_ascii_whitespace().collect();
+            if fields.len() < 8 {
+                return Err(DRIVER);
+            }
+            // The native SDP emits a component-2 copy even with rtcp-mux.
+            // Public video advertises only the multiplexed RTP component;
+            // verification of incoming SDP remains strict.
+            match fields[1] {
+                "1" => {}
+                "2" => continue,
+                _ => return Err(DRIVER),
+            }
+            clean.push_str("a=candidate:");
+            clean.push_str(&fields[..8].join(" "));
+            if matches!(fields[7], "srflx" | "relay") {
+                clean.push_str(" raddr 0.0.0.0 rport 0");
+            } else if fields[7] != "host" {
+                return Err(DRIVER);
+            }
+        } else {
+            clean.push_str(line);
+        }
+        clean.push_str("\r\n");
+    }
+    Ok(clean)
 }
 
 #[cfg(test)]
@@ -478,3 +858,7 @@ mod tests {
         assert!(fresh_host.challenge().is_none());
     }
 }
+
+#[cfg(test)]
+#[path = "public_video_native_ice_tests.rs"]
+mod native_tests;

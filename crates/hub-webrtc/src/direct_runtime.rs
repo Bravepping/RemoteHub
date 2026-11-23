@@ -74,6 +74,17 @@ impl Boundary {
             counters: Counters::default(),
         }))
     }
+    #[cfg(all(test, feature = "v2-public-video-wss"))]
+    pub(crate) fn loopback_fixture(server: SocketAddr, room: uuid::Uuid) -> Arc<Self> {
+        Self::build(
+            Ipv4Addr::LOCALHOST,
+            Some(server),
+            Duration::from_secs(120),
+            room,
+        )
+        .unwrap()
+    }
+
     /// Only the operator diagnostic sets packet-loss faults; product construction has none.
     pub(crate) fn diagnostic(
         grant: &DirectGrant,

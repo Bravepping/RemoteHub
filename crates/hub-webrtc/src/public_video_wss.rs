@@ -393,6 +393,14 @@ enum VideoTrack {
     Remote(Arc<dyn TrackRemote>),
 }
 
+pub(crate) async fn read_authorizable_video_pair(
+    pc: &dyn PeerConnection,
+    role: Role,
+) -> Result<(Candidate, Candidate), &'static str> {
+    let (pair, _) = read_video_pair(pc, role).await?;
+    Ok((to_candidate(pair.local())?, to_candidate(pair.remote())?))
+}
+
 async fn read_video_pair(
     pc: &dyn PeerConnection,
     role: Role,
