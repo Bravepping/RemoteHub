@@ -70,3 +70,29 @@ it('ordinary P006 UI keeps its desktop/30-second scope', async () => {
   );
   w.unmount();
 });
+it.each([
+  ['R06_RELAY_PATH_METRIC_INVALID', 'R06_RELAY_PATH_METRIC_INVALID'],
+  [
+    'R06_RELAY_PATH_METRIC_INVALID: token=private-fixture',
+    'RECEIVER_INTERNAL_ERROR',
+  ],
+])(
+  'only renders an exact safe native error in the diagnostic panel',
+  async (failure, label) => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'p006_interfaces') return ['192.168.1.2'];
+      throw new Error(failure);
+    });
+    const w = mount(RelayVideoProbe, {
+      props: { directEnabled: true, diagnosticOnly: true },
+    });
+    await flushPromises();
+    await w.get('[aria-label="本轮诊断方式"]').setValue('relay_only');
+    await w.get('input[type=checkbox]').setValue(true);
+    await w.findAll('button')[0].trigger('click');
+    await flushPromises();
+    expect(w.get('.relay-error').text()).toBe(label);
+    expect(w.text()).not.toContain('private-fixture');
+    w.unmount();
+  },
+);

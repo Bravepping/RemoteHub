@@ -9,6 +9,115 @@ import { invoke } from '@tauri-apps/api/core';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 const ip = '8.8.8.8'; // Offline fixture. Tests never contact this address.
+it.each([
+  ['constructor', 'BROWSER_RELAY_PC_CREATE_FAILED'],
+  ['offer', 'BROWSER_RELAY_OFFER_CREATE_FAILED'],
+  ['local', 'BROWSER_RELAY_LOCAL_SDP_APPLY_FAILED'],
+  ['answer', 'BROWSER_RELAY_ANSWER_APPLY_FAILED'],
+] as const)(
+  'R06 relay-only reports %s failures without raw browser details',
+  async (stage, code) => {
+    const until = Math.floor(Date.now() / 1000) + 120;
+    const controlSession = '12345678-1234-1234-1234-123456789abc';
+    const sdp = `v=0\r\na=candidate:a 1 udp 1 ${ip} 49160 typ relay raddr 0.0.0.0 rport 0\r\n`;
+    const raw = new DOMException(
+      'private SDP and token fixture',
+      'OperationError',
+    );
+    const failAt = (name: string) => {
+      if (stage === name) throw raw;
+    };
+    const pc = {
+      connectionState: 'new',
+      iceGatheringState: 'complete',
+      createDataChannel: () => ({ readyState: 'closed', close: vi.fn() }),
+      addTransceiver: () => ({ setCodecPreferences: vi.fn() }),
+      createOffer: async () => {
+        failAt('offer');
+        return { type: 'offer', sdp };
+      },
+      setLocalDescription: async () => {
+        failAt('local');
+      },
+      localDescription: { sdp },
+      setRemoteDescription: async () => {
+        failAt('answer');
+      },
+      getStats: async () => new Map(),
+      getReceivers: () => [],
+      close: vi.fn(),
+    };
+    const call = vi.fn(async (command: string) => {
+      if (command === 'p006_start')
+        return { sessionId: 'fixed', pairingCode: null };
+      if (command === 'p006_ready')
+        return {
+          mode: 'relay_only',
+          serverIp: ip,
+          expiresAt: until,
+          controlSession,
+          ice: {
+            mode: 'relay_only',
+            expires_at: until,
+            session_id: controlSession,
+            ice_servers: [
+              {
+                urls: [`turn:${ip}:3478?transport=udp`],
+                username: `${until}:${controlSession}`,
+                credential: `${'A'.repeat(27)}=`,
+              },
+            ],
+          },
+        };
+      if (command === 'p006_signal') return sdp;
+      if (command === 'p006_stats')
+        return { resources_released: true, error: null, receiver_samples: [] };
+      if (command === 'p006_save') return 'fixture';
+      return undefined;
+    });
+    vi.stubGlobal('RTCRtpReceiver', {
+      getCapabilities: () => ({
+        codecs: [
+          {
+            mimeType: 'video/H264',
+            sdpFmtpLine: 'profile-level-id=42001f;packetization-mode=1',
+          },
+        ],
+      }),
+    });
+    try {
+      const failed = vi.fn();
+      const probe = new RelayProbe(
+        document.createElement('video'),
+        vi.fn(),
+        failed,
+        vi.fn(),
+        vi.fn(),
+        true,
+        call as unknown as typeof invoke,
+        () => {
+          failAt('constructor');
+          return pc as unknown as RTCPeerConnection;
+        },
+      );
+      await probe.start(
+        {
+          role: 'receiver',
+          consent: true,
+          localIp: '192.168.1.2',
+          seconds: 8,
+          mode: 'relay_only',
+        },
+        true,
+      );
+      expect(failed).toHaveBeenCalledExactlyOnceWith(`Error: ${code}`);
+      expect(JSON.stringify(call.mock.calls)).not.toContain('private SDP');
+      expect(call).toHaveBeenCalledWith('p006_stop', { sessionId: 'fixed' });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  },
+);
 it('forwards only approved UDP relay candidates and requires at least one', () => {
   const lines = [
     'v=0',

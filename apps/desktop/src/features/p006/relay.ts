@@ -232,6 +232,11 @@ export class RelayProbe {
       config.pairingCode = undefined;
     }
   }
+  private browserFailure(code: string, cause: unknown): never {
+    // DOM/WebView error strings may embed raw SDP or connection details.
+    if (this.diagnosticMode === 'relay_only') throw new Error(code);
+    throw cause;
+  }
   private async connect(ready: Ready) {
     const direct = ready.mode === 'direct_preferred';
     if (direct && (!ready.directScope || !this.directFeatureEnabled))
@@ -249,7 +254,12 @@ export class RelayProbe {
       Math.floor(Date.now() / 1000),
       direct ? this.directFeatureEnabled : true,
     );
-    const pc = this.createPeer(options);
+    let pc: RTCPeerConnection;
+    try {
+      pc = this.createPeer(options);
+    } catch (cause) {
+      this.browserFailure('BROWSER_RELAY_PC_CREATE_FAILED', cause);
+    }
     this.pc = pc;
     // Credentials are now owned by the PC; do not retain the IPC result.
     ready.ice.ice_servers = [];
@@ -277,7 +287,17 @@ export class RelayProbe {
     if (!codecs?.length) throw new Error('H264_BASELINE_UNAVAILABLE');
     transceiver.setCodecPreferences(codecs);
     this.update('negotiating');
-    await pc.setLocalDescription(await pc.createOffer());
+    let draft: RTCSessionDescriptionInit;
+    try {
+      draft = await pc.createOffer();
+    } catch (cause) {
+      this.browserFailure('BROWSER_RELAY_OFFER_CREATE_FAILED', cause);
+    }
+    try {
+      await pc.setLocalDescription(draft);
+    } catch (cause) {
+      this.browserFailure('BROWSER_RELAY_LOCAL_SDP_APPLY_FAILED', cause);
+    }
     await new Promise<void>((resolve, reject) => {
       if (pc.iceGatheringState === 'complete') return resolve();
       const timer = setTimeout(() => {
@@ -319,7 +339,11 @@ export class RelayProbe {
         );
       else if (this.diagnosticMode === 'relay_only')
         this.remoteCandidates = relayCandidateSet(answer, this.server);
-      await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+      try {
+        await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+      } catch (cause) {
+        this.browserFailure('BROWSER_RELAY_ANSWER_APPLY_FAILED', cause);
+      }
     }
   }
   private async completedNormally(error: unknown): Promise<boolean> {

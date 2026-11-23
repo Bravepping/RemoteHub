@@ -177,3 +177,37 @@ it('bounded collection times out and raw errors become fixed safe codes', async 
     'RECEIVER_EVIDENCE_TIMEOUT',
   );
 });
+it.each([
+  'BROWSER_RELAY_CANDIDATE_MISSING',
+  'BROWSER_RELAY_GATHER_TIMEOUT',
+  'BROWSER_RELAY_SDP_INVALID',
+  'BROWSER_RELAY_CANDIDATE_UNVERIFIED',
+  'R06_RELAY_PATH_METRIC_INVALID',
+  'R06_RELAY_SDP_NOT_REDACTED',
+  'R06_RELAY_CANDIDATE_INVALID',
+  'METRICS_INVALID',
+  'ICE_SHORT_CREDENTIAL_OR_ENDPOINT_INVALID',
+  'P006_WSS_TLS_OR_AUTH_FAILED',
+  'P006_PRIVATE_CONFIG_REQUIRED',
+])(
+  'preserves the fixed diagnostic code %s but never attaches raw details',
+  (code) => {
+    expect(evidenceCode(code)).toBe(code);
+    expect(evidenceCode(new Error(code))).toBe(code);
+    expect(
+      evidenceCode(new Error(`${code}: token=private-fixture at 192.168.1.2`)),
+    ).toBe('RECEIVER_INTERNAL_ERROR');
+  },
+);
+it.each([
+  'R06_RELAY_UNRECOGNIZED_ERROR',
+  'BROWSER_RELAY_TOKEN_PRIVATE_FIXTURE',
+  'wss://192.168.1.2?token=private-fixture',
+  'C:/Users/private-fixture/session.json',
+  'v=0\r\no=private-fixture 1 1 IN IP4 192.168.1.2',
+])(
+  'does not expose arbitrary errors or nearby prefix lookalikes',
+  (details) => {
+    expect(evidenceCode(details)).toBe('RECEIVER_INTERNAL_ERROR');
+  },
+);

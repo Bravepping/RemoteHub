@@ -129,6 +129,7 @@ R06 诊断版要求两端分别手动选择同一个模式：「优先直连」�
 
 ## 本分支已执行验证
 
+- R06 强制 TURN 首轮公网未连上，接收端只显示 `RECEIVER_INTERNAL_ERROR`。本机代码确认新诊断发送的 `connectionPath` 会被旧通用指标校验拒绝；现仅在强制 TURN 合成诊断里校验该字段，且仍要求两端匹配的中继候选，并把固定阶段错误保留为脱敏代码。44 项 Rust 本地测试、163 项前端测试和 Windows MSVC 编译检查通过；这不能证明公网失败只有这一处原因，未重新运行公网测试。
 - R06 手动仅 TURN：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 43 项通过，新增本机脱敏、ICE 解析和精确候选校验覆盖；前端 141 项测试、类型检查及构建通过。Windows MSVC 目标的诊断构建及测试源码通过编译检查；未连接真机或公网 TURN。
 - R06 公网双机复测（用户操作）：匹配版本的 WSS 服务端使配对进入 ICE 阶段。发送端 `DIRECT_SELECTED_PAIR_NOT_APPROVED`；脱敏最终统计：本地候选 `host/private`，`candidate_type_absent_from_sdp`，已发布候选 2 个、同类型 0 个、未批准发布私网候选；远端 `matched`。接收端同时报 `CONTROL_CHANNEL_ERROR`。当前原生 ICE 仍可能选中仅在 SDP 阶段过滤掉的候选，拒绝是预期行为；不放宽核验。未验证公网直连、TURN 转发或画面；R06 仍 OPEN。
 - R06 首轮公网尝试（用户操作）：信令 TCP 和 TURN UDP 均已监听，但发送端未进入等待对端便报 `P006_WSS_CLOSED`，未验证实际选路或画面。旧信令程序缺少 `direct_preferred` 标记；历史 `977f97f` 的握手严格拒绝这个字段。当前源码 `e186880` 的静态 Linux x64 信令程序已通过本机 WSS 实测：R06 发送端收到 `waiting`、双角色收到 `ready`，旧格式不带模式字段也可等待；`cargo test --locked --offline -p hub-rendezvous-probe --bin hub-rendezvous-probe` 6 项通过。新程序未上传云端或部署，未验证公网、TURN 转发或实际画面。

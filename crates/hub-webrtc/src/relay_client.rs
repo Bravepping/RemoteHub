@@ -504,6 +504,12 @@ impl RelayClient {
     }
     fn validate_metrics(&self, data: &serde_json::Value) -> Result<(), String> {
         if self.mode == PathMode::RelayOnly {
+            #[cfg(feature = "p006-session-probe")]
+            if self.config.synthetic_source {
+                return crate::lan::validate_metrics(
+                    &crate::relay_diagnostic::metrics_without_path(data)?,
+                );
+            }
             return crate::lan::validate_metrics(data);
         }
         let mut limited = data.clone();

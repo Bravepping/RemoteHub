@@ -96,10 +96,65 @@ pub(crate) fn matches(set: &Endpoints, c: &webrtc::peer_connection::RTCIceCandid
             .is_ok_and(|ip| set.contains(&SocketAddrV4::new(ip, c.port)))
 }
 
+/// The common LAN metrics validator intentionally doesn't accept connectionPath.
+pub(crate) fn metrics_without_path(data: &serde_json::Value) -> Result<serde_json::Value, String> {
+    let mut common = data.clone();
+    let field = common
+        .as_object_mut()
+        .ok_or("METRICS_INVALID")?
+        .remove("connectionPath")
+        .ok_or("R06_RELAY_PATH_METRIC_INVALID")?;
+    let path = field.as_str().ok_or("R06_RELAY_PATH_METRIC_INVALID")?;
+    let decoded = data["framesDecoded"].as_u64().unwrap_or(0);
+    match path {
+        "unknown" if decoded == 0 && data["peerMatches"].as_bool() != Some(true) => (),
+        "relay"
+            if data["peerMatches"].as_bool() == Some(true)
+                && data["localCandidateType"].as_str() == Some("relay")
+                && data["remoteCandidateType"].as_str() == Some("relay") =>
+        {
+            ()
+        }
+        _ => return Err("R06_RELAY_PATH_METRIC_INVALID".into()),
+    }
+    Ok(common)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use webrtc::peer_connection::{RTCIceCandidate, RTCIceCandidateType, RTCIceProtocol};
+
+    #[test]
+    fn relay_metrics_keep_the_legacy_schema_and_reject_unproven_playback() {
+        use serde_json::json;
+        let awaiting = json!({"connectionPath":"unknown","framesDecoded":0,"peerMatches":null});
+        assert_eq!(
+            metrics_without_path(&awaiting).unwrap(),
+            json!({"framesDecoded":0,"peerMatches":null})
+        );
+        let good = json!({"connectionPath":"relay","framesDecoded":2,"peerMatches":true,
+            "localCandidateType":"relay","remoteCandidateType":"relay"});
+        let common = metrics_without_path(&good).unwrap();
+        assert!(common.get("connectionPath").is_none());
+        assert_eq!(common["framesDecoded"], 2);
+        #[cfg(windows)]
+        {
+            assert!(crate::lan::validate_metrics(&good).is_err());
+            assert!(crate::lan::validate_metrics(&common).is_ok());
+        }
+        for (key, value) in [
+            ("connectionPath", json!("direct")),
+            ("connectionPath", json!("unknown")),
+            ("peerMatches", json!(false)),
+            ("remoteCandidateType", json!("srflx")),
+        ] {
+            let mut bad = good.clone();
+            bad[key] = value;
+            assert!(metrics_without_path(&bad).is_err(), "{key}");
+        }
+        assert!(metrics_without_path(&common).is_err());
+    }
 
     #[test]
     fn redaction_and_exact_selection_do_not_trust_related_endpoints_or_other_ports() {
