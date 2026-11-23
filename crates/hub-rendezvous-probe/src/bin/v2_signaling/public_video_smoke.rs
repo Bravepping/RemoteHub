@@ -14,9 +14,27 @@ use hub_webrtc::{
     public_video::PublicVideoScope,
     public_video_wss::{PublicVideoWss, PublicVideoWssConfig, PublicVideoWssEvent},
 };
+use hub_webrtc::{pinned_runtime::PinnedRuntime, video::FMTP};
+use rtc::{
+    ice::{mdns::MulticastDnsMode, network_type::NetworkType},
+    peer_connection::transport::RTCDtlsTransportState,
+    rtp_transceiver::rtp_sender::{
+        RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
+        RtpCodecKind,
+    },
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::{sleep, timeout};
 use webrtc::peer_connection::{RTCIceCandidate, RTCIceCandidateType, RTCIceProtocol};
+use webrtc::{
+    media_stream::{track_local::static_rtp::TrackLocalStaticRTP, MediaStreamTrack},
+    peer_connection::{
+        MediaEngine, PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler,
+        RTCIceCandidateInit, RTCPeerConnectionIceEvent, RTCSessionDescription,
+        SettingEngineBuilder,
+    },
+    rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit},
+};
 
 fn fixture_sdp(answer: bool, candidate: &RTCIceCandidate) -> String {
     let direction = if answer { "sendonly" } else { "recvonly" };
@@ -55,6 +73,149 @@ fn packet_candidate(relay: bool, answer: bool) -> RTCIceCandidate {
 }
 const WAIT: Duration = Duration::from_secs(3);
 
+struct VideoIce(mpsc::Sender<RTCIceCandidateInit>);
+
+#[async_trait::async_trait]
+impl PeerConnectionEventHandler for VideoIce {
+    async fn on_ice_candidate(&self, event: RTCPeerConnectionIceEvent) {
+        if event.candidate.component == 1 {
+            let _ = self.0.try_send(event.candidate.to_json().unwrap());
+        }
+    }
+}
+
+fn fixture_codec() -> RTCRtpCodec {
+    RTCRtpCodec {
+        mime_type: "video/H264".into(),
+        clock_rate: 90_000,
+        sdp_fmtp_line: FMTP.into(),
+        ..Default::default()
+    }
+}
+
+async fn video_peer() -> (impl PeerConnection, mpsc::Receiver<RTCIceCandidateInit>) {
+    let (ice_tx, ice_rx) = mpsc::channel(8);
+    let local = Ipv4Addr::LOCALHOST.into();
+    let mut engine = MediaEngine::default();
+    engine
+        .register_codec(
+            RTCRtpCodecParameters {
+                rtp_codec: fixture_codec(),
+                payload_type: 102,
+            },
+            RtpCodecKind::Video,
+        )
+        .unwrap();
+    let pc = PeerConnectionBuilder::new()
+        .with_media_engine(engine)
+        .with_setting_engine(
+            SettingEngineBuilder::new()
+                .with_include_loopback_candidate(true)
+                .with_multicast_dns_mode(MulticastDnsMode::Disabled)
+                .with_network_types(vec![NetworkType::Udp4])
+                .build(),
+        )
+        .with_udp_addrs(vec!["127.0.0.1:0"])
+        .with_runtime(Arc::new(PinnedRuntime {
+            inner: webrtc::runtime::default_runtime().unwrap(),
+            local,
+            peer: local,
+            counters: Default::default(),
+        }))
+        .with_handler(Arc::new(VideoIce(ice_tx)))
+        .build()
+        .await
+        .unwrap();
+    (pc, ice_rx)
+}
+
+/// Real native ICE on loopback, no data channel, no screen capture and no RTP write.
+/// This pair is deliberately *not* the separate connection described by the signed fixture SDP.
+async fn check_native_unsigned_pair(wss: &mut PublicVideoWss<'_>) {
+    let (host, mut host_ice) = video_peer().await;
+    let (viewer, mut viewer_ice) = video_peer().await;
+    viewer
+        .add_transceiver_from_kind(
+            RtpCodecKind::Video,
+            Some(RTCRtpTransceiverInit {
+                direction: RTCRtpTransceiverDirection::Recvonly,
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let sender = host
+        .add_track(Arc::new(TrackLocalStaticRTP::new(MediaStreamTrack::new(
+            "test-video".into(),
+            "fixture-only".into(),
+            "no capture".into(),
+            RtpCodecKind::Video,
+            vec![RTCRtpEncodingParameters {
+                rtp_coding_parameters: RTCRtpCodingParameters {
+                    ssrc: Some(42),
+                    ..Default::default()
+                },
+                codec: fixture_codec(),
+                active: true,
+                max_bitrate: 100_000,
+                max_framerate: Some(30.0),
+                scale_resolution_down_by: None,
+            }],
+        ))))
+        .await
+        .unwrap();
+
+    let offer = viewer.create_offer(None).await.unwrap();
+    viewer.set_local_description(offer.clone()).await.unwrap();
+    host.set_remote_description(RTCSessionDescription::offer(offer.sdp).unwrap())
+        .await
+        .unwrap();
+    let answer = host.create_answer(None).await.unwrap();
+    host.set_local_description(answer.clone()).await.unwrap();
+    viewer
+        .set_remote_description(RTCSessionDescription::answer(answer.sdp).unwrap())
+        .await
+        .unwrap();
+
+    let (local, remote) = timeout(WAIT, async {
+        tokio::join!(host_ice.recv(), viewer_ice.recv())
+    })
+    .await
+    .unwrap();
+    host.add_ice_candidate(remote.unwrap()).await.unwrap();
+    viewer.add_ice_candidate(local.unwrap()).await.unwrap();
+    timeout(WAIT, async {
+        loop {
+            if let Some(dtls) = sender.transport().await.unwrap() {
+                if dtls.state().await.unwrap() != RTCDtlsTransportState::Connected {
+                    sleep(Duration::from_millis(10)).await;
+                    continue;
+                }
+                if let Some(pair) = dtls
+                    .ice_transport()
+                    .get_selected_candidate_pair()
+                    .await
+                    .unwrap()
+                {
+                    assert_eq!(pair.local().address, "127.0.0.1");
+                    assert_eq!(pair.remote().address, "127.0.0.1");
+                    break;
+                }
+            }
+            sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("video sender must have a live UDP loopback pair");
+
+    assert!(matches!(
+        wss.check_live_video_pair(&host).await,
+        Err("PUBLIC_VIDEO_ICE_PAIR_REJECTED")
+    ));
+    host.close().await.unwrap();
+    viewer.close().await.unwrap();
+}
+
 fn pin(local: &Identity, peer: &Identity) -> VerifiedPeer {
     let peer = peer.public();
     local
@@ -80,6 +241,8 @@ enum Scenario {
     RoundTrip,
     RelayOnly,
     UnsignedSelectedPort,
+    LiveUnsignedPair,
+    LiveUnavailable,
     BadLocalSdp,
     WrongTlsTrust,
     OtherRouteScope,
@@ -229,6 +392,8 @@ async fn exchange(scenario: Scenario) {
         Scenario::RoundTrip
         | Scenario::RelayOnly
         | Scenario::UnsignedSelectedPort
+        | Scenario::LiveUnsignedPair
+        | Scenario::LiveUnavailable
         | Scenario::DuplicateOffer
         | Scenario::PeerLeavesBeforeAnswer => {
             assert!(matches!(
@@ -271,7 +436,16 @@ async fn exchange(scenario: Scenario) {
                         .path,
                     expected
                 );
-                if matches!(scenario, Scenario::UnsignedSelectedPort) {
+                if matches!(scenario, Scenario::LiveUnsignedPair) {
+                    check_native_unsigned_pair(&mut h).await;
+                } else if matches!(scenario, Scenario::LiveUnavailable) {
+                    let (unstarted, _) = video_peer().await;
+                    assert!(matches!(
+                        h.check_live_video_pair(&unstarted).await,
+                        Err("PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE")
+                    ));
+                    unstarted.close().await.unwrap();
+                } else if matches!(scenario, Scenario::UnsignedSelectedPort) {
                     answer_candidate.port += 1;
                     assert!(matches!(
                         h.check_selected_pair(&answer_candidate, &offer_candidate),
@@ -323,4 +497,14 @@ async fn public_video_wss_checks_relay_only_and_rejects_unsigned_selected_port()
 #[tokio::test]
 async fn public_video_wss_refuses_invalid_local_video_before_sending() {
     exchange(Scenario::BadLocalSdp).await;
+}
+
+#[tokio::test]
+async fn public_video_wss_rejects_real_video_transport_pair_absent_from_signed_sdp() {
+    exchange(Scenario::LiveUnsignedPair).await;
+}
+
+#[tokio::test]
+async fn public_video_wss_rejects_unavailable_live_video_pair() {
+    exchange(Scenario::LiveUnavailable).await;
 }
