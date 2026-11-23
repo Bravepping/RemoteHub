@@ -19,6 +19,7 @@ pub enum End {
     Revoked,
     Disconnected,
     Expired,
+    QueueOverflow,
     SinkFailed,
 }
 
@@ -103,12 +104,7 @@ impl<S: SessionSink> Approval<S> {
         now: Instant,
     ) -> Result<(), Error> {
         self.advance(now)?;
-        if scope != &self.scope {
-            return Err(Error::WrongScope);
-        }
-        if self.state != State::Allowed {
-            return Err(Error::NotAllowed);
-        }
+        self.authorize(scope)?;
         if self.sink.apply(event).is_err() {
             self.end(End::SinkFailed)?;
             return Err(Error::ApplyFailed);
@@ -131,13 +127,32 @@ impl<S: SessionSink> Approval<S> {
         self.end(End::Disconnected)
     }
 
+    /// Scope and consent only. The owner must advance the monotonic clock
+    /// first, and still use `apply` to revalidate at dispatch.
+    pub(super) fn authorize(&self, scope: &InputScope) -> Result<(), Error> {
+        if scope != &self.scope {
+            return Err(Error::WrongScope);
+        }
+        if self.state != State::Allowed {
+            return Err(Error::NotAllowed);
+        }
+        Ok(())
+    }
+
+    pub(super) fn overflow(&mut self) -> Result<(), Error> {
+        self.end(End::QueueOverflow)
+    }
+
+    pub(super) fn release_status(&self) -> Result<(), Error> {
+        if self.release_unconfirmed {
+            return Err(Error::ReleaseUnconfirmed);
+        }
+        Ok(())
+    }
+
     fn end(&mut self, reason: End) -> Result<(), Error> {
         if matches!(self.state, State::Ended(_)) {
-            return if self.release_unconfirmed {
-                Err(Error::ReleaseUnconfirmed)
-            } else {
-                Ok(())
-            };
+            return self.release_status();
         }
         // Deny further input even if release fails.
         let had_grant = self.state == State::Allowed;

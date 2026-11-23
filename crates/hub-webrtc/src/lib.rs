@@ -20,6 +20,8 @@ pub mod ice_policy;
 pub mod input_pair;
 #[cfg(feature = "v2-input-approval")]
 pub mod input_approval;
+#[cfg(feature = "v2-input-approval")]
+pub mod input_queue;
 #[cfg(windows)]
 pub mod lan;
 #[cfg(all(feature = "v2-verified-lan", any(windows, test)))]
