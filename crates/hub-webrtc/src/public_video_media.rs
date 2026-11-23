@@ -120,6 +120,11 @@ impl ScopedVideoSender {
 }
 
 impl ScopedVideoReceiver {
+    #[cfg(test)]
+    pub(crate) fn fixture_has_queued_frame(&self) -> bool {
+        !self.queue.is_empty()
+    }
+
     /// A well-formed access unit from an admitted RTP stream, not a decoded
     /// or presented frame. Queued frames are not returned after revoke.
     pub async fn next_frame(&mut self) -> Result<VerifiedVideoFrame, &'static str> {
