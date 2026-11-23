@@ -153,6 +153,7 @@ cargo build --locked -p remotehub-desktop --bin remotehub-stream-display-check -
 
 ## 本分支已执行验证
 
+- 公网仅视频配置准备：`scripts/prepare-public-video-test.py` 在受信任的 Linux 管理端离线生成一个短期房间的 `host.json`、`viewer.json` 和 `wss.env`；校验明确的 WSS/TURN、网卡与 NAT 出口 IPv4、设备指纹及 CA 指纹。coturn 主密钥仅通过不回显的终端读取，不写入输出；角色文件只交给对应设备，切勿上传聊天或仓库。目录与文件 使用 0700/0600，不覆盖原文件。运行 `python3 scripts/prepare-public-video-test.py --self-test` 的 6 项合成测试通过；脚本不会配置、连接或启动服务器。
 - Windows 公网仅视频入口（显式 `v2-public-video-desktop`）：只在启动时指定本机普通配置文件才显示；两端先在「设备」核验指纹，再各自通过默认拒绝的原生确认。首轮入口限定 TURN 中继，不提供键鼠或声音；共享端实际核验候选对后才启动 720p DXGI/MF，最长 15 秒。观看端通过有界二进制 IPC 一次取一帧；Stop/Esc 先清屏，旧世代帧不能回画，关窗等待原生结束。配置不经 WebView、只用一次；房间和凭据仍须独立配置。本轮仅执行合成/前端测试与 Windows 交叉编译，没有运行 Windows 程序、采集真实桌面或部署公网。
 - 公网仅视频的连续媒体联测：同一签名会话在实际 ICE/DTLS 选路核验后，连续收发 64 个合成 H.264 完整访问单元；回环直连和回环模拟 TURN 都逐帧核对通过。TURN 联测定位并修复了首个 RTP 在轨道注册前被丢弃的问题，未放宽 SPS/PPS/IDR、序列及选路校验。WSS 监听与媒体并行；主动停止和信令断开后，媒体端不交付排队帧。另有 96 KiB 合成 IDR 分片重组测试，接收上限为每访问单元 192 包、256 KiB，每 RTP 载荷 1188 字节。这里只验证原生收发与重组，未采集真实桌面、解码呈现或连接云端。
 - 公网仅视频 WSS 服务端准入：`v2_signaling` 增加显式 `public-video` 模式，必须提供 TLS 证书和私钥、指定 IPv4 绑定接口及一个短期房间。独立路径 `/v2/public-video/ws` 从实际 TCP 来源和不同角色令牌识别对端；不会信任转发头、接受旧路径或因错误的房间/角色请求消耗正确席位。正常加入后席位单次使用，任一方离开即关闭本进程中的房间；服务重启前应重新签发邀请。只转发双向挑战和单次 offer/answer，拒绝 trickle。真实回环 TLS 回归覆盖错来源、错令牌、错房间、角色互换、重复加入、提前 offer、过期与退出。默认回环及私网模式不变；未部署公网或传输真实桌面。
