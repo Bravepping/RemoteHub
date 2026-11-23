@@ -6,6 +6,8 @@ use std::time::Duration;
 
 pub const VERSION: u8 = 2;
 pub const PATH: &str = "/v2/ws";
+/// Reserved for the explicitly admitted public-video profile; not a fallback.
+pub const PUBLIC_VIDEO_PATH: &str = "/v2/public-video/ws";
 pub const MAX_WIRE: usize = 64 * 1024;
 pub const MAX_SIGNAL: usize = 32 * 1024;
 pub const MAX_CHALLENGE_DATA: usize = 1024;
@@ -104,6 +106,15 @@ pub enum Flow {
 }
 
 impl Flow {
+    /// Public video always performs both device challenges and signs inline
+    /// offer/answer. Legacy signaling may still omit challenges or trickle ICE.
+    pub fn after_public_video(self, signal: SignalKind) -> Option<Self> {
+        match (self, signal) {
+            (Self::BeforeOffer, SignalKind::Offer) | (_, SignalKind::Ice) => None,
+            _ => self.after(signal),
+        }
+    }
+
     pub fn after(self, signal: SignalKind) -> Option<Self> {
         match (self, signal) {
             (Self::BeforeOffer, SignalKind::HostChallenge) => Some(Self::HostChallengeOnly),
@@ -163,6 +174,27 @@ pub fn decode<T: serde::de::DeserializeOwned>(json: &str) -> Result<T, WireError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn public_video_requires_both_challenges_and_never_trickles() {
+        let initial = Flow::default();
+        assert!(initial.after(SignalKind::Offer).is_some());
+        assert!(initial.after_public_video(SignalKind::Offer).is_none());
+        for (first, second) in [
+            (SignalKind::HostChallenge, SignalKind::ViewerChallenge),
+            (SignalKind::ViewerChallenge, SignalKind::HostChallenge),
+        ] {
+            let one = initial.after_public_video(first).unwrap();
+            assert!(one.after_public_video(SignalKind::Offer).is_none());
+            assert!(one.after_public_video(first).is_none());
+            let both = one.after_public_video(second).unwrap();
+            let offer = both.after_public_video(SignalKind::Offer).unwrap();
+            assert!(offer.after_public_video(SignalKind::Ice).is_none());
+            let answer = offer.after_public_video(SignalKind::Answer).unwrap();
+            assert!(answer.after_public_video(SignalKind::Ice).is_none());
+            assert!(answer.after_public_video(SignalKind::Answer).is_none());
+        }
+    }
 
     #[test]
     fn strict_wire_keeps_existing_json_and_rejects_unknown_fields() {

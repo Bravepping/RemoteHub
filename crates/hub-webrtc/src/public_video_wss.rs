@@ -1,13 +1,16 @@
-//! Loopback TLS fixture for the public-video proof protocol. It does not
-//! connect to the public address carried in the proof, confer consent, or
-//! by itself open ICE or media. The scoped actor ties ICE to the same device
-//! proof; its current binding is confined to the local integration fixture.
+//! Signed video-only WSS: a reserved native scope binds the relay's literal
+//! endpoint and CA to its device proof and scoped ICE driver. Loopback
+//! fixtures are separate and never become a public-route fallback.
 
 use crate::{
-    authenticated_relay::{AuthenticatedLoopbackRelay, AuthenticatedRelayEvent, ClientError},
+    authenticated_relay::{
+        AuthenticatedLoopbackRelay, AuthenticatedRelayEvent, ClientError, PublicVideoEndpoint,
+        RoomId,
+    },
     direct_policy::{self, Candidate, Kind, PathSummary, SelectedRoute, VerifiedCandidates},
+    ice_policy::{IceConfig, RelayGrant},
     lan_wire::Key,
-    public_video::{PublicVideoProof, PublicVideoScope, PublicVideoScopedIce},
+    public_video::{PublicVideoIcePlan, PublicVideoProof, PublicVideoScope, PublicVideoScopedIce},
 };
 use hub_identity::{
     pairing::VerifiedPeer,
@@ -22,6 +25,7 @@ use rtc::{
     rtp_transceiver::rtp_sender::RtpCodecKind,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     net::{SocketAddr, SocketAddrV4},
     sync::Arc,
@@ -74,6 +78,120 @@ pub struct PublicVideoWssConfig<'a> {
     pub scope: PublicVideoScope,
 }
 
+/// One native provisioned WSS token bound to a role and room. It authorizes
+/// access to the signaling relay, not device trust or permission to capture.
+pub struct PublicVideoWssInvitation {
+    room: Uuid,
+    role: Role,
+    expires_at: u64,
+    token: RelayToken,
+}
+
+impl PublicVideoWssInvitation {
+    pub fn new(
+        room: Uuid,
+        role: Role,
+        expires_at: u64,
+        token: RelayToken,
+    ) -> Result<Self, &'static str> {
+        if room.is_nil() || expires_at == 0 {
+            return Err("PUBLIC_VIDEO_WSS_INVITATION");
+        }
+        Ok(Self {
+            room,
+            role,
+            expires_at,
+            token,
+        })
+    }
+}
+
+/// Native-only inputs, independently provisioned and approved. No frontend
+/// message can select the public endpoint or reach the socket directly.
+pub struct PublicVideoNetworkConfig<'a> {
+    pub invitation: PublicVideoWssInvitation,
+    pub pairing_key: Arc<Key>,
+    pub wire_nonce: String,
+    pub session_nonce: [u8; 32],
+    pub ca_der: &'a [u8],
+    pub local_identity: &'a Identity,
+    pub peer: &'a VerifiedPeer,
+    pub scope: PublicVideoScope,
+    pub relay_grant: RelayGrant,
+    pub ice_config: IceConfig,
+}
+
+struct PreparedPublicVideoRoute {
+    endpoint: PublicVideoEndpoint,
+    trust: LoopbackTlsTrust,
+    plan: PublicVideoIcePlan,
+    deadline: Instant,
+}
+
+/// The production route can't enter the caller-supplied/unsigned fixture
+/// interface. It owns its validated media plan until challenges are exchanged.
+pub struct PendingPublicNetworkVideoWss<'a> {
+    wss: PendingPublicVideoWss<'a>,
+    plan: PublicVideoIcePlan,
+}
+
+impl<'a> PendingPublicNetworkVideoWss<'a> {
+    /// Host only: confirm signaling registration before sharing an invitation.
+    pub async fn wait_for_host_registration(mut self) -> Result<Self, &'static str> {
+        self.wss = timeout_at(
+            self.wss.context.scope_deadline,
+            self.wss.wait_for_host_registration(),
+        )
+        .await
+        .map_err(|_| TIMEOUT)??;
+        Ok(self)
+    }
+
+    pub async fn establish(self) -> Result<ScopedPublicVideoWss<'a>, &'static str> {
+        let deadline = self.wss.context.scope_deadline;
+        let (wire, proof) = timeout_at(deadline, self.wss.establish_proof())
+            .await
+            .map_err(|_| TIMEOUT)??;
+        let ice = PublicVideoScopedIce::new(proof, self.plan, wire.check()?)?;
+        Ok(ScopedPublicVideoWss { wire, ice })
+    }
+
+    pub async fn leave(self) -> Result<(), &'static str> {
+        self.wss.leave().await
+    }
+}
+
+fn prepare_public_route(
+    scope: PublicVideoScope,
+    invitation: &PublicVideoWssInvitation,
+    ca_der: &[u8],
+    grant: RelayGrant,
+    config: IceConfig,
+    now: u64,
+) -> Result<PreparedPublicVideoRoute, &'static str> {
+    scope.checked_mode(now)?;
+    if invitation.expires_at != scope.expires_at {
+        return Err("PUBLIC_VIDEO_WSS_INVITATION");
+    }
+    if ca_der.is_empty()
+        || ca_der.len() > 64 * 1024
+        || <[u8; 32]>::from(Sha256::digest(ca_der)) != scope.ca_sha256
+    {
+        return Err("PUBLIC_VIDEO_WSS_CA_PIN");
+    }
+    let trust = LoopbackTlsTrust::from_ca_der(ca_der).map_err(|_| "PUBLIC_VIDEO_WSS_CA_PIN")?;
+    let plan = PublicVideoIcePlan::prepare(scope, invitation.room, grant, config, now)?;
+    let deadline = Instant::now() + Duration::from_secs(plan.expires_at() - now);
+    let endpoint = PublicVideoEndpoint::new(plan.local_ip(), scope.wss, plan.expires_at(), now)
+        .map_err(|_| "PUBLIC_VIDEO_WSS_ENDPOINT")?;
+    Ok(PreparedPublicVideoRoute {
+        endpoint,
+        trust,
+        plan,
+        deadline,
+    })
+}
+
 struct ProofContext<'a> {
     room: Uuid,
     role: Role,
@@ -123,6 +241,65 @@ pub struct PublicVideoWss<'a> {
 }
 
 impl<'a> PublicVideoWss<'a> {
+    /// Native public client only. Reject inconsistent scope, role-bound
+    /// invitation, trust and ICE plan before attempting any TCP connection.
+    /// No implicit private/loopback route, media capture, or input.
+    pub async fn connect_public_wss(
+        cfg: PublicVideoNetworkConfig<'a>,
+    ) -> Result<PendingPublicNetworkVideoWss<'a>, &'static str> {
+        let now = wall_seconds()?;
+        let room = cfg.invitation.room;
+        let role = cfg.invitation.role;
+        cfg.peer
+            .session_binding(
+                &cfg.local_identity.public(),
+                session_role(role),
+                *room.as_bytes(),
+                cfg.session_nonce,
+            )
+            .map_err(|_| "PUBLIC_VIDEO_IDENTITY_MISMATCH")?;
+        let route = prepare_public_route(
+            cfg.scope,
+            &cfg.invitation,
+            cfg.ca_der,
+            cfg.relay_grant,
+            cfg.ice_config,
+            now,
+        )?;
+        let room_id = RoomId::new(room.simple().to_string()).map_err(relay_error)?;
+        let relay = timeout_at(
+            route.deadline,
+            AuthenticatedLoopbackRelay::connect_public_video_wss(
+                route.endpoint,
+                &cfg.invitation.token,
+                room_id,
+                role,
+                cfg.pairing_key,
+                cfg.wire_nonce,
+                &route.trust,
+            ),
+        )
+        .await
+        .map_err(|_| TIMEOUT)?
+        .map_err(public_connect_error)?;
+        Ok(PendingPublicNetworkVideoWss {
+            wss: PendingPublicVideoWss {
+                relay,
+                context: ProofContext {
+                    room,
+                    role,
+                    session_nonce: cfg.session_nonce,
+                    identity: cfg.local_identity,
+                    peer: cfg.peer,
+                    scope: cfg.scope,
+                    scope_deadline: route.deadline,
+                },
+                host_registered: false,
+            },
+            plan: route.plan,
+        })
+    }
+
     /// Only the existing explicit loopback-WSS transport is available.
     /// Use the same local room and role for the transport and device proof.
     pub async fn connect_loopback_wss(
@@ -887,11 +1064,22 @@ fn wall_seconds() -> Result<u64, &'static str> {
         .map_err(|_| "PUBLIC_VIDEO_WSS_CLOCK")
 }
 
+fn public_connect_error(error: ClientError) -> &'static str {
+    match error {
+        ClientError::PublicVideoEndpoint | ClientError::PublicVideoBind => {
+            "PUBLIC_VIDEO_WSS_ENDPOINT"
+        }
+        ClientError::TlsTrust | ClientError::TlsHandshake => "PUBLIC_VIDEO_WSS_TLS",
+        ClientError::Unauthorized => "PUBLIC_VIDEO_WSS_ADMISSION",
+        _ => relay_error(error),
+    }
+}
+
 fn relay_error(error: ClientError) -> &'static str {
     match error {
         ClientError::Endpoint => ENDPOINT,
         ClientError::Closed => CLOSED,
-        ClientError::Timeout => TIMEOUT,
+        ClientError::Timeout | ClientError::PublicVideoExpiry => TIMEOUT,
         ClientError::Protocol | ClientError::Payload | ClientError::Rejected => PROTOCOL,
         _ => TRANSPORT,
     }
@@ -921,3 +1109,7 @@ fn sdp_kind(role: Role) -> SignalKind {
 #[cfg(test)]
 #[path = "public_video_scoped_wss_tests.rs"]
 mod scoped_tests;
+
+#[cfg(test)]
+#[path = "public_video_network_tests.rs"]
+mod network_tests;

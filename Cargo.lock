@@ -1945,6 +1945,7 @@ name = "hub-signal-v2"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "rcgen",
  "rustls",
  "serde",
  "serde_json",

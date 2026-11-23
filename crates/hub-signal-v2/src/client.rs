@@ -1,5 +1,6 @@
 use crate::wire::{
-    self, ClientFrame, Flow, Role, ServerFrame, SignalKind, MAX_WIRE, PATH, ROOM_LIFETIME, VERSION,
+    self, ClientFrame, Flow, Role, ServerFrame, SignalKind, MAX_WIRE, PATH, PUBLIC_VIDEO_PATH,
+    ROOM_LIFETIME, VERSION,
 };
 use futures_util::{SinkExt, StreamExt};
 use rustls::{
@@ -9,12 +10,12 @@ use rustls::{
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpSocket, TcpStream},
-    time::{timeout, timeout_at, Instant},
+    time::{timeout_at, Instant},
 };
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::{
@@ -105,13 +106,19 @@ pub enum ClientError {
     PrivateLanEndpoint,
     #[error("unable to bind or verify the private LAN relay source socket")]
     PrivateLanBind,
+    #[error("V2 public video requires an approved literal IPv4 source and public relay socket")]
+    PublicVideoEndpoint,
+    #[error("unable to bind or verify the public video relay source socket")]
+    PublicVideoBind,
+    #[error("public video relay approval is expired or too long")]
+    PublicVideoExpiry,
     #[error("invalid relay token")]
     Token,
     #[error("invalid relay room")]
     Room,
-    #[error("invalid loopback relay trust configuration")]
+    #[error("invalid relay trust configuration")]
     TlsTrust,
-    #[error("loopback relay TLS handshake or certificate verification failed")]
+    #[error("relay TLS handshake or certificate verification failed")]
     TlsHandshake,
     #[error("relay rejected the WebSocket authorization")]
     Unauthorized,
@@ -157,32 +164,146 @@ impl PrivateLanEndpoint {
         self.relay
     }
 
+    #[cfg(test)]
     fn matches_socket(self, local: SocketAddr, peer: SocketAddr) -> bool {
-        matches!(local, SocketAddr::V4(v4) if *v4.ip() == self.source && v4.port() != 0)
-            && peer == SocketAddr::V4(self.relay)
+        matches_bound_socket(self.source, self.relay, local, peer)
     }
 
     async fn dial(self) -> Result<TcpStream, ClientError> {
-        let socket = TcpSocket::new_v4().map_err(|_| ClientError::PrivateLanBind)?;
-        socket
-            .bind(SocketAddr::V4(SocketAddrV4::new(self.source, 0)))
-            .map_err(|_| ClientError::PrivateLanBind)?;
-        let tcp = socket
-            .connect(SocketAddr::V4(self.relay))
-            .await
-            .map_err(|_| ClientError::Transport)?;
-        let local = tcp.local_addr().map_err(|_| ClientError::PrivateLanBind)?;
-        let peer = tcp.peer_addr().map_err(|_| ClientError::PrivateLanBind)?;
-        if !self.matches_socket(local, peer) {
-            return Err(ClientError::PrivateLanBind);
-        }
-        Ok(tcp)
+        dial_bound(self.source, self.relay, ClientError::PrivateLanBind).await
     }
+}
+
+/// Literal source and relay tuple admitted by the caller for a short window.
+/// This type neither grants device/media permissions nor initiates a connection.
+pub struct PublicVideoEndpoint {
+    source: Ipv4Addr,
+    relay: SocketAddrV4,
+    expires_at: u64,
+    deadline: Instant,
+}
+
+impl PublicVideoEndpoint {
+    pub fn new(
+        source: Ipv4Addr,
+        relay: SocketAddrV4,
+        expires_at: u64,
+        now: u64,
+    ) -> Result<Self, ClientError> {
+        if !(source.is_private() || public_unicast(source))
+            || !public_unicast(*relay.ip())
+            || relay.port() < 1024
+        {
+            return Err(ClientError::PublicVideoEndpoint);
+        }
+        Self::with_clock(source, relay, expires_at, now, Instant::now())
+    }
+
+    fn with_clock(
+        source: Ipv4Addr,
+        relay: SocketAddrV4,
+        expires_at: u64,
+        now: u64,
+        started_at: Instant,
+    ) -> Result<Self, ClientError> {
+        let ttl = approval_remaining(expires_at, now)?;
+        Ok(Self {
+            source,
+            relay,
+            expires_at,
+            deadline: started_at + ttl,
+        })
+    }
+
+    pub fn source(&self) -> Ipv4Addr {
+        self.source
+    }
+
+    pub fn relay(&self) -> SocketAddrV4 {
+        self.relay
+    }
+
+    fn checked_deadline(&self) -> Result<Instant, ClientError> {
+        self.checked_deadline_at(epoch_seconds()?, Instant::now())
+    }
+
+    fn checked_deadline_at(
+        &self,
+        now: u64,
+        monotonic_now: Instant,
+    ) -> Result<Instant, ClientError> {
+        let remaining = approval_remaining(self.expires_at, now)?;
+        if monotonic_now >= self.deadline {
+            return Err(ClientError::PublicVideoExpiry);
+        }
+        Ok(self.deadline.min(monotonic_now + remaining))
+    }
+}
+
+fn public_unicast(ip: Ipv4Addr) -> bool {
+    // Match the scoped media policy's conservative public IPv4 ranges.
+    let [a, b, _, _] = ip.octets();
+    a != 0
+        && a < 224
+        && !ip.is_private()
+        && !ip.is_loopback()
+        && !ip.is_link_local()
+        && !ip.is_documentation()
+        && !(a == 100 && (64..=127).contains(&b))
+        && !(a == 192 && b == 0)
+        && !(a == 198 && (b == 18 || b == 19))
+}
+
+fn epoch_seconds() -> Result<u64, ClientError> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|time| time.as_secs())
+        .map_err(|_| ClientError::PublicVideoExpiry)
+}
+
+fn approval_remaining(expires_at: u64, now: u64) -> Result<Duration, ClientError> {
+    let remaining = Duration::from_secs(expires_at.saturating_sub(now));
+    if remaining.is_zero() || remaining > ROOM_LIFETIME {
+        return Err(ClientError::PublicVideoExpiry);
+    }
+    Ok(remaining)
+}
+
+fn matches_bound_socket(
+    source: Ipv4Addr,
+    relay: SocketAddrV4,
+    local: SocketAddr,
+    peer: SocketAddr,
+) -> bool {
+    matches!(local, SocketAddr::V4(v4) if *v4.ip() == source && v4.port() != 0)
+        && peer == SocketAddr::V4(relay)
+}
+
+async fn dial_bound(
+    source: Ipv4Addr,
+    relay: SocketAddrV4,
+    bind_error: ClientError,
+) -> Result<TcpStream, ClientError> {
+    let socket = TcpSocket::new_v4().map_err(|_| bind_error)?;
+    socket
+        .bind(SocketAddr::V4(SocketAddrV4::new(source, 0)))
+        .map_err(|_| bind_error)?;
+    let tcp = socket
+        .connect(SocketAddr::V4(relay))
+        .await
+        .map_err(|_| ClientError::Transport)?;
+    let local = tcp.local_addr().map_err(|_| bind_error)?;
+    let peer = tcp.peer_addr().map_err(|_| bind_error)?;
+    if !matches_bound_socket(source, relay, local, peer) {
+        return Err(bind_error);
+    }
+    Ok(tcp)
 }
 
 enum Route<'a> {
     Loopback(SocketAddr, Option<&'a LoopbackTlsTrust>),
     PrivateLan(PrivateLanEndpoint, &'a LoopbackTlsTrust),
+    PublicVideo(PublicVideoEndpoint, &'a LoopbackTlsTrust),
 }
 
 impl Route<'_> {
@@ -193,13 +314,35 @@ impl Route<'_> {
             }
             Self::Loopback(..) => Err(ClientError::Endpoint),
             Self::PrivateLan(endpoint, _) => Ok(SocketAddr::V4(endpoint.relay)),
+            Self::PublicVideo(ref endpoint, _) => Ok(SocketAddr::V4(endpoint.relay)),
         }
     }
 
     fn trust(&self) -> Option<&LoopbackTlsTrust> {
         match *self {
             Self::Loopback(_, trust) => trust,
-            Self::PrivateLan(_, trust) => Some(trust),
+            Self::PrivateLan(_, trust) | Self::PublicVideo(_, trust) => Some(trust),
+        }
+    }
+
+    fn path(&self) -> &'static str {
+        match self {
+            Self::PublicVideo(..) => PUBLIC_VIDEO_PATH,
+            _ => PATH,
+        }
+    }
+
+    fn checked_deadline(&self, fallback: Instant) -> Result<Instant, ClientError> {
+        match self {
+            Self::PublicVideo(endpoint, _) => endpoint.checked_deadline().map(|d| d.min(fallback)),
+            _ => Ok(fallback),
+        }
+    }
+
+    fn into_approval(self) -> Option<PublicVideoEndpoint> {
+        match self {
+            Self::PublicVideo(endpoint, _) => Some(endpoint),
+            _ => None,
         }
     }
 
@@ -209,6 +352,15 @@ impl Route<'_> {
                 .await
                 .map_err(|_| ClientError::Transport),
             Self::PrivateLan(endpoint, _) => endpoint.dial().await,
+            Self::PublicVideo(ref endpoint, _) => {
+                endpoint.checked_deadline()?;
+                dial_bound(
+                    endpoint.source,
+                    endpoint.relay,
+                    ClientError::PublicVideoBind,
+                )
+                .await
+            }
         }
     }
 }
@@ -246,6 +398,44 @@ impl PrivateLanRelay {
     }
 }
 
+/// Dedicated public-video relay connection. Establishing it does not authorize
+/// the peer, capture, media routing, or input.
+pub struct PublicVideoRelay(LoopbackRelay);
+
+/// Connect only to the approved literal IPv4 socket, bound to its exact
+/// source. The only trust root is the independently provisioned DER CA;
+/// rustls must verify TLS for the relay IP before sending the bearer.
+/// This client never follows redirects or attempts plaintext/legacy fallback.
+pub async fn connect_public_video_wss(
+    endpoint: PublicVideoEndpoint,
+    token: &RelayToken,
+    room: RoomId,
+    role: Role,
+    trust: &LoopbackTlsTrust,
+) -> Result<PublicVideoRelay, ClientError> {
+    LoopbackRelay::connect_with_route(Route::PublicVideo(endpoint, trust), token, room, role)
+        .await
+        .map(PublicVideoRelay)
+}
+
+impl PublicVideoRelay {
+    pub async fn send_signal(&mut self, kind: SignalKind, data: String) -> Result<(), ClientError> {
+        let result = self.0.send_signal(kind, data).await;
+        if result.is_err() {
+            self.0.socket.take();
+        }
+        result
+    }
+
+    pub async fn next_event(&mut self, wait: Duration) -> Result<RelayEvent, ClientError> {
+        self.0.next_event(wait).await
+    }
+
+    pub async fn leave(self) -> Result<(), ClientError> {
+        self.0.leave().await
+    }
+}
+
 /// Not serializable or Debug so raw signaling cannot accidentally reach logs
 /// or an IPC response. The product must separately authenticate any SDP/ICE.
 pub enum RelayEvent {
@@ -265,6 +455,7 @@ enum JoinPhase {
 pub struct LoopbackRelay {
     socket: Option<WebSocketStream<Box<dyn RelayIo>>>,
     deadline: Instant,
+    approval: Option<PublicVideoEndpoint>,
     role: Role,
     phase: JoinPhase,
     flow: Flow,
@@ -309,8 +500,10 @@ impl LoopbackRelay {
             .max_write_buffer_size(MAX_WIRE * 2)
             .max_frame_size(Some(MAX_WIRE))
             .max_message_size(Some(MAX_WIRE));
-        let deadline = Instant::now() + ROOM_LIFETIME;
-        let socket = timeout(IO_TIMEOUT, async {
+        let started_at = Instant::now();
+        let deadline = route.checked_deadline(started_at + ROOM_LIFETIME)?;
+        let handshake_deadline = deadline.min(started_at + IO_TIMEOUT);
+        let socket = timeout_at(handshake_deadline, async {
             // SocketAddr makes the TCP target explicit independently of the HTTP Host.
             let tcp = route.dial(address).await?;
             let (scheme, stream): (&str, Box<dyn RelayIo>) = match route.trust() {
@@ -324,7 +517,9 @@ impl LoopbackRelay {
                 }
                 None => ("ws", Box::new(tcp)),
             };
-            let mut request = format!("{scheme}://{address}{PATH}")
+            route.checked_deadline(deadline)?;
+            let path = route.path();
+            let mut request = format!("{scheme}://{address}{path}")
                 .into_client_request()
                 .map_err(|_| ClientError::Endpoint)?;
             let auth = Zeroizing::new(format!("Bearer {}", token.0.as_str()));
@@ -346,6 +541,7 @@ impl LoopbackRelay {
                     }
                     _ => ClientError::Transport,
                 })?;
+            route.checked_deadline(deadline)?;
             Ok::<_, ClientError>(socket)
         })
         .await
@@ -353,6 +549,7 @@ impl LoopbackRelay {
         let mut relay = Self {
             socket: Some(socket),
             deadline,
+            approval: route.into_approval(),
             role,
             phase: JoinPhase::Hello,
             flow: Flow::default(),
@@ -369,6 +566,22 @@ impl LoopbackRelay {
         Ok(relay)
     }
 
+    fn effective_deadline(&self) -> Option<Instant> {
+        let deadline = match &self.approval {
+            Some(approval) => approval.checked_deadline().ok()?.min(self.deadline),
+            None => self.deadline,
+        };
+        (Instant::now() < deadline).then_some(deadline)
+    }
+
+    fn flow_after(&self, signal: SignalKind) -> Option<Flow> {
+        if self.approval.is_some() {
+            self.flow.after_public_video(signal)
+        } else {
+            self.flow.after(signal)
+        }
+    }
+
     /// Only sends signaling. Caller must still obtain native approval and
     /// authenticate the intended peer/session before any media or input.
     pub async fn send_signal(&mut self, kind: SignalKind, data: String) -> Result<(), ClientError> {
@@ -381,7 +594,7 @@ impl LoopbackRelay {
         if self.phase != JoinPhase::Paired || !kind.allows_sender(self.role) {
             return Err(ClientError::Protocol);
         }
-        let next_flow = self.flow.after(kind).ok_or(ClientError::Protocol)?;
+        let next_flow = self.flow_after(kind).ok_or(ClientError::Protocol)?;
         let seq = self.sent.checked_add(1).ok_or(ClientError::Protocol)?;
         self.write(ClientFrame::Signal {
             seq,
@@ -395,20 +608,18 @@ impl LoopbackRelay {
     }
 
     pub async fn next_event(&mut self, wait: Duration) -> Result<RelayEvent, ClientError> {
-        if self.socket.is_none() || Instant::now() >= self.deadline {
+        let Some(deadline) = self.effective_deadline().filter(|_| self.socket.is_some()) else {
+            self.socket.take();
+            return Err(ClientError::Closed);
+        };
+        let deadline = deadline.min(Instant::now() + wait.min(MAX_POLL_TIMEOUT));
+        let outcome = timeout_at(deadline, self.read()).await;
+        if self.effective_deadline().is_none() {
             self.socket.take();
             return Err(ClientError::Closed);
         }
-        let deadline = self
-            .deadline
-            .min(Instant::now() + wait.min(MAX_POLL_TIMEOUT));
-        let outcome = timeout_at(deadline, self.read()).await;
         match outcome {
-            Err(_) if Instant::now() < self.deadline => Err(ClientError::Timeout),
-            Err(_) => {
-                self.socket.take();
-                Err(ClientError::Closed)
-            }
+            Err(_) => Err(ClientError::Timeout),
             Ok(Ok(RelayEvent::PeerLeft)) => {
                 self.socket.take();
                 Ok(RelayEvent::PeerLeft)
@@ -428,19 +639,22 @@ impl LoopbackRelay {
     }
 
     async fn write(&mut self, frame: ClientFrame) -> Result<(), ClientError> {
-        if Instant::now() >= self.deadline {
+        let Some(deadline) = self.effective_deadline() else {
             self.socket.take();
             return Err(ClientError::Closed);
-        }
+        };
         let text = wire::encode(&frame).map_err(|_| ClientError::Payload)?;
         // Abort rather than reuse an indeterminate sequence if the caller
         // cancels a write after bytes have been queued into the socket.
         let mut socket = self.socket.take().ok_or(ClientError::Closed)?;
-        let deadline = self.deadline.min(Instant::now() + IO_TIMEOUT);
+        let deadline = deadline.min(Instant::now() + IO_TIMEOUT);
         timeout_at(deadline, socket.send(Message::Text(text.into())))
             .await
             .map_err(|_| ClientError::Timeout)?
             .map_err(|_| ClientError::Transport)?;
+        if self.effective_deadline().is_none() {
+            return Err(ClientError::Closed);
+        }
         self.socket = Some(socket);
         Ok(())
     }
@@ -493,7 +707,7 @@ impl LoopbackRelay {
                 && self.received.checked_add(1) == Some(seq)
                 && signal.valid_payload(&data) =>
             {
-                self.flow = self.flow.after(signal).ok_or(ClientError::Protocol)?;
+                self.flow = self.flow_after(signal).ok_or(ClientError::Protocol)?;
                 self.received = seq;
                 Ok(RelayEvent::Signal { kind: signal, data })
             }
@@ -566,3 +780,7 @@ mod tests {
         ));
     }
 }
+
+#[cfg(test)]
+#[path = "public_video_client_tests.rs"]
+mod public_video_client_tests;
