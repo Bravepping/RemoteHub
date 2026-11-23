@@ -1,7 +1,9 @@
 //! A synchronous queue owned by the native approval owner. This module does
 //! not accept wire messages, authenticate peers or connect to an input driver.
 
-use crate::input_approval::{Approval, Error as ApprovalError, InputScope, SessionSink, State};
+use crate::input_approval::{
+    Approval, Binding, Error as ApprovalError, InputScope, SessionSink, State,
+};
 use std::{collections::VecDeque, time::Instant};
 
 const CAPACITY: usize = 32;
@@ -35,7 +37,7 @@ impl From<ApprovalError> for Error {
 }
 
 struct Pending<E> {
-    scope: InputScope,
+    scope: Binding,
     event: E,
 }
 
@@ -56,8 +58,12 @@ pub struct InputQueue<S: SessionSink> {
 
 impl<S: SessionSink> InputQueue<S> {
     pub fn view_only(scope: InputScope, session_until: Instant, sink: S) -> Self {
+        Self::view_only_bound(Binding::Device(scope), session_until, sink)
+    }
+
+    pub(super) fn view_only_bound(scope: Binding, session_until: Instant, sink: S) -> Self {
         Self {
-            approval: Approval::view_only(scope, session_until, sink),
+            approval: Approval::view_only_bound(scope, session_until, sink),
             pending: VecDeque::new(),
         }
     }
@@ -72,7 +78,11 @@ impl<S: SessionSink> InputQueue<S> {
     }
 
     pub fn enqueue(&mut self, scope: &InputScope, event: S::Event) -> Result<(), Error> {
-        self.enqueue_at(scope, event, Instant::now())
+        self.enqueue_bound(&Binding::Device(*scope), event)
+    }
+
+    pub(super) fn enqueue_bound(&mut self, scope: &Binding, event: S::Event) -> Result<(), Error> {
+        self.enqueue_bound_at(scope, event, Instant::now())
     }
 
     /// One synchronous owner turn. Always pass the current verified scope,
@@ -82,7 +92,15 @@ impl<S: SessionSink> InputQueue<S> {
         scope: &InputScope,
         control: Control,
     ) -> Result<Dispatch, Error> {
-        self.dispatch_at(scope, control, Instant::now())
+        self.dispatch_bound(&Binding::Device(*scope), control)
+    }
+
+    pub(super) fn dispatch_bound(
+        &mut self,
+        scope: &Binding,
+        control: Control,
+    ) -> Result<Dispatch, Error> {
+        self.dispatch_bound_at(scope, control, Instant::now())
     }
 
     /// Advance expiry or report a pending local revoke/transport loss even
@@ -97,9 +115,19 @@ impl<S: SessionSink> InputQueue<S> {
         self.finish(result)
     }
 
+    #[cfg(test)]
     fn enqueue_at(
         &mut self,
         scope: &InputScope,
+        event: S::Event,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.enqueue_bound_at(&Binding::Device(*scope), event, now)
+    }
+
+    fn enqueue_bound_at(
+        &mut self,
+        scope: &Binding,
         event: S::Event,
         now: Instant,
     ) -> Result<(), Error> {
@@ -108,9 +136,7 @@ impl<S: SessionSink> InputQueue<S> {
         if self.pending.len() == CAPACITY {
             // Do not drop a possible release event and continue applying
             // a now-incomplete stream of presses/releases.
-            self.pending.clear();
-            let result = self.approval.overflow();
-            self.finish(result)?;
+            self.close_for_overflow()?;
             return Err(Error::Full);
         }
         self.pending.push_back(Pending {
@@ -120,9 +146,25 @@ impl<S: SessionSink> InputQueue<S> {
         Ok(())
     }
 
+    pub(super) fn close_for_overflow(&mut self) -> Result<(), Error> {
+        self.pending.clear();
+        let result = self.approval.overflow();
+        self.finish(result)
+    }
+
+    #[cfg(test)]
     fn dispatch_at(
         &mut self,
         scope: &InputScope,
+        control: Control,
+        now: Instant,
+    ) -> Result<Dispatch, Error> {
+        self.dispatch_bound_at(&Binding::Device(*scope), control, now)
+    }
+
+    fn dispatch_bound_at(
+        &mut self,
+        scope: &Binding,
         control: Control,
         now: Instant,
     ) -> Result<Dispatch, Error> {
@@ -140,7 +182,7 @@ impl<S: SessionSink> InputQueue<S> {
         let Some(item) = self.pending.pop_front() else {
             return Ok(Dispatch::Idle);
         };
-        let result = self.approval.apply(&item.scope, &item.event, now);
+        let result = self.approval.apply_bound(&item.scope, &item.event, now);
         self.finish(result)?;
         Ok(Dispatch::Applied)
     }

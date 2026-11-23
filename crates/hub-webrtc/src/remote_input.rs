@@ -1,9 +1,8 @@
 //! Explicitly approved short LAN sessions only. No arbitrary command/text execution.
 use serde::Deserialize;
-use std::{
-    collections::BTreeSet,
-    time::{Duration, Instant},
-};
+#[cfg(windows)]
+use std::collections::BTreeSet;
+use std::time::{Duration, Instant};
 pub const LABEL: &str = "remote-input.v1";
 #[derive(Deserialize, Clone)]
 #[serde(tag = "kind", deny_unknown_fields)]
@@ -40,9 +39,13 @@ pub struct Protocol {
 impl Protocol {
     pub fn new(session: String, seconds: u32) -> Self {
         let now = Instant::now();
+        Self::with_deadline(session, now, now + Duration::from_secs(seconds as u64))
+    }
+
+    pub(super) fn with_deadline(session: String, now: Instant, expires: Instant) -> Self {
         Self {
             session,
-            expires: now + Duration::from_secs(seconds as u64),
+            expires,
             window: now,
             count: 0,
             seq: 0,
@@ -56,6 +59,18 @@ impl Protocol {
         now: Instant,
         sink: &mut impl Sink,
     ) -> Result<u64, String> {
+        let (seq, event) = self.validate_event(bytes, text, permitted, now)?;
+        sink.apply(&event)?;
+        Ok(self.commit_applied(seq))
+    }
+
+    pub(super) fn validate_event(
+        &mut self,
+        bytes: &[u8],
+        text: bool,
+        permitted: bool,
+        now: Instant,
+    ) -> Result<(u64, Event), String> {
         if !permitted || now >= self.expires {
             return Err("INPUT_NOT_AUTHORIZED".into());
         }
@@ -92,9 +107,14 @@ impl Protocol {
             }
             _ => (),
         }
-        sink.apply(&m.event)?;
-        self.seq = m.seq;
-        Ok(m.seq)
+        Ok((m.seq, m.event))
+    }
+
+    /// Only after the exact validated event has been successfully applied.
+    pub(super) fn commit_applied(&mut self, seq: u64) -> u64 {
+        debug_assert_eq!(seq, self.seq + 1);
+        self.seq = seq;
+        seq
     }
 }
 pub fn vk(code: &str) -> Option<u16> {

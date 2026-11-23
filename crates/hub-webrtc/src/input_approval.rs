@@ -13,6 +13,14 @@ pub struct InputScope {
     pub viewer_key: [u8; 32],
 }
 
+/// Internal exact binding. An address-pair scope is never a device scope.
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub(super) enum Binding {
+    Device(InputScope),
+    #[cfg(feature = "p3-lan-input-queue-test")]
+    LegacyLan(crate::lan_input_queue::LanInputScope),
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum End {
     Declined,
@@ -53,7 +61,7 @@ pub trait SessionSink {
 /// `advance` on a timer even if no input arrives, and `disconnect` on any
 /// transport loss. Never give network / UI code a reference to the sink.
 pub struct Approval<S: SessionSink> {
-    scope: InputScope,
+    scope: Binding,
     session_until: Instant,
     permission_until: Option<Instant>,
     state: State,
@@ -63,6 +71,10 @@ pub struct Approval<S: SessionSink> {
 
 impl<S: SessionSink> Approval<S> {
     pub fn view_only(scope: InputScope, session_until: Instant, sink: S) -> Self {
+        Self::view_only_bound(Binding::Device(scope), session_until, sink)
+    }
+
+    pub(super) fn view_only_bound(scope: Binding, session_until: Instant, sink: S) -> Self {
         Self {
             scope,
             session_until,
@@ -103,6 +115,15 @@ impl<S: SessionSink> Approval<S> {
         event: &S::Event,
         now: Instant,
     ) -> Result<(), Error> {
+        self.apply_bound(&Binding::Device(*scope), event, now)
+    }
+
+    pub(super) fn apply_bound(
+        &mut self,
+        scope: &Binding,
+        event: &S::Event,
+        now: Instant,
+    ) -> Result<(), Error> {
         self.advance(now)?;
         self.authorize(scope)?;
         if self.sink.apply(event).is_err() {
@@ -129,7 +150,7 @@ impl<S: SessionSink> Approval<S> {
 
     /// Scope and consent only. The owner must advance the monotonic clock
     /// first, and still use `apply` to revalidate at dispatch.
-    pub(super) fn authorize(&self, scope: &InputScope) -> Result<(), Error> {
+    pub(super) fn authorize(&self, scope: &Binding) -> Result<(), Error> {
         if scope != &self.scope {
             return Err(Error::WrongScope);
         }

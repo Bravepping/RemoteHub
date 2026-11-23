@@ -26,6 +26,8 @@ pub mod input_queue;
 pub mod lan;
 #[cfg(all(feature = "v2-verified-lan", any(windows, test)))]
 pub(crate) mod lan_device;
+#[cfg(feature = "p3-lan-input-queue-test")]
+pub mod lan_input_queue;
 pub mod lan_wire;
 pub mod pinned_runtime;
 #[cfg(all(feature = "v2-private-wss-lan", any(windows, test)))]
