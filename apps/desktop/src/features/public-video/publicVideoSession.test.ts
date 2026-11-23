@@ -1,0 +1,254 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { VideoDisplayFailure } from './canvasVideoAdapter';
+import {
+  parsePublicVideoFrame,
+  PublicVideoSession,
+  type PublicVideoBridge,
+} from './publicVideoSession';
+
+const first = '0'.repeat(32);
+const second = '1'.repeat(32);
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((fulfill, fail) => {
+    resolve = fulfill;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+function raw(sequence = 0, timestampUs = 0, key = true): ArrayBuffer {
+  const payload = [0, 0, 1, 0x65, 3];
+  const frame = new ArrayBuffer(24 + payload.length);
+  const header = new DataView(frame);
+  header.setBigUint64(0, BigInt(sequence), true);
+  header.setBigUint64(8, BigInt(timestampUs), true);
+  header.setUint32(16, payload.length, true);
+  header.setUint8(20, Number(key));
+  new Uint8Array(frame, 24).set(payload);
+  return frame;
+}
+
+describe('native raw video frame', () => {
+  it('parses the little-endian layout and treats only an empty buffer as pending', () => {
+    expect(parsePublicVideoFrame(new ArrayBuffer(0))).toBeNull();
+    expect(parsePublicVideoFrame(raw(260, 4000, false))).toEqual({
+      sequence: 260,
+      timestampUs: 4000,
+      keyframe: false,
+      annexB: new Uint8Array([0, 0, 1, 0x65, 3]),
+    });
+  });
+
+  it.each([
+    ['truncated', () => new ArrayBuffer(23)],
+    ['oversized', () => new ArrayBuffer(24 + 1024 * 1024 + 1)],
+    ['JSON bytes', () => [...new Uint8Array(raw())]],
+    [
+      'reserved flag',
+      () => {
+        const frame = raw();
+        new DataView(frame).setUint8(20, 3);
+        return frame;
+      },
+    ],
+    [
+      'nonzero padding',
+      () => {
+        const frame = raw();
+        new DataView(frame).setUint8(23, 1);
+        return frame;
+      },
+    ],
+    [
+      'payload length mismatch',
+      () => {
+        const frame = raw();
+        new DataView(frame).setUint32(16, 15, true);
+        return frame;
+      },
+    ],
+    [
+      'unsafe timestamp',
+      () => {
+        const frame = raw();
+        new DataView(frame).setBigUint64(8, 1n << 53n, true);
+        return frame;
+      },
+    ],
+  ] as const)('rejects %s', (_name, mutate) => {
+    expect(() => parsePublicVideoFrame(mutate())).toThrow();
+  });
+});
+
+describe('public video viewer controller', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  function harness() {
+    const bridge = {
+      start: vi.fn<PublicVideoBridge['start']>().mockResolvedValue(first),
+      status: vi
+        .fn<PublicVideoBridge['status']>()
+        .mockResolvedValue({ phase: 'ready' }),
+      nextFrame: vi
+        .fn<PublicVideoBridge['nextFrame']>()
+        .mockResolvedValue(new ArrayBuffer(0)),
+      stop: vi.fn<PublicVideoBridge['stop']>().mockResolvedValue(undefined),
+    };
+    const ingress = vi.fn(() => true);
+    const renderer = { start: vi.fn(() => ingress), stop: vi.fn() };
+    let draw!: () => void;
+    const create = vi.fn(
+      (_failed: (code: VideoDisplayFailure) => void, presented: () => void) => {
+        draw = presented;
+        return renderer;
+      },
+    );
+    const update = vi.fn();
+    const session = new PublicVideoSession(bridge, create, update);
+    return {
+      bridge,
+      renderer,
+      create,
+      ingress,
+      update,
+      session,
+      draw: () => draw(),
+    };
+  }
+
+  it('waits for native ready, has one frame pull, and reports watching only after a paint', async () => {
+    const { bridge, create, ingress, update, session, draw } = harness();
+    const frame = deferred<unknown>();
+    bridge.status.mockResolvedValueOnce({ phase: 'starting' });
+    bridge.nextFrame.mockReturnValueOnce(frame.promise);
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(create).not.toHaveBeenCalled();
+    expect(bridge.nextFrame).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(700);
+    expect(bridge.nextFrame).toHaveBeenCalledExactlyOnceWith(first);
+    expect(update).toHaveBeenLastCalledWith('waiting');
+    frame.resolve(raw());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ingress).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenLastCalledWith('waiting');
+    draw();
+    expect(update).toHaveBeenLastCalledWith('watching');
+    await session.stop();
+  });
+
+  it('does not create a renderer or pull media when sharing', async () => {
+    const { bridge, create, session, update } = harness();
+    session.start('host');
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(bridge.start).toHaveBeenCalledExactlyOnceWith('host');
+    expect(bridge.status).toHaveBeenCalledWith(first);
+    expect(create).not.toHaveBeenCalled();
+    expect(bridge.nextFrame).not.toHaveBeenCalled();
+    expect(update).toHaveBeenLastCalledWith('sharing');
+    await session.stop();
+  });
+
+  it('clears synchronously and suppresses stale output across stop and restart', async () => {
+    const { bridge, renderer, ingress, session, update, draw } = harness();
+    const oldFrame = deferred<unknown>();
+    const nativeStop = deferred<unknown>();
+    bridge.nextFrame.mockReturnValueOnce(oldFrame.promise);
+    bridge.stop.mockReturnValueOnce(nativeStop.promise);
+    bridge.start.mockResolvedValueOnce(first).mockResolvedValueOnce(second);
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(0);
+    const stopping = session.stop();
+    expect(renderer.stop).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenLastCalledWith('stopping');
+    draw();
+    session.start('viewer');
+    expect(bridge.start).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    nativeStop.resolve(undefined);
+    await stopping;
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bridge.start).toHaveBeenCalledTimes(2);
+    expect(bridge.nextFrame).toHaveBeenCalledExactlyOnceWith(first);
+    oldFrame.resolve(raw());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ingress).not.toHaveBeenCalled();
+    expect(bridge.nextFrame).toHaveBeenLastCalledWith(second);
+    expect(update.mock.calls.map(([state]) => state)).not.toContain('watching');
+    await session.stop();
+  });
+
+  it('revokes any generation returned after the pending start was stopped', async () => {
+    const { bridge, session, update } = harness();
+    const pending = deferred<unknown>();
+    bridge.start.mockReturnValueOnce(pending.promise);
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(0);
+    const stopping = session.stop();
+    expect(update).toHaveBeenLastCalledWith('stopping');
+    pending.resolve(first);
+    await stopping;
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    expect(bridge.status).not.toHaveBeenCalled();
+    expect(bridge.nextFrame).not.toHaveBeenCalled();
+    expect(update).toHaveBeenLastCalledWith('stopped', undefined);
+  });
+
+  it('does not call native start if stopped before dispatch', async () => {
+    const { bridge, session } = harness();
+    session.start('viewer');
+    await session.stop();
+    expect(bridge.start).not.toHaveBeenCalled();
+  });
+
+  it('clears on terminal native status, without exposing raw failure', async () => {
+    const { bridge, renderer, session, update } = harness();
+    bridge.status
+      .mockResolvedValueOnce({ phase: 'ready' })
+      .mockResolvedValueOnce({ phase: 'closed', error: 'secret fixture' });
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(500);
+    expect(renderer.stop).toHaveBeenCalledTimes(1);
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    expect(update).toHaveBeenLastCalledWith('failed', 'PUBLIC_VIDEO_OP_FAILED');
+    expect(JSON.stringify(update.mock.calls)).not.toContain('secret fixture');
+  });
+
+  it('fails closed on raw buffer mismatch and never submits a malformed frame', async () => {
+    const { bridge, renderer, ingress, session, update } = harness();
+    bridge.nextFrame.mockResolvedValueOnce(new ArrayBuffer(3));
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(ingress).not.toHaveBeenCalled();
+    expect(renderer.stop).toHaveBeenCalledTimes(1);
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    expect(update).toHaveBeenLastCalledWith(
+      'failed',
+      'PUBLIC_VIDEO_RESPONSE_INVALID',
+    );
+  });
+
+  it('keeps cleanup locked on timeout and closes the late native ID without displaying', async () => {
+    const { bridge, session, update } = harness();
+    const pending = deferred<unknown>();
+    bridge.start.mockReturnValueOnce(pending.promise);
+    session.start('viewer');
+    await vi.advanceTimersByTimeAsync(7100);
+    expect(update).toHaveBeenLastCalledWith(
+      'cleanup_unconfirmed',
+      'PUBLIC_VIDEO_IPC_TIMEOUT',
+    );
+    session.start('viewer');
+    pending.resolve(first);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bridge.start).toHaveBeenCalledTimes(1);
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    expect(bridge.nextFrame).not.toHaveBeenCalled();
+  });
+});

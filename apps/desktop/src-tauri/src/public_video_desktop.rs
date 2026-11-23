@@ -1,0 +1,479 @@
+//! Opt-in native-only public viewing. The webview can choose a role, pull one
+//! admitted AU, or stop; it cannot supply endpoints, keys, captures or input.
+use crate::{public_video_capture, public_video_profile::PublicVideoProfile};
+use hub_webrtc::{
+    ice_policy::IceMode,
+    public_video_media::{ScopedVideoMedia, ScopedVideoReceiver, VerifiedVideoFrame},
+    public_video_wss::{PublicVideoWss, Role, ScopedWssState},
+};
+use serde::Serialize;
+use std::{
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tauri::{ipc::Response, Manager, WebviewWindow};
+use tokio::sync::{watch, Mutex as AsyncMutex};
+use windows::{
+    core::HSTRING,
+    Win32::{
+        Foundation::HWND,
+        UI::WindowsAndMessaging::{MessageBoxW, IDYES, MB_DEFBUTTON2, MB_ICONQUESTION, MB_YESNO},
+    },
+};
+
+const CANCELLED: &str = "PUBLIC_VIDEO_CANCELLED";
+const PULL_TIMEOUT: Duration = Duration::from_millis(500);
+const MAX_FRAME_BYTES: usize = 256 * 1024;
+
+pub(crate) struct DesktopVideoState {
+    profile: Option<PathBuf>,
+    active: Mutex<Option<Arc<Session>>>,
+    used: AtomicBool,
+    closing: AtomicBool,
+}
+
+impl DesktopVideoState {
+    pub(crate) fn new() -> Self {
+        Self {
+            profile: launch_profile(std::env::args_os().skip(1)),
+            active: Mutex::new(None),
+            used: AtomicBool::new(false),
+            closing: AtomicBool::new(false),
+        }
+    }
+    pub(crate) fn available(&self) -> bool {
+        self.profile.is_some()
+    }
+}
+
+fn launch_profile(args: impl IntoIterator<Item = std::ffi::OsString>) -> Option<PathBuf> {
+    let mut args = args.into_iter();
+    let mut profile = None;
+    while let Some(arg) = args.next() {
+        if arg == "--public-video-profile" {
+            if profile.is_some() {
+                return None;
+            }
+            let path = PathBuf::from(args.next()?);
+            if !path.is_absolute() {
+                return None;
+            }
+            profile = Some(path);
+        }
+    }
+    profile
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum Phase {
+    Starting,
+    Ready,
+    Stopping,
+    Closed,
+}
+
+#[derive(Clone, Serialize)]
+pub(crate) struct Status {
+    phase: Phase,
+    error: Option<&'static str>,
+}
+
+pub(crate) struct Session {
+    id: String,
+    role: Role,
+    stop: watch::Sender<bool>,
+    status: watch::Sender<Status>,
+    receiver: AsyncMutex<Option<ScopedVideoReceiver>>,
+}
+
+impl Session {
+    fn new(role: Role) -> Self {
+        Self {
+            id: uuid::Uuid::new_v4().simple().to_string(),
+            role,
+            stop: watch::channel(false).0,
+            status: watch::channel(Status {
+                phase: Phase::Starting,
+                error: None,
+            })
+            .0,
+            receiver: AsyncMutex::new(None),
+        }
+    }
+
+    fn request_stop(&self) {
+        self.stop.send_replace(true);
+        self.status.send_if_modified(|status| {
+            if matches!(status.phase, Phase::Closed | Phase::Stopping) {
+                return false;
+            }
+            status.phase = Phase::Stopping;
+            true
+        });
+    }
+
+    pub(crate) async fn wait_finished(&self) -> bool {
+        self.wait_finished_for(Duration::from_secs(5)).await
+    }
+    async fn wait_finished_for(&self, deadline: Duration) -> bool {
+        let mut state = self.status.subscribe();
+        tokio::time::timeout(deadline, state.wait_for(|s| s.phase == Phase::Closed))
+            .await
+            .is_ok_and(|r| r.is_ok())
+    }
+}
+
+struct CaptureLease(Arc<AtomicBool>);
+impl Drop for CaptureLease {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+struct CloseSession(Arc<Session>);
+impl Drop for CloseSession {
+    fn drop(&mut self) {
+        self.0.stop.send_replace(true);
+        self.0.status.send_if_modified(|status| {
+            if status.phase == Phase::Closed {
+                return false;
+            }
+            *status = Status {
+                phase: Phase::Closed,
+                error: Some("PUBLIC_VIDEO_CLOSED_UNEXPECTEDLY"),
+            };
+            true
+        });
+    }
+}
+
+fn find(window: &WebviewWindow, generation: &str) -> Result<Arc<Session>, String> {
+    crate::experiment_origin::origin(window)?;
+    if generation.len() != 32
+        || !generation
+            .bytes()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+    {
+        return Err("PUBLIC_VIDEO_GENERATION".into());
+    }
+    let state = window.state::<Arc<DesktopVideoState>>();
+    let session = state
+        .active
+        .lock()
+        .map_err(|_| "PUBLIC_VIDEO_STATE")?
+        .as_ref()
+        .filter(|s| s.id == generation)
+        .cloned()
+        .ok_or("PUBLIC_VIDEO_GENERATION")?;
+    Ok(session)
+}
+
+#[tauri::command]
+pub(crate) fn public_video_start(window: WebviewWindow, role: String) -> Result<String, String> {
+    crate::experiment_origin::origin(&window)?;
+    let role = match role.as_str() {
+        "host" => Role::Host,
+        "viewer" => Role::Viewer,
+        _ => return Err("PUBLIC_VIDEO_ROLE".into()),
+    };
+    let state = window.state::<Arc<DesktopVideoState>>().inner().clone();
+    let profile = state
+        .profile
+        .clone()
+        .ok_or("PUBLIC_VIDEO_PROFILE_REQUIRED")?;
+    let mut active = state.active.lock().map_err(|_| "PUBLIC_VIDEO_STATE")?;
+    if state.closing.load(Ordering::Acquire) || state.used.load(Ordering::Acquire) {
+        return Err("PUBLIC_VIDEO_PROFILE_UNAVAILABLE".into());
+    }
+    if active
+        .as_ref()
+        .is_some_and(|s| s.status.borrow().phase != Phase::Closed)
+    {
+        return Err("PUBLIC_VIDEO_BUSY".into());
+    }
+    let gate = window.state::<Arc<crate::ProbeState>>().0.clone();
+    if gate.swap(true, Ordering::AcqRel) {
+        return Err("PUBLIC_VIDEO_BUSY".into());
+    }
+    let lease = CaptureLease(gate);
+    if window.state::<Arc<crate::p004::P004State>>().busy()
+        || window.state::<Arc<crate::p004_lan::LanState>>().busy()
+    {
+        return Err("PUBLIC_VIDEO_BUSY".into());
+    }
+    let session = Arc::new(Session::new(role));
+    let id = session.id.clone();
+    *active = Some(session.clone());
+    drop(active);
+    tauri::async_runtime::spawn(async move {
+        let cleanup = CloseSession(session.clone());
+        let result = run(window, state, profile, session.clone()).await;
+        session.stop.send_replace(true);
+        *session.receiver.lock().await = None;
+        drop(lease);
+        session.status.send_replace(Status {
+            phase: Phase::Closed,
+            error: result.err().filter(|e| *e != CANCELLED),
+        });
+        drop(cleanup);
+    });
+    Ok(id)
+}
+
+#[tauri::command]
+pub(crate) fn public_video_status(
+    window: WebviewWindow,
+    generation: String,
+) -> Result<Status, String> {
+    let session = find(&window, &generation)?;
+    let status = session.status.borrow().clone();
+    Ok(status)
+}
+
+#[tauri::command]
+pub(crate) async fn public_video_stop(
+    window: WebviewWindow,
+    generation: String,
+) -> Result<(), String> {
+    let session = find(&window, &generation)?;
+    session.request_stop();
+    if !session.wait_finished_for(Duration::from_secs(3)).await {
+        return Err("PUBLIC_VIDEO_STOP_UNCONFIRMED".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub(crate) async fn public_video_next_frame(
+    window: WebviewWindow,
+    generation: String,
+) -> Result<Response, String> {
+    let session = find(&window, &generation)?;
+    if session.role != Role::Viewer {
+        return Err("PUBLIC_VIDEO_ROLE".into());
+    }
+    let mut stop = session.stop.subscribe();
+    if *stop.borrow() {
+        return Ok(Response::new(Vec::<u8>::new()));
+    }
+    if session.status.borrow().phase != Phase::Ready {
+        return Ok(Response::new(Vec::<u8>::new()));
+    }
+    let mut guard = session
+        .receiver
+        .try_lock()
+        .map_err(|_| "PUBLIC_VIDEO_PULL_BUSY")?;
+    let Some(receiver) = guard.as_mut() else {
+        // The renderer normally waits for ready; empty is safe while pending.
+        return Ok(Response::new(Vec::<u8>::new()));
+    };
+    let result = tokio::select! {
+        biased;
+        _ = stopped(&mut stop) => return Ok(Response::new(Vec::<u8>::new())),
+        result = tokio::time::timeout(PULL_TIMEOUT, receiver.next_frame()) => result,
+    };
+    crate::experiment_origin::origin(&window)?;
+    if *stop.borrow() {
+        return Ok(Response::new(Vec::<u8>::new()));
+    }
+    match result {
+        Ok(Ok(frame)) => {
+            let bytes = frame_bytes(frame)?;
+            if *stop.borrow() {
+                return Ok(Response::new(Vec::<u8>::new()));
+            }
+            Ok(Response::new(bytes))
+        }
+        Ok(Err(_)) | Err(_) => Ok(Response::new(Vec::<u8>::new())),
+    }
+}
+
+fn frame_bytes(frame: VerifiedVideoFrame) -> Result<Vec<u8>, &'static str> {
+    let len = frame.annex_b.len();
+    if len == 0 || len > MAX_FRAME_BYTES {
+        return Err("PUBLIC_VIDEO_FRAME_SIZE");
+    }
+    let mut bytes = Vec::with_capacity(24 + len);
+    bytes.extend_from_slice(&frame.sequence.to_le_bytes());
+    bytes.extend_from_slice(&frame.timestamp_us.to_le_bytes());
+    bytes.extend_from_slice(&(len as u32).to_le_bytes());
+    bytes.extend_from_slice(&[u8::from(frame.keyframe), 0, 0, 0]);
+    bytes.extend_from_slice(&frame.annex_b);
+    Ok(bytes)
+}
+
+async fn stopped(stop: &mut watch::Receiver<bool>) {
+    let _ = stop.wait_for(|value| *value).await;
+}
+fn now() -> Result<u64, &'static str> {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|t| t.as_secs())
+        .map_err(|_| "PUBLIC_VIDEO_CLOCK")
+}
+
+async fn run(
+    window: WebviewWindow,
+    state: Arc<DesktopVideoState>,
+    path: PathBuf,
+    session: Arc<Session>,
+) -> Result<(), &'static str> {
+    let mut stop = session.stop.subscribe();
+    if *stop.borrow() {
+        return Err(CANCELLED);
+    }
+    let peer = window
+        .state::<crate::v2_pairing::PairingState>()
+        .current()
+        .map_err(|_| "PUBLIC_VIDEO_VERIFY_PEER_FIRST")?;
+    let (mut profile, identity) = tauri::async_runtime::spawn_blocking(move || {
+        let profile = PublicVideoProfile::load(&path, now()?)?;
+        let identity =
+            hub_identity::open_existing_default().map_err(|_| "PUBLIC_VIDEO_IDENTITY")?;
+        Ok::<_, &'static str>((profile, identity))
+    })
+    .await
+    .map_err(|_| "PUBLIC_VIDEO_PROFILE")??;
+    let approval = profile.approval();
+    if approval.role != session.role || approval.scope.mode != IceMode::RelayOnly {
+        return Err("PUBLIC_VIDEO_ROLE_OR_ROUTE");
+    }
+    if profile.expected_peer_fingerprint() != peer.fingerprint() {
+        return Err("PUBLIC_VIDEO_PEER_MISMATCH");
+    }
+    if *stop.borrow() {
+        return Err(CANCELLED);
+    }
+    let hwnd = window.hwnd().map_err(|_| "PUBLIC_VIDEO_NATIVE_WINDOW")?.0 as usize;
+    let action = if session.role == Role::Host {
+        "共享这台电脑的主屏，不含声音"
+    } else {
+        "观看对方主屏，不含声音"
+    };
+    let message = format!(
+        "本次仅{action}，共享最多 {} 秒。只允许中继，不允许键鼠或无人值守访问。点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
+        public_video_capture::CAPTURE_WINDOW.as_secs(),
+        approval.scope.wss, approval.scope.turn, peer.fingerprint(),
+    );
+    let confirmed = tauri::async_runtime::spawn_blocking(move || unsafe {
+        MessageBoxW(
+            Some(HWND(hwnd as *mut _)),
+            &HSTRING::from(message),
+            &HSTRING::from("RemoteHub · 公网短时仅视频"),
+            MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION,
+        ) == IDYES
+    })
+    .await
+    .map_err(|_| "PUBLIC_VIDEO_CONSENT_DIALOG")?;
+    if !confirmed {
+        return Err("NATIVE_CONSENT_DENIED");
+    }
+    if *stop.borrow() || state.closing.load(Ordering::Acquire) {
+        return Err(CANCELLED);
+    }
+    crate::experiment_origin::origin(&window).map_err(|_| "PUBLIC_VIDEO_ORIGIN")?;
+    let config = profile.take_config(&identity, &peer, now()?, true)?;
+    state.used.store(true, Ordering::Release);
+    let (phase_tx, mut phase_rx) = watch::channel(ScopedWssState::Negotiating);
+    let watch_session = session.clone();
+    let monitor = async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(Duration::from_millis(200)) => {
+                    if crate::experiment_origin::origin(&window).is_err() {
+                        watch_session.request_stop();
+                        return;
+                    }
+                }
+                event = phase_rx.changed() => {
+                    if event.is_err() { return; }
+                    let phase = *phase_rx.borrow_and_update();
+                    let ready = matches!((watch_session.role, phase),
+                        (Role::Host, ScopedWssState::HostPathVerified(..))
+                        | (Role::Viewer, ScopedWssState::Established));
+                    if ready {
+                        watch_session.status.send_if_modified(|s| {
+                            if s.phase != Phase::Starting { return false; }
+                            s.phase = Phase::Ready;
+                            true
+                        });
+                    }
+                }
+            }
+        }
+    };
+    let worker = async {
+        let pending = tokio::select! {
+            biased;
+            _ = stopped(&mut stop) => return Err(CANCELLED),
+            pending = PublicVideoWss::connect_public_wss(config) => pending?,
+        };
+        let actor = tokio::select! {
+            biased;
+            _ = stopped(&mut stop) => return Err(CANCELLED),
+            actor = pending.establish() => actor?,
+        };
+        if session.role == Role::Host {
+            let (media, sender) = ScopedVideoMedia::host();
+            let phase = phase_tx.subscribe();
+            let (actor_result, capture_result) = tokio::join!(
+                actor.run_with_media(stop.clone(), phase_tx, media),
+                public_video_capture::run(sender, stop, phase),
+            );
+            actor_result?;
+            capture_result?;
+        } else {
+            let (media, receiver) = ScopedVideoMedia::viewer();
+            *session.receiver.lock().await = Some(receiver);
+            actor.run_with_media(stop, phase_tx, media).await?;
+        }
+        Ok(())
+    };
+    let mut worker = std::pin::pin!(worker);
+    tokio::select! {
+        result = &mut worker => result,
+        () = monitor => worker.await,
+    }
+}
+
+pub(crate) fn close_window(window: &tauri::Window) -> Option<Arc<Session>> {
+    let state = window.state::<Arc<DesktopVideoState>>();
+    state.closing.store(true, Ordering::Release);
+    let session = state.active.lock().ok()?.clone();
+    if let Some(session) = &session {
+        session.request_stop();
+    }
+    session
+}
+
+pub(crate) fn allow_close_retry(window: &tauri::Window) {
+    window
+        .state::<Arc<DesktopVideoState>>()
+        .closing
+        .store(false, Ordering::Release);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn frame_has_fixed_little_endian_header_and_exact_bytes() {
+        let bytes = frame_bytes(VerifiedVideoFrame {
+            sequence: 7,
+            timestamp_us: 42,
+            keyframe: true,
+            annex_b: vec![0, 0, 0, 1, 0x65],
+        })
+        .unwrap();
+        assert_eq!(&bytes[..8], &7u64.to_le_bytes());
+        assert_eq!(&bytes[8..16], &42u64.to_le_bytes());
+        assert_eq!(&bytes[16..24], &[5, 0, 0, 0, 1, 0, 0, 0]);
+        assert_eq!(&bytes[24..], &[0, 0, 0, 1, 0x65]);
+    }
+}

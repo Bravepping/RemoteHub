@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-public-video-status"
+description = "Enables the public_video_status command without any pre-configured scope."
+commands.allow = ["public_video_status"]
+
+[[permission]]
+identifier = "deny-public-video-status"
+description = "Denies the public_video_status command without any pre-configured scope."
+commands.deny = ["public_video_status"]

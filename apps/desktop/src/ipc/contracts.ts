@@ -21,6 +21,7 @@ export interface RuntimeInfo {
   v2_peer_pairing_enabled?: boolean;
   v2_verified_lan_enabled?: boolean;
   v2_private_wss_lan_enabled?: boolean;
+  public_video_available?: boolean;
   app_version: string;
   os: string;
   arch: string;
@@ -73,6 +74,7 @@ const flags = [
   'v2_peer_pairing_enabled',
   'v2_verified_lan_enabled',
   'v2_private_wss_lan_enabled',
+  'public_video_available',
   'p004_enabled',
   'p004_lan_enabled',
   'p005_enabled',

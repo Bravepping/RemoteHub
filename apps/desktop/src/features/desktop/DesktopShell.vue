@@ -13,6 +13,7 @@ import './p103.css';
 import './p105.css';
 import ReadFeedback from './ReadFeedback.vue';
 import RemoteWorkspace from './RemoteWorkspace.vue';
+import PublicVideoPanel from '../public-video/PublicVideoPanel.vue';
 import type { ReadStatus } from '../../state/desktop';
 
 defineProps<{
@@ -117,8 +118,9 @@ onUnmounted(() => {
         @cancel="$emit('cancelRead')"
         @retry="$emit('refresh')"
       />
+      <PublicVideoPanel v-if="runtime?.public_video_available" />
       <RemoteWorkspace
-        v-if="runtime?.p3_enabled"
+        v-else-if="runtime?.p3_enabled"
         :v2-loopback-diagnostic-enabled="
           runtime?.v2_loopback_diagnostic_enabled === true
         "

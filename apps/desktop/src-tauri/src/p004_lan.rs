@@ -588,6 +588,8 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
         if let Some((_, session)) = &active {
             session.cancel();
         }
+        #[cfg(feature = "v2-public-video-desktop")]
+        let public_video = crate::public_video_desktop::close_window(window);
         let window = window.clone();
         let shared = state.inner().clone();
         let old = window
@@ -603,10 +605,19 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             } else {
                 true
             };
-            if clean && old_clean {
+            #[cfg(feature = "v2-public-video-desktop")]
+            let public_clean = match public_video {
+                Some(session) => session.wait_finished().await,
+                None => true,
+            };
+            #[cfg(not(feature = "v2-public-video-desktop"))]
+            let public_clean = true;
+            if clean && old_clean && public_clean {
                 let _ = window.destroy();
             } else {
                 shared.closing.store(false, Ordering::Release);
+                #[cfg(feature = "v2-public-video-desktop")]
+                crate::public_video_desktop::allow_close_retry(&window);
             }
         });
     }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-public-video-next-frame"
+description = "Enables the public_video_next_frame command without any pre-configured scope."
+commands.allow = ["public_video_next_frame"]
+
+[[permission]]
+identifier = "deny-public-video-next-frame"
+description = "Denies the public_video_next_frame command without any pre-configured scope."
+commands.deny = ["public_video_next_frame"]

@@ -37,6 +37,10 @@
     "allow-p006-stats",
     "allow-p006-metrics",
     "allow-p006-stop",
-    "allow-p006-save"
+    "allow-p006-save",
+    "allow-public-video-start",
+    "allow-public-video-status",
+    "allow-public-video-next-frame",
+    "allow-public-video-stop"
   ]
 }

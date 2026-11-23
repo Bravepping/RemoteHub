@@ -49,6 +49,7 @@ use webrtc::{
 pub use crate::authenticated_relay::{LoopbackTlsTrust, RelayToken, Role, SignalKind};
 
 const JOIN_WAIT: Duration = Duration::from_secs(5);
+const PUBLIC_HOST_PAIR_WAIT: Duration = Duration::from_secs(45);
 const CHALLENGE_WAIT: Duration = Duration::from_secs(3);
 const PROOF_TTL: Duration = Duration::from_secs(15);
 const MEDIA_IO: &str = "PUBLIC_VIDEO_RTP_UNAVAILABLE";
@@ -150,7 +151,12 @@ impl<'a> PendingPublicNetworkVideoWss<'a> {
 
     pub async fn establish(self) -> Result<ScopedPublicVideoWss<'a>, &'static str> {
         let deadline = self.wss.context.scope_deadline;
-        let (wire, proof) = timeout_at(deadline, self.wss.establish_proof())
+        let wait = if self.wss.context.role == Role::Host {
+            PUBLIC_HOST_PAIR_WAIT
+        } else {
+            JOIN_WAIT
+        };
+        let (wire, proof) = timeout_at(deadline, self.wss.establish_proof(wait))
             .await
             .map_err(|_| TIMEOUT)??;
         let ice = PublicVideoScopedIce::new(proof, self.plan, wire.check()?)?;
@@ -690,7 +696,7 @@ impl<'a> PendingPublicVideoWss<'a> {
     /// Run both roles concurrently. A fresh proof clock starts after Paired.
     /// No SDP methods are available while the challenges are exchanged.
     pub async fn establish(self) -> Result<PublicVideoWss<'a>, &'static str> {
-        let (wire, proof) = self.establish_proof().await?;
+        let (wire, proof) = self.establish_proof(JOIN_WAIT).await?;
         Ok(PublicVideoWss {
             relay: Some(wire.relay),
             proof,
@@ -714,23 +720,32 @@ impl<'a> PendingPublicVideoWss<'a> {
             u64,
         ) -> Result<PublicVideoScopedIce<'a>, &'static str>,
     ) -> Result<ScopedPublicVideoWss<'a>, &'static str> {
-        let (wire, proof) = self.establish_proof().await?;
+        let (wire, proof) = self.establish_proof(JOIN_WAIT).await?;
         let ice = make_ice(proof, wire.check()?)?;
         Ok(ScopedPublicVideoWss { wire, ice })
     }
 
-    async fn establish_proof(mut self) -> Result<(ScopedWire, PublicVideoProof<'a>), &'static str> {
+    async fn establish_proof(
+        mut self,
+        pair_wait: Duration,
+    ) -> Result<(ScopedWire, PublicVideoProof<'a>), &'static str> {
         if self.context.role == Role::Host {
             self.register_host().await?;
         }
-        if !matches!(
-            self.relay
-                .next_event(JOIN_WAIT)
-                .await
-                .map_err(relay_error)?,
-            AuthenticatedRelayEvent::Paired
-        ) {
-            return Err(PROTOCOL);
+        // Let a person approve the viewing side without reducing the fresh
+        // proof window or extending the original approved scope.
+        let join_end = self.context.scope_deadline.min(Instant::now() + pair_wait);
+        loop {
+            let remaining = join_end.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(TIMEOUT);
+            }
+            match self.relay.next_event(remaining.min(JOIN_WAIT)).await {
+                Ok(AuthenticatedRelayEvent::Paired) => break,
+                Err(ClientError::Timeout) => {}
+                Err(error) => return Err(relay_error(error)),
+                Ok(_) => return Err(PROTOCOL),
+            }
         }
 
         let ctx = self.context;

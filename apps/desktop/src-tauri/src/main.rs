@@ -25,6 +25,13 @@ mod v2_pairing;
 #[cfg(all(feature = "v2-private-wss-lan", not(feature = "p006-relay")))]
 mod v2_private_wss;
 
+#[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
+mod public_video_capture;
+#[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
+mod public_video_desktop;
+#[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
+mod public_video_profile;
+
 #[cfg(not(feature = "p006-relay"))]
 use hub_capture_win::ProbeReport;
 use serde::Serialize;
@@ -77,6 +84,8 @@ struct RuntimeInfo {
     v2_peer_pairing_enabled: bool,
     v2_verified_lan_enabled: bool,
     v2_private_wss_lan_enabled: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    public_video_available: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
@@ -128,6 +137,19 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
             feature = "v2-private-wss-lan",
             not(feature = "p006-relay")
         )),
+        public_video_available: {
+            #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
+            {
+                use tauri::Manager;
+                window
+                    .state::<std::sync::Arc<public_video_desktop::DesktopVideoState>>()
+                    .available()
+            }
+            #[cfg(not(all(feature = "v2-public-video-desktop", not(feature = "p006-relay"))))]
+            {
+                false
+            }
+        },
         p004_enabled: cfg!(feature = "p004-probe"),
         p004_lan_enabled: cfg!(feature = "p004-lan"),
         p005_enabled: cfg!(feature = "p005-control"),
@@ -205,6 +227,10 @@ fn main() {
     let builder = builder.manage(identity::DesktopIdentity::initialize());
     #[cfg(all(feature = "v2-peer-pairing", not(feature = "p006-relay")))]
     let builder = builder.manage(v2_pairing::PairingState::default());
+    #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
+    let builder = builder.manage(std::sync::Arc::new(
+        public_video_desktop::DesktopVideoState::new(),
+    ));
     #[cfg(not(feature = "p006-relay"))]
     let probe = std::sync::Arc::new(ProbeState::default());
     #[cfg(not(feature = "p004-probe"))]
@@ -272,7 +298,15 @@ fn main() {
             p004_lan::p004_lan_save,
             v2_loopback::run_v2_loopback_diagnostic,
             v2_pairing::get_v2_pairing_card,
-            v2_pairing::verify_v2_peer
+            v2_pairing::verify_v2_peer,
+            #[cfg(feature = "v2-public-video-desktop")]
+            public_video_desktop::public_video_start,
+            #[cfg(feature = "v2-public-video-desktop")]
+            public_video_desktop::public_video_status,
+            #[cfg(feature = "v2-public-video-desktop")]
+            public_video_desktop::public_video_next_frame,
+            #[cfg(feature = "v2-public-video-desktop")]
+            public_video_desktop::public_video_stop
         ])
         .on_window_event(p004_lan::on_window_event);
     #[cfg(feature = "p006-relay")]

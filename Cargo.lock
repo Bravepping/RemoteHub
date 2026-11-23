@@ -3540,18 +3540,22 @@ checksum = "d902046e6a28a1e4c3cab97258a0ce11e994903f01c2d97a9447a0b3df85f4f6"
 name = "remotehub-desktop"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "hub-capture-win",
+ "hub-encode-win",
  "hub-identity",
  "hub-probe-wire",
  "hub-rendezvous-probe",
  "hub-webrtc",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tauri",
  "tauri-build",
  "tokio",
  "uuid",
  "windows",
+ "zeroize",
 ]
 
 [[package]]

@@ -22,6 +22,7 @@ synthetic-display-check = []
 p3-lan = ["p005-control", "hub-webrtc/p3-lan"]
 v2-peer-pairing = ["p3-lan"]
 v2-verified-lan = ["v2-peer-pairing", "hub-webrtc/v2-verified-lan"]
+v2-public-video-desktop = ["v2-verified-lan", "hub-webrtc/v2-public-video-wss", "dep:hub-encode-win", "dep:base64", "dep:sha2", "dep:zeroize", "windows/Win32_Storage_FileSystem"]
 v2-private-wss-lan = ["v2-verified-lan", "hub-webrtc/v2-private-wss-lan"]
 v2-loopback-diagnostic = ["p3-lan", "hub-webrtc/v2-loopback-signaling"]
 custom-protocol = ["tauri/custom-protocol"]
@@ -42,9 +43,13 @@ serde.workspace = true
 hub-capture-win = { path = "../../../crates/hub-capture-win" }
 hub-identity = { path = "../../../crates/hub-identity" }
 hub-rendezvous-probe = { path = "../../../crates/hub-rendezvous-probe", features = ["v2-synthetic-video"], optional = true }
+hub-encode-win = { path = "../../../crates/hub-encode-win", optional = true }
+base64 = { version = "=0.22.1", optional = true }
+sha2 = { version = "=0.10.9", optional = true }
+zeroize = { version = "=1.9.2", optional = true }
 hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
 hub-probe-wire = { path = "../../../crates/hub-probe-wire", optional = true }
-tokio = { version = "=1.54.1", features = ["sync", "time"], optional = true }
+tokio = { version = "=1.54.1", features = ["sync", "time", "macros"], optional = true }
 uuid = { version = "=1.29.3", features = ["v4"], optional = true }
 serde_json = { workspace = true, optional = true }
 windows = { version = "=0.62.2", features = ["Win32_UI_WindowsAndMessaging"], optional = true }

@@ -28,6 +28,10 @@ fn main() {
             "p006_save",
             "run_signed_stream",
             "stop_signed_stream",
+            "public_video_start",
+            "public_video_status",
+            "public_video_next_frame",
+            "public_video_stop",
         ]),
     ))
     .expect("RemoteHub build configuration failed");

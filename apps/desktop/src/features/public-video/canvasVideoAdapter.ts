@@ -105,6 +105,7 @@ export class CanvasVideoAdapter {
     private readonly onFailure: (code: VideoDisplayFailure) => void = () => {},
     private readonly chunkFactory: ChunkFactory = (init) =>
       new EncodedVideoChunk(init),
+    private readonly onPresented: () => void = () => {},
   ) {
     this.context = canvas.getContext('2d', { alpha: false });
   }
@@ -235,6 +236,7 @@ export class CanvasVideoAdapter {
       if (this.canvas.height !== height) this.canvas.height = height;
       this.context.drawImage(frame, 0, 0, width, height);
       run.lastPresentedUs = timestamp;
+      this.onPresented();
     } catch {
       this.fail(run, 'VIDEO_PAINT_FAILED');
     } finally {

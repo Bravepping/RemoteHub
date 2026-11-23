@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-public-video-start"
+description = "Enables the public_video_start command without any pre-configured scope."
+commands.allow = ["public_video_start"]
+
+[[permission]]
+identifier = "deny-public-video-start"
+description = "Denies the public_video_start command without any pre-configured scope."
+commands.deny = ["public_video_start"]
