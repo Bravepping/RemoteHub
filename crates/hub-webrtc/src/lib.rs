@@ -30,6 +30,11 @@ mod private_wss_contract;
 pub mod receiver_evidence;
 #[cfg(all(windows, feature = "p006-relay"))]
 pub mod relay_client;
+#[cfg(all(
+    feature = "p006-relay",
+    any(windows, all(test, feature = "p006-session-probe"))
+))]
+mod relay_config;
 #[cfg(feature = "p006-turn-probe")]
 pub mod relay_runtime;
 #[cfg(feature = "p3-lan")]

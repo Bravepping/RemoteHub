@@ -1,4 +1,5 @@
 //! Native WSS signaling only. Video/control payloads remain on the same WebRTC PC.
+pub use crate::relay_config::PrivateConfig;
 use crate::{
     ice_policy::{IceConfig, RelayGrant, RelayTarget},
     lan::LanStatus,
@@ -6,7 +7,7 @@ use crate::{
 };
 use futures_util::{SinkExt, StreamExt};
 use hub_probe_wire::{now, Codec, Hello, PairKey, PathMode, Ready, Role, ServerEvent, MAX_FRAME};
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     io::BufReader,
     net::{Ipv4Addr, SocketAddrV4},
@@ -25,99 +26,7 @@ use tokio_tungstenite::{
     tungstenite::{client::IntoClientRequest, protocol::WebSocketConfig, Message},
     Connector,
 };
-use zeroize::Zeroize;
-#[cfg(all(test, feature = "p006-session-probe"))]
-#[path = "relay_client_tests.rs"]
-mod tests;
 
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PrivateConfig {
-    #[cfg(feature = "p006-session-probe")]
-    #[serde(skip)]
-    synthetic_local: bool,
-    #[cfg(feature = "p006-session-probe")]
-    #[serde(skip)]
-    synthetic_source: bool,
-    #[cfg(feature = "p006-session-probe")]
-    #[serde(skip)]
-    diagnostic_drop_direct: bool,
-    pub server_ipv4: Ipv4Addr,
-    pub signaling_port: u16,
-    pub ca_pem: String,
-    pub sender_invitation: String,
-    pub receiver_invitation: String,
-    pub invitation_expires_at: u64,
-}
-impl Drop for PrivateConfig {
-    fn drop(&mut self) {
-        self.sender_invitation.zeroize();
-        self.receiver_invitation.zeroize();
-    }
-}
-impl PrivateConfig {
-    pub fn load(path: &std::path::Path) -> Result<Arc<Self>, String> {
-        Self::load_inner(path, false)
-    }
-    #[cfg(feature = "p006-session-probe")]
-    pub fn load_local_synthetic(path: &std::path::Path) -> Result<Arc<Self>, String> {
-        Self::load_inner(path, true)
-    }
-    #[cfg(feature = "p006-session-probe")]
-    pub fn load_operator_synthetic(
-        path: &std::path::Path,
-        drop_direct: bool,
-    ) -> Result<Arc<Self>, String> {
-        let mut config = Self::load(path)?;
-        let c = Arc::get_mut(&mut config).ok_or("LOCAL_CONFIG_ALREADY_SHARED")?;
-        c.synthetic_source = true;
-        c.diagnostic_drop_direct = drop_direct;
-        Ok(config)
-    }
-    fn is_local_synthetic(&self) -> bool {
-        #[cfg(feature = "p006-session-probe")]
-        {
-            self.synthetic_local
-        }
-        #[cfg(not(feature = "p006-session-probe"))]
-        {
-            false
-        }
-    }
-    fn load_inner(path: &std::path::Path, local_synthetic: bool) -> Result<Arc<Self>, String> {
-        let info = std::fs::symlink_metadata(path).map_err(|_| "P006_PRIVATE_CONFIG_REQUIRED")?;
-        if !info.is_file() || info.file_type().is_symlink() || info.len() > 16384 {
-            return Err("P006_CONFIG_FILE_POLICY".into());
-        }
-        let data =
-            zeroize::Zeroizing::new(std::fs::read_to_string(path).map_err(|_| "P006_CONFIG_READ")?);
-        let c: Self = serde_json::from_str(&data).map_err(|_| "P006_CONFIG_SCHEMA")?;
-        #[cfg(feature = "p006-session-probe")]
-        let c = {
-            let mut c = c;
-            c.synthetic_local = local_synthetic;
-            c.synthetic_source = local_synthetic;
-            c
-        };
-        if (local_synthetic
-            && (!cfg!(feature = "p006-session-probe") || c.server_ipv4 != Ipv4Addr::LOCALHOST))
-            || (!local_synthetic && !crate::ice_policy::public_v4(c.server_ipv4))
-            || c.signaling_port < 1024
-            || c.sender_invitation.len() != 64
-            || c.receiver_invitation.len() != 64
-            || c.sender_invitation == c.receiver_invitation
-            || !c
-                .sender_invitation
-                .bytes()
-                .chain(c.receiver_invitation.bytes())
-                .all(|b| b.is_ascii_hexdigit())
-            || !(60..=7200).contains(&c.invitation_expires_at.saturating_sub(now()))
-        {
-            return Err("P006_CONFIG_EXPIRED_OR_INVALID".into());
-        }
-        Ok(Arc::new(c))
-    }
-}
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BrowserReady {
@@ -214,11 +123,9 @@ impl RelayClient {
         mode: PathMode,
         private_peers: Vec<Ipv4Addr>,
     ) -> Result<(Arc<Self>, Option<String>), String> {
+        config.authorize_start(role, mode)?;
         if mode == PathMode::DirectPreferred && !cfg!(feature = "p006-direct") {
             return Err("DIRECT_MODE_NOT_ENABLED".into());
-        }
-        if config.is_local_synthetic() && mode != PathMode::DirectPreferred {
-            return Err("LOCAL_SYNTHETIC_REQUIRES_DIRECT_MODE".into());
         }
         hub_probe_wire::PathPolicy::new(private_peers.clone())?;
         if !(5..=30).contains(&seconds) || !local.is_private() {
@@ -640,11 +547,7 @@ impl RelayClient {
         )
         .into_client_request()
         .map_err(|_| "P006_URL_INVALID")?;
-        let token = if self.role == Role::Sender {
-            &self.config.sender_invitation
-        } else {
-            &self.config.receiver_invitation
-        };
+        let token = self.config.invitation(self.role)?;
         request.headers_mut().insert(
             "authorization",
             format!("Bearer {token}")

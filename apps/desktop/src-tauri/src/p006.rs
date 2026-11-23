@@ -161,7 +161,7 @@ pub async fn p006_start(
             "p006b-private.json"
         });
     #[cfg(feature = "p007b-diag")]
-    let private = crate::p007b_diag::load(&path)?;
+    let private = crate::p007b_diag::load(&path, config.role)?;
     #[cfg(not(feature = "p007b-diag"))]
     let private = PrivateConfig::load(&path)?;
     drop(
@@ -199,7 +199,7 @@ pub async fn p006_start(
     } else {
         "强制TURN中继"
     };
-    let message=format!("本次将{action}，视频最长{}秒。\n连接策略：{strategy}。{private_peer}\n\n使用包内指定服务器和应用专用证书；只记录脱敏统计，不保存画面，不执行键盘鼠标输入。\n配对最长等待120秒，随时停止，断线终止。\n\n是否批准本次实验？",config.seconds);
+    let message=format!("本次将{action}，视频最长{}秒。\n连接策略：{strategy}。{private_peer}\n\n信令服务器：{}:{}（应用专用证书）。只记录脱敏统计，不保存画面，不执行键盘鼠标输入。\n配对最长等待120秒，随时停止，断线终止。\n\n是否批准本次实验？",config.seconds, private.server_ipv4, private.signaling_port);
     let allowed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
@@ -368,7 +368,19 @@ fn write(
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|_| "REPORT_CLOCK")?
         .as_millis();
-    let bytes=serde_json::to_vec_pretty(&serde_json::json!({"event":event,"buildTag":if cfg!(feature="p007b-diag") {"p007b-r06-v1"}else if cfg!(feature="p006-direct") {"p006c-v1"}else{"p006b-v1"},"recordedAtMs":recorded_at_ms,"native":status,"browserClosed":browser_closed})).map_err(|_|"REPORT_ENCODING")?;
+    #[cfg(feature = "p007b-diag")]
+    let build_tag = crate::p007b_diag::BUILD_TAG;
+    #[cfg(not(feature = "p007b-diag"))]
+    let build_tag = if cfg!(feature = "p006-direct") {
+        "p006c-v1"
+    } else {
+        "p006b-v1"
+    };
+    let bytes = serde_json::to_vec_pretty(&serde_json::json!({
+        "event": event, "buildTag": build_tag, "recordedAtMs": recorded_at_ms,
+        "native": status, "browserClosed": browser_closed
+    }))
+    .map_err(|_| "REPORT_ENCODING")?;
     if bytes.len() > 160 * 1024 {
         return Err("REPORT_SIZE".into());
     }

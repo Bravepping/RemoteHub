@@ -111,8 +111,13 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 `ice-path-probe` 还是单机双原生 PeerConnection、仅合成文本的显式探测工具，不采集桌面、不发键鼠。每侧只用在自身授权范围内验证过的 offer/answer 候选检查实际选中对；发包前后分别核对，没有读到新候选对时不把旧值当成最终结果。报告保留粗分类 `path`（直连/中继），另用 `route` 区分私网主机、公网主机、STUN 映射候选和 TURN 中继，用 `selected_phase` 区分流量前后；都不输出 IP、端口或凭据。仅收集到候选、或选到私网主机候选，并不证明公网连通。外网测试须确认具体端点和范围后另行执行。
 
+跨网双机在单独的 Windows `p007b-diag` 构建验收，只生成 8 秒合成图案，不采集桌面、不注入系统键鼠，不自动启动会话。双方就同一个获批 WSS 端点各自确认原生弹窗（显示 IP 和端口）。两台设备各保留一份私有 `r06-private.json`：相同的 `server_ipv4`、`signaling_port`、可信 `ca_pem` 和本次 `invitation_expires_at`，发送端另含且只含 `sender_invitation`，接收端另含且只含 `receiver_invitation`。错角色、无令牌或同时包含两份令牌均在联网前拒绝。不要发送整个配置、令牌或配对码到聊天或仓库。旧的单机 RPC 合成测试仍按原双邀请格式，不用于双机验收。
+
+首轮跨网验收：两台 Windows 分别走宽带和热点，不填私网对端，确认收到并解码合成图案，两侧实际选中的候选匹配已验证信令且走非中继公网路径，最后两端均释放资源。若实际选中 TURN，只记录中继结果，不算公网直连；受控回退测试须另行批准。只有候选收集、画面或最后一次旧样本不能判定选路通过。尚未运行跨网实测。
+
 ## 本分支已执行验证
 
+- Linux：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 通过（42 项）；覆盖发送、接收各自配置、错角色、双令牌拒绝及单机双令牌格式保持。Windows 交叉检查因当前环境缺 MSVC `lib.exe` 停在依赖构建，尚未生成新 Windows 安装包。
 - Linux：`cargo test -p hub-webrtc --features p006-direct-probe --lib --locked --offline` 40 项通过。新增自动回归只绑定 `127.0.0.1`，使用两端各自的授权范围建立真实原生 WebRTC DataChannel，100 条合成文本全部收齐并收到 ACK；读取两端实际选中的 UDP 主机候选对后，双方正常关闭。测试入口不编入正式探测器；`cargo check -p hub-webrtc --features p006-direct-probe --bin ice-path-probe --locked --offline` 通过。此前 `p006-session-probe` 编译检查也已通过。未启动 STUN/TURN，未做跨网双机验证。
 - Linux PowerShell 7.4：`pwsh -NoProfile -File scripts/test-private-wss-launcher.ps1` 通过；覆盖角色与入口匹配、指纹错误、错误角色与损坏配置拒绝、子进程环境隔离。使用替身文件，不启动程序或中继；新脚本尚未在 Windows 实机验证。
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（135 项）、`pnpm lint`、`pnpm build` 通过。

@@ -1,9 +1,10 @@
 //! Explicit synthetic-only operator build. No cloud activation or capture bypass.
-use hub_probe_wire::{now, PathMode};
+use hub_probe_wire::{now, PathMode, Role};
 use hub_webrtc::relay_client::PrivateConfig;
 use std::{path::Path, sync::Arc};
 
 pub const SECONDS: u32 = 8;
+pub const BUILD_TAG: &str = "p007b-r06-v2";
 pub const PRIVATE_FILE: &str = "r06-private.json";
 
 pub fn validate(mode: PathMode, seconds: u32) -> Result<(), String> {
@@ -12,9 +13,9 @@ pub fn validate(mode: PathMode, seconds: u32) -> Result<(), String> {
     }
     Ok(())
 }
-pub fn load(path: &Path) -> Result<Arc<PrivateConfig>, String> {
+pub fn load(path: &Path, role: Role) -> Result<Arc<PrivateConfig>, String> {
     // JSON cannot select desktop, local bypass or a packet fault. Keep real cloud ICE.
-    let config = PrivateConfig::load_operator_synthetic(path, false)?;
+    let config = PrivateConfig::load_operator_role_synthetic(path, role)?;
     if config.invitation_expires_at.saturating_sub(now()) > 1200 {
         return Err("R06_INVITATION_WINDOW_EXCEEDS_20_MINUTES".into());
     }
@@ -22,9 +23,9 @@ pub fn load(path: &Path) -> Result<Arc<PrivateConfig>, String> {
 }
 pub fn build_info() -> serde_json::Value {
     serde_json::json!({
-        "buildTag":"p007b-r06-v1", "sourceKind":"synthetic_nv12", "desktopCapture":false,
+        "buildTag":BUILD_TAG, "sourceKind":"synthetic_nv12", "desktopCapture":false,
         "inputInjection":false, "mode":"direct_preferred", "seconds":SECONDS,
-        "privateConfigFile":PRIVATE_FILE, "reportDirectory":"artifacts/private/p007b-r06",
+        "privateConfigFile":PRIVATE_FILE, "roleScopedInvitationRequired":true, "reportDirectory":"artifacts/private/p007b-r06",
         "nativeConsentRequired":true, "maximumInvitationRemainingSeconds":1200,
         "candidateValidation":"exact_authenticated_sdp", "automaticNetworkStart":false
     })
@@ -65,8 +66,10 @@ mod tests {
         let write =
             |v: &serde_json::Value| std::fs::write(&path, serde_json::to_vec(v).unwrap()).unwrap();
         write(&value);
-        assert!(load(&path).is_ok()); // TLS is validated on connect; no network in this test.
+        assert!(load(&path, Role::Sender).is_ok()); // TLS is validated on connect; no network in this test.
+        assert!(load(&path, Role::Receiver).is_err());
         for (key, v) in [
+            ("receiver_invitation", serde_json::json!("b".repeat(64))),
             ("server_ipv4", serde_json::json!("127.0.0.1")),
             ("invitation_expires_at", serde_json::json!(now() + 1800)),
             ("invitation_expires_at", serde_json::json!(now() - 1)),
@@ -77,7 +80,7 @@ mod tests {
             let mut bad = value.clone();
             bad[key] = v;
             write(&bad);
-            assert!(load(&path).is_err(), "{key}");
+            assert!(load(&path, Role::Sender).is_err(), "{key}");
         }
         std::fs::remove_file(path).unwrap();
     }
