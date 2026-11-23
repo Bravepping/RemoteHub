@@ -400,6 +400,15 @@ fn video_ice_plan_rejects_grant_binding_and_unapproved_configuration() {
 }
 
 #[cfg(feature = "v2-public-video-wss")]
+fn video_offer(s: PublicVideoScope) -> String {
+    format!(
+        "v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=rtcp-mux\r\na=recvonly\r\na=fingerprint:sha-256 {}\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\na=candidate:r 1 udp 2 {} 49152 typ relay raddr 0.0.0.0 rport 0\r\n",
+        ["AA"; 32].join(":"),
+        s.turn.ip()
+    )
+}
+
+#[cfg(feature = "v2-public-video-wss")]
 #[test]
 fn authenticated_public_video_sdp_with_data_channel_is_rejected_and_cannot_authorize_reply() {
     const DATA: &str = "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=sctp-port:5000\r\n";
@@ -407,11 +416,7 @@ fn authenticated_public_video_sdp_with_data_channel_is_rejected_and_cannot_autho
     let viewer = Identity::generate_ephemeral().unwrap();
     for mode in [IceMode::DirectPreferred, IceMode::RelayOnly] {
         let s = PublicVideoScope { mode, ..scope() };
-        let valid_offer = format!(
-            "v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=rtcp-mux\r\na=recvonly\r\na=fingerprint:sha-256 {}\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\na=candidate:r 1 udp 2 {} 49152 typ relay raddr 0.0.0.0 rport 0\r\n",
-            ["AA"; 32].join(":"),
-            s.turn.ip()
-        );
+        let valid_offer = video_offer(s);
         let valid_answer = valid_offer.replace("a=recvonly", "a=sendonly");
         for offer_has_data in [true, false] {
             let room = Uuid::new_v4();
@@ -462,5 +467,139 @@ fn authenticated_public_video_sdp_with_data_channel_is_rejected_and_cannot_autho
                 assert!(v.challenge().is_none());
             }
         }
+    }
+}
+
+#[cfg(all(feature = "v2-public-video-wss", feature = "v2-input-approval"))]
+#[test]
+fn verified_public_video_never_grants_input_and_local_consent_is_single_use() {
+    use crate::input_approval::{Approval, End, Error, InputScope, SessionSink, SinkError, State};
+    use std::{cell::Cell, time::Instant};
+
+    // Fake input, never any wire connection, desktop capture, or OS event.
+    #[derive(Default)]
+    struct MockKeys {
+        session_held: Cell<bool>,
+        local_held: Cell<bool>,
+        applied: Cell<u8>,
+        released: Cell<u8>,
+    }
+
+    impl SessionSink for &MockKeys {
+        type Event = ();
+        fn apply(&mut self, _: &()) -> Result<(), SinkError> {
+            self.session_held.set(true);
+            self.applied.set(self.applied.get() + 1);
+            Ok(())
+        }
+        fn release_owned(&mut self) -> Result<(), SinkError> {
+            if self.session_held.replace(false) {
+                self.released.set(self.released.get() + 1);
+            }
+            Ok(())
+        }
+    }
+
+    let room = Uuid::new_v4();
+    let nonce = [1; 32];
+    let host = Identity::generate_ephemeral().unwrap();
+    let viewer = Identity::generate_ephemeral().unwrap();
+    let s = scope();
+    let mut h = PublicVideoProof::prepare(
+        &host,
+        &pin(&host, &viewer),
+        SessionRole::Host,
+        room,
+        nonce,
+        s,
+        NOW,
+    )
+    .unwrap();
+    let mut v = PublicVideoProof::prepare(
+        &viewer,
+        &pin(&viewer, &host),
+        SessionRole::Viewer,
+        room,
+        nonce,
+        s,
+        NOW,
+    )
+    .unwrap();
+    let offer = video_offer(s);
+    let answer = offer.replace("a=recvonly", "a=sendonly");
+    let (signed_offer, _) = v
+        .seal_video_sdp(h.challenge().unwrap(), &offer, NOW)
+        .unwrap();
+    assert!(h.verify_video_sdp(&offer, &signed_offer, NOW).is_ok());
+    let (signed_answer, _) = h
+        .seal_video_sdp(v.challenge().unwrap(), &answer, NOW)
+        .unwrap();
+    assert!(v.verify_video_sdp(&answer, &signed_answer, NOW).is_ok());
+
+    // Compose these two existing policies in the fixture only. Video proof
+    // does not make or transport an input decision.
+    let input_scope = InputScope {
+        room: *room.as_bytes(),
+        generation: nonce,
+        viewer_key: viewer.public().public_key,
+    };
+    let other_viewer = InputScope {
+        viewer_key: Identity::generate_ephemeral().unwrap().public().public_key,
+        ..input_scope
+    };
+    let next_generation = InputScope {
+        generation: [2; 32],
+        ..input_scope
+    };
+    let now = Instant::now();
+    let until = now + Duration::from_secs(5);
+
+    for end in [End::Declined, End::Revoked, End::Disconnected, End::Expired] {
+        let keys = MockKeys::default();
+        keys.local_held.set(true);
+        let mut gate = Approval::view_only(input_scope, until, &keys);
+        assert_eq!(gate.apply(&input_scope, &(), now), Err(Error::NotAllowed));
+        assert_eq!(keys.applied.get(), 0);
+
+        if end == End::Declined {
+            gate.decide_locally(false, now).unwrap();
+        } else {
+            gate.decide_locally(true, now).unwrap();
+            assert_eq!(gate.decide_locally(true, now), Err(Error::NotAllowed));
+            for wrong in [other_viewer, next_generation] {
+                assert_eq!(gate.apply(&wrong, &(), now), Err(Error::WrongScope));
+            }
+            gate.apply(&input_scope, &(), now).unwrap();
+            assert!(keys.session_held.get());
+            // Revoke models the native emergency-stop signal, not a hotkey test.
+            match end {
+                End::Revoked => gate.revoke().unwrap(),
+                End::Disconnected => gate.disconnect().unwrap(),
+                End::Expired => gate.advance(until).unwrap(),
+                _ => unreachable!(),
+            }
+        }
+
+        let after = if end == End::Expired { until } else { now };
+        assert_eq!(gate.state(), State::Ended(end));
+        assert_eq!(gate.apply(&input_scope, &(), after), Err(Error::NotAllowed));
+        assert_eq!(gate.decide_locally(true, after), Err(Error::NotAllowed));
+        drop(gate);
+        assert!(!keys.session_held.get());
+        assert!(keys.local_held.get());
+        let expected = u8::from(end != End::Declined);
+        assert_eq!(
+            (keys.applied.get(), keys.released.get()),
+            (expected, expected)
+        );
+
+        let mut next = Approval::view_only(next_generation, after + Duration::from_secs(5), &keys);
+        assert_eq!(
+            next.apply(&next_generation, &(), after),
+            Err(Error::NotAllowed)
+        );
+        next.decide_locally(true, after).unwrap();
+        assert_eq!(next.apply(&input_scope, &(), after), Err(Error::WrongScope));
+        assert_eq!(keys.applied.get(), expected);
     }
 }
