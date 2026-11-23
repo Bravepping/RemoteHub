@@ -158,6 +158,10 @@ impl<S: SessionSink> Drop for Approval<S> {
 }
 
 #[cfg(test)]
+#[path = "input_approval_queue_tests.rs"]
+mod queue_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use std::{cell::RefCell, rc::Rc};
