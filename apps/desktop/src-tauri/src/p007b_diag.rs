@@ -4,12 +4,13 @@ use hub_webrtc::relay_client::PrivateConfig;
 use std::{path::Path, sync::Arc};
 
 pub const SECONDS: u32 = 8;
-pub const BUILD_TAG: &str = "p007b-r06-v2";
+pub const BUILD_TAG: &str = "p007b-r06-v3";
 pub const PRIVATE_FILE: &str = "r06-private.json";
 
 pub fn validate(mode: PathMode, seconds: u32) -> Result<(), String> {
-    if mode != PathMode::DirectPreferred || seconds != SECONDS {
-        return Err("R06_SYNTHETIC_DIRECT_8_SECONDS_REQUIRED".into());
+    match mode {
+        PathMode::DirectPreferred | PathMode::RelayOnly if seconds == SECONDS => (),
+        _ => return Err("R06_SYNTHETIC_8_SECONDS_REQUIRED".into()),
     }
     Ok(())
 }
@@ -24,7 +25,7 @@ pub fn load(path: &Path, role: Role) -> Result<Arc<PrivateConfig>, String> {
 pub fn build_info() -> serde_json::Value {
     serde_json::json!({
         "buildTag":BUILD_TAG, "sourceKind":"synthetic_nv12", "desktopCapture":false,
-        "inputInjection":false, "mode":"direct_preferred", "seconds":SECONDS,
+        "inputInjection":false, "modes":["direct_preferred","relay_only"], "explicitModeRequired":true, "seconds":SECONDS,
         "privateConfigFile":PRIVATE_FILE, "roleScopedInvitationRequired":true, "reportDirectory":"artifacts/private/p007b-r06",
         "nativeConsentRequired":true, "maximumInvitationRemainingSeconds":1200,
         "candidateValidation":"exact_authenticated_sdp", "automaticNetworkStart":false
@@ -47,11 +48,12 @@ pub fn cli() -> bool {
 mod tests {
     use super::*;
     #[test]
-    fn dedicated_build_rejects_other_modes_and_durations() {
+    fn dedicated_build_allows_exactly_eight_seconds_in_either_mode() {
         assert!(validate(PathMode::DirectPreferred, SECONDS).is_ok());
-        assert!(validate(PathMode::RelayOnly, SECONDS).is_err());
+        assert!(validate(PathMode::RelayOnly, SECONDS).is_ok());
         for n in [0, 5, 9, 30, u32::MAX] {
             assert!(validate(PathMode::DirectPreferred, n).is_err());
+            assert!(validate(PathMode::RelayOnly, n).is_err());
         }
         assert_eq!(build_info()["desktopCapture"], false);
         assert_eq!(build_info()["inputInjection"], false);
@@ -62,7 +64,7 @@ mod tests {
             std::env::temp_dir().join(format!("remotehub-r06-{}.json", uuid::Uuid::new_v4()));
         let value = serde_json::json!({"server_ipv4":"8.8.8.8","signaling_port":8443,
             "ca_pem":"not-a-real-certificate", "sender_invitation":"a".repeat(64),
-            "receiver_invitation":"b".repeat(64),"invitation_expires_at":now()+180});
+            "invitation_expires_at":now()+180});
         let write =
             |v: &serde_json::Value| std::fs::write(&path, serde_json::to_vec(v).unwrap()).unwrap();
         write(&value);

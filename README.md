@@ -113,6 +113,8 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 跨网双机在单独的 Windows `p007b-diag` 构建验收，只生成 8 秒合成图案，不采集桌面、不注入系统键鼠，不自动启动会话。双方就同一个获批 WSS 端点各自确认原生弹窗（显示 IP 和端口）。两台设备各保留一份私有 `r06-private.json`：相同的 `server_ipv4`、`signaling_port`、可信 `ca_pem` 和本次 `invitation_expires_at`，发送端另含且只含 `sender_invitation`，接收端另含且只含 `receiver_invitation`。错角色、无令牌或同时包含两份令牌均在联网前拒绝。不要发送整个配置、令牌或配对码到聊天或仓库。旧的单机 RPC 合成测试仍按原双邀请格式，不用于双机验收。
 
+R06 诊断版要求两端分别手动选择同一个模式：「优先直连」或「仅 TURN 中继」，不自动切换。「仅 TURN」仍需原生同意和 8 秒合成图案，双方核对实际选中的 UDP 中继候选分别存在于当前认证过的 SDP 中；未选中、选了同范围的其他端口或握手模式不同都不能记为通过。该模式对外信令移除候选的关联基址/端口并清理其他地址字段；不改变 ICE 内部的套接字。这个模式不修复直连的私网 host 候选问题，也不把仅 TURN 结果计入直连。
+
 首轮跨网验收：两台 Windows 分别走宽带和热点，不填私网对端，确认收到并解码合成图案，两侧实际选中的候选匹配已验证信令且走非中继公网路径，最后两端均释放资源。若实际选中 TURN，只记录中继结果，不算公网直连；受控回退测试须另行批准。只有候选收集、画面或最后一次旧样本不能判定选路通过。尚未运行跨网实测。
 
 ### 构建 Windows x64 便携诊断包
@@ -127,6 +129,7 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 ## 本分支已执行验证
 
+- R06 手动仅 TURN：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 43 项通过，新增本机脱敏、ICE 解析和精确候选校验覆盖；前端 141 项测试、类型检查及构建通过。Windows MSVC 目标的诊断构建及测试源码通过编译检查；未连接真机或公网 TURN。
 - R06 公网双机复测（用户操作）：匹配版本的 WSS 服务端使配对进入 ICE 阶段。发送端 `DIRECT_SELECTED_PAIR_NOT_APPROVED`；脱敏最终统计：本地候选 `host/private`，`candidate_type_absent_from_sdp`，已发布候选 2 个、同类型 0 个、未批准发布私网候选；远端 `matched`。接收端同时报 `CONTROL_CHANNEL_ERROR`。当前原生 ICE 仍可能选中仅在 SDP 阶段过滤掉的候选，拒绝是预期行为；不放宽核验。未验证公网直连、TURN 转发或画面；R06 仍 OPEN。
 - R06 首轮公网尝试（用户操作）：信令 TCP 和 TURN UDP 均已监听，但发送端未进入等待对端便报 `P006_WSS_CLOSED`，未验证实际选路或画面。旧信令程序缺少 `direct_preferred` 标记；历史 `977f97f` 的握手严格拒绝这个字段。当前源码 `e186880` 的静态 Linux x64 信令程序已通过本机 WSS 实测：R06 发送端收到 `waiting`、双角色收到 `ready`，旧格式不带模式字段也可等待；`cargo test --locked --offline -p hub-rendezvous-probe --bin hub-rendezvous-probe` 6 项通过。新程序未上传云端或部署，未验证公网、TURN 转发或实际画面。
 - Windows x64 便携合成诊断包：应用源码 `6e149c7` 已用 `cargo build -p remotehub-desktop --target x86_64-pc-windows-gnullvm --profile probe --features p007b-diag,custom-protocol --locked` 交叉链接。已静态检查 AMD64 PE、动态依赖及 ZIP 内容；LLVM 版同目录提供匹配的 `WebView2Loader.dll` 和文件校验清单，未签名，不附私有配置，未在 Windows 实机运行。ZIP SHA-256：`61b2eb30ae68c57591938311b456112d52139af30f77e5d5d3072aa0cef7c11b`。此构建不等于公网验收。

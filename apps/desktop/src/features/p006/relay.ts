@@ -17,35 +17,104 @@ import {
   type Candidate,
 } from './direct';
 
+export type RelayMode = 'relay_only' | 'direct_preferred';
 interface Ready {
-  mode?: 'relay_only' | 'direct_preferred';
+  mode?: RelayMode;
   directScope?: DirectScope;
   controlSession: string;
   serverIp: string;
   expiresAt: number;
   ice: IceConfig;
 }
-export function relaySdp(sdp: string, ip: string): string {
+function relayFields(
+  line: string,
+  ip: string,
+  strict = true,
+): string[] | undefined {
+  const fields = line.slice(12).trim().split(/\s+/);
+  return fields[1] === '1' &&
+    fields[2]?.toLowerCase() === 'udp' &&
+    fields[4] === ip &&
+    Number(fields[5]) >= 49160 &&
+    Number(fields[5]) <= 49259 &&
+    fields[7] === 'relay' &&
+    (!strict ||
+      (fields[0].length <= 64 &&
+        /^\d{1,10}$/.test(fields[3]) &&
+        Number(fields[3]) <= 4294967295 &&
+        /^\d+$/.test(fields[5]) &&
+        fields[6] === 'typ'))
+    ? fields.slice(0, 8)
+    : undefined;
+}
+function canonicalRelay(fields: string[]): string {
+  const normalized = [...fields];
+  normalized[2] = 'udp';
+  return `a=candidate:${normalized.join(' ')} raddr 0.0.0.0 rport 0`;
+}
+function diagnosticMetadata(line: string): string {
+  if (
+    line.trim() !== line ||
+    line.includes('\r') ||
+    line.startsWith('a=remote-candidates:')
+  )
+    throw new Error('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
+  if (line.startsWith('o=')) {
+    const fields = line.slice(2).split(/\s+/);
+    if (
+      fields.length !== 6 ||
+      !/^\d+$/.test(fields[1]) ||
+      !/^\d+$/.test(fields[2]) ||
+      fields[3] !== 'IN' ||
+      !['IP4', 'IP6'].includes(fields[4])
+    )
+      throw new Error('BROWSER_RELAY_SDP_INVALID');
+    return `o=- ${fields[1]} ${fields[2]} IN IP4 0.0.0.0`;
+  }
+  if (line.startsWith('c=')) return 'c=IN IP4 0.0.0.0';
+  if (line.startsWith('a=rtcp:')) return 'a=rtcp:9 IN IP4 0.0.0.0';
+  return line;
+}
+export function relaySdp(sdp: string, ip: string, diagnostic = false): string {
+  if (diagnostic && (sdp.length > 65536 || sdp.includes('\0')))
+    throw new Error('BROWSER_RELAY_SDP_INVALID');
   let count = 0;
   const result = sdp
     .split(/\r?\n/)
-    .filter((line) => {
-      if (!line.startsWith('a=candidate:')) return true;
-      const p = line.slice(12).trim().split(/\s+/);
-      const accepted =
-        p[1] === '1' &&
-        p[2]?.toLowerCase() === 'udp' &&
-        p[4] === ip &&
-        p[7] === 'relay' &&
-        Number(p[5]) >= 49160 &&
-        Number(p[5]) <= 49259;
-      if (accepted) count++;
-      return accepted;
+    .flatMap((line) => {
+      if (diagnostic) line = diagnosticMetadata(line);
+      if (!line.startsWith('a=candidate:'))
+        return [line.startsWith('c=') ? 'c=IN IP4 0.0.0.0' : line];
+      const fields = relayFields(line, ip, diagnostic);
+      if (!fields) return [];
+      count++;
+      // Host-related addresses and browser extensions are not needed by the
+      // peer: expose only the approved allocation plus the redacted sentinel.
+      return [diagnostic ? canonicalRelay(fields) : line];
     })
-    .map((line) => (line.startsWith('c=') ? 'c=IN IP4 0.0.0.0' : line))
     .join('\r\n');
   if (!count) throw new Error('BROWSER_RELAY_CANDIDATE_MISSING');
   return result;
+}
+export function relayCandidateSet(sdp: string, ip: string): Candidate[] {
+  if (sdp.length > 65536 || sdp.includes('\0'))
+    throw new Error('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
+  const candidates: Candidate[] = [];
+  for (const line of sdp.split(/\r?\n/)) {
+    if (line !== diagnosticMetadata(line))
+      throw new Error('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
+    if (!line.startsWith('a=candidate:')) continue;
+    const fields = relayFields(line, ip);
+    if (!fields || candidates.length >= 16 || line !== canonicalRelay(fields))
+      throw new Error('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
+    candidates.push({
+      address: fields[4],
+      port: Number(fields[5]),
+      type: 'relay',
+    });
+  }
+  if (!candidates.length) throw new Error('BROWSER_RELAY_CANDIDATE_MISSING');
+  return candidates;
 }
 export function selectedRelay(all: RTCStatsReport, ip: string): boolean | null {
   let result: boolean | null = null;
@@ -83,6 +152,7 @@ export class RelayProbe {
   private lastReceiver?: { sample: LanReceiver; at: number };
   private failureCodes: string[] = [];
   private receiverRole = false;
+  private diagnosticMode?: RelayMode;
   constructor(
     private video: HTMLVideoElement,
     private update: (
@@ -108,17 +178,30 @@ export class RelayProbe {
       }
     };
   }
-  async start(config: {
-    role: 'sender' | 'receiver';
-    consent: boolean;
-    localIp: string;
-    seconds: number;
-    pairingCode?: string;
-    mode?: 'relay_only' | 'direct_preferred';
-    peerIp?: string;
-  }) {
+  async start(
+    config: {
+      role: 'sender' | 'receiver';
+      consent: boolean;
+      localIp: string;
+      seconds: number;
+      pairingCode?: string;
+      mode?: RelayMode;
+      peerIp?: string;
+    },
+    diagnostic = false,
+  ) {
     this.receiverRole = config.role === 'receiver';
     try {
+      if (diagnostic) {
+        if (
+          config.seconds !== 8 ||
+          (config.mode !== 'direct_preferred' &&
+            config.mode !== 'relay_only') ||
+          (config.mode === 'direct_preferred' && !this.directFeatureEnabled)
+        )
+          throw new Error('R06_EXPLICIT_MODE_REQUIRED');
+        this.diagnosticMode = config.mode;
+      }
       const result = await this.call<{
         sessionId: string;
         pairingCode: string | null;
@@ -135,6 +218,9 @@ export class RelayProbe {
         sessionId: this.id,
       });
       if (this.stopped) return;
+      // Never switch the operator's diagnostic mode based on a reply.
+      if (this.diagnosticMode && ready.mode !== this.diagnosticMode)
+        throw new Error('R06_REQUESTED_MODE_MISMATCH');
       this.server = ready.serverIp;
       if (config.role === 'receiver') await this.connect(ready);
       if (!this.stopped) await this.poll();
@@ -208,13 +294,22 @@ export class RelayProbe {
       };
     });
     if (this.stopped) return;
-    const offer = this.directScope
+    const directOffer = this.directScope
       ? directSdp(pc.localDescription!.sdp, this.directScope)
       : null;
-    if (offer) this.localCandidates = offer.candidates;
+    const offer =
+      directOffer?.sdp ??
+      relaySdp(
+        pc.localDescription!.sdp,
+        this.server,
+        this.diagnosticMode === 'relay_only',
+      );
+    if (directOffer) this.localCandidates = directOffer.candidates;
+    else if (this.diagnosticMode === 'relay_only')
+      this.localCandidates = relayCandidateSet(offer, this.server);
     const answer = await this.call<string>('p006_signal', {
       sessionId: this.id,
-      offer: offer?.sdp ?? relaySdp(pc.localDescription!.sdp, this.server),
+      offer,
     });
     if (!this.stopped) {
       if (this.directScope)
@@ -222,6 +317,8 @@ export class RelayProbe {
           answer,
           this.directScope,
         );
+      else if (this.diagnosticMode === 'relay_only')
+        this.remoteCandidates = relayCandidateSet(answer, this.server);
       await pc.setRemoteDescription({ type: 'answer', sdp: answer });
     }
   }
@@ -300,11 +397,12 @@ export class RelayProbe {
       this.firstFrame,
       stats,
     );
-    const directPath = this.directScope
-      ? selectedDirect(stats, this.localCandidates, this.remoteCandidates)
-      : null;
-    const peerMatches = directPath
-      ? directPath.verified
+    const exactPath =
+      this.directScope || this.diagnosticMode === 'relay_only'
+        ? selectedDirect(stats, this.localCandidates, this.remoteCandidates)
+        : null;
+    const peerMatches = exactPath
+      ? exactPath.verified
       : selectedRelay(stats, this.server);
     const invalid =
       peerMatches === false ||
@@ -318,7 +416,7 @@ export class RelayProbe {
     if (this.firstFrame === null && (data.framesDecoded ?? 0) > 0)
       this.firstFrame = data.elapsedMs;
     const result: LanReceiver = {
-      ...(directPath ? { connectionPath: directPath.path } : {}),
+      ...(exactPath ? { connectionPath: exactPath.path } : {}),
       ...data,
       firstFrameMs: this.firstFrame,
       peerMatches,

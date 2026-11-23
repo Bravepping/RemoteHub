@@ -14,38 +14,59 @@ beforeEach(() => {
     throw new Error('OFFLINE_FIXTURE_STOP');
   });
 });
-it('diagnostic panel is synthetic-only, fresh-consent and never silently starts', async () => {
-  const w = mount(RelayVideoProbe, {
-    props: { directEnabled: true, diagnosticOnly: true },
-  });
-  await flushPromises();
-  expect(w.text()).toContain('不采集桌面');
-  expect(w.text()).toContain('最多8秒');
-  expect(w.text()).not.toContain('发送屏幕');
-  expect(w.findAll('select')).toHaveLength(2); // No relay-only/fault/source switch.
-  expect(w.findAll('button')[0].attributes('disabled')).toBeDefined();
-  expect(invoke).not.toHaveBeenCalledWith('p006_start', expect.anything());
-  await w.get('input[type=checkbox]').setValue(true);
-  await w.findAll('button')[0].trigger('click');
-  await flushPromises();
-  expect(invoke).toHaveBeenCalledWith('p006_start', {
-    config: expect.objectContaining({
-      consent: true,
-      seconds: 8,
-      mode: 'direct_preferred',
-      role: 'sender',
-    }),
-  });
-  expect(
-    (w.get('input[type=checkbox]').element as HTMLInputElement).checked,
-  ).toBe(false);
-  w.unmount();
-});
+it.each(['direct_preferred', 'relay_only'] as const)(
+  'diagnostic panel only launches the explicitly chosen synthetic mode %s',
+  async (mode) => {
+    const w = mount(RelayVideoProbe, {
+      props: { directEnabled: true, diagnosticOnly: true },
+    });
+    await flushPromises();
+    expect(w.text()).toContain('不采集桌面');
+    expect(w.text()).toContain('最多8秒');
+    expect(w.text()).not.toContain('发送屏幕');
+    expect(w.findAll('select')).toHaveLength(3); // Mode, role and approved interface.
+    const choice = w.get('[aria-label="本轮诊断方式"]');
+    expect((choice.element as HTMLSelectElement).value).toBe('');
+    expect(w.findAll('button')[0].attributes('disabled')).toBeDefined();
+    expect(w.get('input[type=checkbox]').attributes('disabled')).toBeDefined();
+    expect(invoke).not.toHaveBeenCalledWith('p006_start', expect.anything());
+    await w.findAll('button')[0].trigger('click');
+    expect(invoke).not.toHaveBeenCalledWith('p006_start', expect.anything());
+    await choice.setValue(
+      mode === 'relay_only' ? 'direct_preferred' : 'relay_only',
+    );
+    await w.get('input[type=checkbox]').setValue(true);
+    await choice.setValue(mode);
+    expect(
+      (w.get('input[type=checkbox]').element as HTMLInputElement).checked,
+    ).toBe(false);
+    await w.get('input[type=checkbox]').setValue(true);
+    await w.findAll('button')[0].trigger('click');
+    await flushPromises();
+    expect(invoke).toHaveBeenCalledWith('p006_start', {
+      config: expect.objectContaining({
+        consent: true,
+        seconds: 8,
+        mode,
+        role: 'sender',
+      }),
+    });
+    expect(
+      (w.get('input[type=checkbox]').element as HTMLInputElement).checked,
+    ).toBe(false);
+    expect((choice.element as HTMLSelectElement).value).toBe('');
+    w.unmount();
+  },
+);
 it('ordinary P006 UI keeps its desktop/30-second scope', async () => {
   const w = mount(RelayVideoProbe, { props: { directEnabled: true } });
   await flushPromises();
   expect(w.text()).toContain('发送屏幕');
   expect(w.text()).toContain('30秒');
   expect(w.text()).not.toContain('R06 ·');
+  expect(w.find('[aria-label="本轮诊断方式"]').exists()).toBe(false);
+  expect((w.get('select').element as HTMLSelectElement).value).toBe(
+    'direct_preferred',
+  );
   w.unmount();
 });

@@ -42,7 +42,7 @@ impl Drop for Lease<'_> {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Config {
-    #[serde(default)]
+    #[cfg_attr(not(feature = "p007b-diag"), serde(default))]
     mode: PathMode,
     peer_ip: Option<Ipv4Addr>,
     role: Role,
@@ -197,7 +197,7 @@ pub async fn p006_start(
     let strategy = if config.mode == PathMode::DirectPreferred {
         "优先加密直连，必要时自动中继"
     } else {
-        "强制TURN中继"
+        "仅加密 TURN 中继，不尝试直连"
     };
     let message=format!("本次将{action}，视频最长{}秒。\n连接策略：{strategy}。{private_peer}\n\n信令服务器：{}:{}（应用专用证书）。只记录脱敏统计，不保存画面，不执行键盘鼠标输入。\n配对最长等待120秒，随时停止，断线终止。\n\n是否批准本次实验？",config.seconds, private.server_ipv4, private.signaling_port);
     let allowed = tauri::async_runtime::spawn_blocking(move || unsafe {

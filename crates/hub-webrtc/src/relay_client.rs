@@ -465,14 +465,18 @@ impl RelayClient {
                 c.ready.session_id.clone(),
             );
         }
-        Session::new_relay(
-            self.seconds,
-            RelaySettings {
-                grant: c.grant.as_ref().ok_or("RELAY_GRANT_REQUIRED")?.clone(),
-                config: ice_mode(&c.ready, self.mode)?,
-            },
-            c.ready.session_id.clone(),
-        )
+        if self.mode != PathMode::RelayOnly {
+            return Err("DIRECT_GRANT_REQUIRED".into());
+        }
+        let relay = RelaySettings {
+            grant: c.grant.as_ref().ok_or("RELAY_GRANT_REQUIRED")?.clone(),
+            config: ice_mode(&c.ready, self.mode)?,
+        };
+        #[cfg(feature = "p006-session-probe")]
+        if self.config.synthetic_source {
+            return Session::new_relay_synthetic(self.seconds, relay, c.ready.session_id.clone());
+        }
+        Session::new_relay(self.seconds, relay, c.ready.session_id.clone())
     }
     #[cfg(feature = "p006-direct")]
     fn approved_direct_grant(

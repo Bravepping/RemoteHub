@@ -22,6 +22,9 @@ fn synthetic_loopback_entry_is_explicit_and_cannot_be_enabled_by_private_json() 
         !normal.is_local_synthetic() && !normal.synthetic_source && !normal.diagnostic_drop_direct
     );
     let operator = PrivateConfig::load_operator_synthetic(&path, true).unwrap();
+    assert!(operator
+        .authorize_start(Role::Sender, PathMode::RelayOnly)
+        .is_err());
     assert!(
         !operator.is_local_synthetic()
             && operator.synthetic_source
@@ -79,12 +82,10 @@ fn synthetic_dual_pc_configs_never_need_the_other_roles_invitation() {
                 .as_deref(),
             Some("P006_INVITATION_ROLE_MISMATCH")
         );
-        assert_eq!(
-            cfg.authorize_start(role, PathMode::RelayOnly)
-                .err()
-                .as_deref(),
-            Some("P006_SYNTHETIC_REQUIRES_DIRECT_MODE")
-        );
+        assert!(cfg.authorize_start(role, PathMode::RelayOnly).is_ok());
+        assert!(cfg
+            .authorize_start(role.opposite(), PathMode::RelayOnly)
+            .is_err());
 
         value[other] = serde_json::json!("c".repeat(64));
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();

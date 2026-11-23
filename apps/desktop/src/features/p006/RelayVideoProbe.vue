@@ -1,16 +1,22 @@
 <script setup lang="ts">
-import { onMounted, onBeforeUnmount, ref } from 'vue';
+import { onMounted, onBeforeUnmount, ref, watch } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { RelayProbe } from './relay';
+import { RelayProbe, type RelayMode } from './relay';
+import { evidenceCode } from './evidence';
 import type { LanStatus, LanReceiver } from '../p004/lan';
 const props = defineProps<{
   directEnabled?: boolean;
   diagnosticOnly?: boolean;
 }>();
-const mode = ref<'relay_only' | 'direct_preferred'>(
-  props.directEnabled ? 'direct_preferred' : 'relay_only',
+const mode = ref<RelayMode | ''>(
+  props.diagnosticOnly
+    ? ''
+    : props.directEnabled
+      ? 'direct_preferred'
+      : 'relay_only',
 );
+const lastDiagnosticMode = ref<RelayMode>();
 const peerIp = ref('');
 const video = ref<HTMLVideoElement>();
 const role = ref<'sender' | 'receiver'>('sender');
@@ -27,6 +33,25 @@ const status = ref<LanStatus>();
 const receiver = ref<LanReceiver>();
 let probe: RelayProbe | undefined;
 let unlistenClose: UnlistenFn | undefined;
+watch(mode, () => {
+  if (!props.diagnosticOnly) return;
+  consent.value = false;
+  if (mode.value !== 'direct_preferred') peerIp.value = '';
+});
+function modeLabel(selected: RelayMode | '') {
+  if (selected === 'direct_preferred') return '优先直连，需要时自动中继';
+  if (selected === 'relay_only') return '两端强制 TURN';
+  return '尚未选择连接方式';
+}
+function showError(error: string) {
+  if (!props.diagnosticOnly) return error;
+  const code = error.replace(/^Error:\s*/, '');
+  if (code === 'R06_REQUESTED_MODE_MISMATCH')
+    return '两端返回的诊断方式与本次选择不符，已停止且未切换模式。';
+  if (code === 'R06_EXPLICIT_MODE_REQUIRED')
+    return '请明确选择受支持的连接方式，且诊断固定为 8 秒。';
+  return evidenceCode(error);
+}
 const labels: Record<string, string> = {
   idle: '尚未开始',
   waiting: '等待另一台电脑配对',
@@ -49,27 +74,40 @@ onMounted(async () => {
       interfaces.value[0] ??
       '';
   } catch (e) {
-    error.value = String(e);
+    error.value = showError(String(e));
   }
 });
 async function start() {
-  if (!video.value || busy.value) return;
+  const picked = mode.value;
+  if (
+    !video.value ||
+    busy.value ||
+    !consent.value ||
+    !localIp.value ||
+    !picked ||
+    (picked === 'direct_preferred' && !props.directEnabled)
+  )
+    return;
   busy.value = true;
   error.value = '';
   saved.value = '';
   status.value = undefined;
   receiver.value = undefined;
   state.value = 'starting';
+  if (props.diagnosticOnly) lastDiagnosticMode.value = picked;
   probe = new RelayProbe(
     video.value,
     (s, n, r) => {
       state.value = s;
       if (n) status.value = n;
       if (r) receiver.value = r;
-      if (['stopped', 'failed'].includes(s)) busy.value = false;
+      if (['stopped', 'failed'].includes(s)) {
+        busy.value = false;
+        if (props.diagnosticOnly) mode.value = '';
+      }
     },
     (e) => {
-      if (!error.value) error.value = e;
+      if (!error.value) error.value = showError(e);
     },
     (c) => (hostCode.value = c),
     (p) => (saved.value = p),
@@ -81,15 +119,15 @@ async function start() {
     localIp: localIp.value,
     seconds: props.diagnosticOnly ? 8 : 30,
     pairingCode: inputCode.value,
-    mode: mode.value,
+    mode: picked,
     peerIp:
-      mode.value === 'direct_preferred' && peerIp.value.trim()
+      picked === 'direct_preferred' && peerIp.value.trim()
         ? peerIp.value.trim()
         : undefined,
   };
   inputCode.value = '';
   consent.value = false;
-  await probe.start(config);
+  await probe.start(config, props.diagnosticOnly === true);
 }
 onBeforeUnmount(() => {
   unlistenClose?.();
@@ -108,18 +146,31 @@ onBeforeUnmount(() => {
       }}
     </h2>
     <p>
-      {{
-        mode === 'direct_preferred'
-          ? '优先直连，需要时自动中继'
-          : '两端强制 TURN'
-      }}
+      {{ modeLabel(mode) }}
       · 720p30 · {{ props.diagnosticOnly ? '最多8秒，可提前停止' : '30秒' }} ·
       最多100条模拟事件 · 不执行键鼠输入
     </p>
     <p v-if="props.diagnosticOnly">
       本构建只生成图案，不采集桌面、摄像头或麦克风。需等待另行授权并取得新配置后使用；每轮双方亲自确认。
     </p>
+    <p v-if="props.diagnosticOnly">
+      两端须为本轮选择同一种方式。优先直连可按该模式的规则经 TURN
+      中继；强制中继不会尝试直连。
+    </p>
+    <p v-if="props.diagnosticOnly && lastDiagnosticMode && !busy && !mode">
+      上轮选择：{{ modeLabel(lastDiagnosticMode) }}
+    </p>
     <div class="relay-form">
+      <label v-if="props.diagnosticOnly">
+        本轮诊断方式
+        <select v-model="mode" aria-label="本轮诊断方式" :disabled="busy">
+          <option value="" disabled>请选择，不预选连接方式</option>
+          <option value="direct_preferred" :disabled="!props.directEnabled">
+            优先直连，允许中继
+          </option>
+          <option value="relay_only">强制 TURN 中继（对照）</option>
+        </select>
+      </label>
       <label v-if="props.directEnabled && !props.diagnosticOnly"
         >连接方式<select v-model="mode" :disabled="busy">
           <option value="direct_preferred">优先直连，自动中继</option>
@@ -160,7 +211,11 @@ onBeforeUnmount(() => {
       /></label>
     </div>
     <label
-      ><input v-model="consent" type="checkbox" :disabled="busy" />
+      ><input
+        v-model="consent"
+        type="checkbox"
+        :disabled="busy || (props.diagnosticOnly && !mode)"
+      />
       {{
         props.diagnosticOnly
           ? '我同意本次合成图案连接诊断，明白不采集桌面'
@@ -168,7 +223,16 @@ onBeforeUnmount(() => {
       }}</label
     >
     <div class="relay-actions">
-      <button :disabled="busy || !consent || !localIp" @click="start">
+      <button
+        :disabled="
+          busy ||
+          !consent ||
+          !localIp ||
+          !mode ||
+          (mode === 'direct_preferred' && !props.directEnabled)
+        "
+        @click="start"
+      >
         开始本次实验</button
       ><button :disabled="!busy" @click="probe?.stop()">停止实验</button>
     </div>

@@ -1,5 +1,10 @@
 import { expect, it, vi } from 'vitest';
-import { relaySdp, selectedRelay, RelayProbe } from './relay';
+import {
+  relayCandidateSet,
+  relaySdp,
+  selectedRelay,
+  RelayProbe,
+} from './relay';
 import { invoke } from '@tauri-apps/api/core';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
@@ -54,6 +59,161 @@ it('requires the actual selected transport pair and both approved relay endpoint
     expect(selectedRelay(altered as unknown as RTCStatsReport, ip)).toBe(false);
   }
 });
+it('redacts diagnostic TURN SDP origin, related address, RTCP and extensions', () => {
+  const sdp = [
+    'v=0',
+    'o=private-name 123 456 IN IP4 192.168.1.6',
+    'c=IN IP4 192.168.1.6',
+    'a=rtcp:5444 IN IP4 192.168.1.6',
+    'a=rtcp-mux',
+    `a=candidate:a 1 UDP 1 ${ip} 49160 typ relay raddr 192.168.1.6 rport 5444 network-id 2 arbitrary private-fixture`,
+  ].join('\r\n');
+  const result = relaySdp(sdp, ip, true);
+  expect(result).toBe(
+    [
+      'v=0',
+      'o=- 123 456 IN IP4 0.0.0.0',
+      'c=IN IP4 0.0.0.0',
+      'a=rtcp:9 IN IP4 0.0.0.0',
+      'a=rtcp-mux',
+      `a=candidate:a 1 udp 1 ${ip} 49160 typ relay raddr 0.0.0.0 rport 0`,
+    ].join('\r\n'),
+  );
+  expect(relayCandidateSet(result, ip)).toEqual([
+    { address: ip, port: 49160, type: 'relay' },
+  ]);
+  for (const noncanonical of [
+    result.replace(' 1 udp ', ' 1 UDP '),
+    result.replace('raddr 0.0.0.0 rport 0', 'raddr 10.0.0.2 rport 5000'),
+    result.replace('raddr 0.0.0.0 rport 0', 'generation 0'),
+    result.replace('a=candidate:', ' a=candidate:'),
+    result.replace('o=- ', 'o=unredacted '),
+    result.replace('c=IN IP4 0.0.0.0', 'c=IN IP4 10.0.0.2'),
+    result.replace('a=rtcp:9 IN IP4 0.0.0.0', 'a=rtcp:1234 IN IP4 10.0.0.2'),
+    `${result}\na=remote-candidates:1 10.0.0.2 5000`,
+  ])
+    expect(() => relayCandidateSet(noncanonical, ip)).toThrow();
+  expect(() =>
+    relaySdp(`${sdp}\r\na=remote-candidates:1 192.168.1.6 5444`, ip, true),
+  ).toThrow('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
+  expect(() =>
+    relayCandidateSet(
+      `${result}\r\na=candidate:x 1 udp 1 ${ip} 49161 typ host`,
+      ip,
+    ),
+  ).toThrow('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
+});
+
+it.each(['direct_preferred', undefined] as const)(
+  'closes an R06 relay-only session without creating a PC when authenticated ready mode is %s',
+  async (mode) => {
+    vi.mocked(invoke)
+      .mockClear()
+      .mockImplementation(async (command) => {
+        if (command === 'p006_start')
+          return { sessionId: 'mismatch', pairingCode: null };
+        if (command === 'p006_ready') return { mode };
+        if (command === 'p006_stats')
+          return {
+            resources_released: true,
+            error: null,
+            receiver_samples: [],
+          };
+        if (command === 'p006_save') return 'fixture';
+        return undefined;
+      });
+    const failure = vi.fn();
+    const createPeer = vi.fn();
+    const probe = new RelayProbe(
+      document.createElement('video'),
+      vi.fn(),
+      failure,
+      vi.fn(),
+      vi.fn(),
+      true,
+      invoke,
+      createPeer,
+    );
+    await probe.start(
+      {
+        role: 'receiver',
+        consent: true,
+        localIp: '192.168.1.2',
+        seconds: 8,
+        mode: 'relay_only',
+      },
+      true,
+    );
+    expect(failure).toHaveBeenCalledWith('Error: R06_REQUESTED_MODE_MISMATCH');
+    expect(createPeer).not.toHaveBeenCalled();
+    expect(invoke).not.toHaveBeenCalledWith('p006_signal', expect.anything());
+    expect(invoke).toHaveBeenCalledWith('p006_stop', { sessionId: 'mismatch' });
+  },
+);
+
+it.each([49161, 49162])(
+  'diagnostic relay requires exact authenticated answer port, selected %s',
+  async (selectedPort) => {
+    const failures = vi.fn();
+    const update = vi.fn();
+    const probe = new RelayProbe(
+      document.createElement('video'),
+      update,
+      failures,
+      vi.fn(),
+      vi.fn(),
+    );
+    const report = new Map([
+      ['video', { type: 'inbound-rtp', kind: 'video', framesDecoded: 1 }],
+      ['transport', { type: 'transport', selectedCandidatePairId: 'pair' }],
+      ['pair', { localCandidateId: 'local', remoteCandidateId: 'remote' }],
+      [
+        'local',
+        { candidateType: 'relay', protocol: 'udp', address: ip, port: 49160 },
+      ],
+      [
+        'remote',
+        {
+          candidateType: 'relay',
+          protocol: 'udp',
+          address: ip,
+          port: selectedPort,
+        },
+      ],
+    ] as Array<[string, Record<string, unknown>]>);
+    const pc = {
+      connectionState: 'connected',
+      getStats: async () => report,
+      getReceivers: () => [],
+      close: () => {
+        pc.connectionState = 'closed';
+      },
+    };
+    const candidate = (port: number) =>
+      `a=candidate:a 1 udp 1 ${ip} ${port} typ relay raddr 0.0.0.0 rport 0`;
+    Object.assign(probe, {
+      pc,
+      server: ip,
+      diagnosticMode: 'relay_only',
+      localCandidates: relayCandidateSet(candidate(49160), ip),
+      remoteCandidates: relayCandidateSet(candidate(49161), ip),
+    });
+    await probe.stop();
+    expect(update).toHaveBeenLastCalledWith(
+      selectedPort === 49161 ? 'stopped' : 'failed',
+      undefined,
+      expect.objectContaining({
+        peerMatches: selectedPort === 49161,
+        connectionPath: selectedPort === 49161 ? 'relay' : 'unknown',
+      }),
+    );
+    if (selectedPort === 49161) expect(failures).not.toHaveBeenCalled();
+    else
+      expect(failures).toHaveBeenCalledWith(
+        'Error: BROWSER_SELECTED_RELAY_UNVERIFIED',
+      );
+  },
+);
 it('revokes a late native approval when stopped while the native dialog is pending', async () => {
   let approve!: (value: { sessionId: string; pairingCode: null }) => void;
   vi.mocked(invoke).mockImplementation(async (command) => {

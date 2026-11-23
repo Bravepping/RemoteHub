@@ -35,6 +35,8 @@ pub mod relay_client;
     any(windows, all(test, feature = "p006-session-probe"))
 ))]
 mod relay_config;
+#[cfg(all(feature = "p006-session-probe", any(windows, test)))]
+mod relay_diagnostic;
 #[cfg(feature = "p006-turn-probe")]
 pub mod relay_runtime;
 #[cfg(feature = "p3-lan")]

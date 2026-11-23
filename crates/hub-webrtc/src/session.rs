@@ -161,6 +161,13 @@ pub struct Session {
     direct_remote: Mutex<Option<crate::direct_policy::VerifiedCandidates>>,
     #[cfg(feature = "p006-session-probe")]
     synthetic: bool,
+    #[cfg(feature = "p006-session-probe")]
+    synthetic_relay_pair: Mutex<
+        Option<(
+            crate::relay_diagnostic::Endpoints,
+            crate::relay_diagnostic::Endpoints,
+        )>,
+    >,
     #[cfg(feature = "p006-relay")]
     relay: Option<RelaySettings>,
     #[cfg(feature = "p006-relay")]
@@ -200,6 +207,18 @@ impl Session {
             seconds + 30,
         )?);
         inner.relay = Some(relay);
+        Ok(session)
+    }
+    #[cfg(feature = "p006-session-probe")]
+    pub(crate) fn new_relay_synthetic(
+        seconds: u32,
+        relay: RelaySettings,
+        control_session: String,
+    ) -> Result<Arc<Self>, String> {
+        let mut session = Self::new_relay(seconds, relay, control_session)?;
+        let inner = Arc::get_mut(&mut session).ok_or("SESSION_ALREADY_SHARED")?;
+        inner.synthetic = true;
+        inner.shared.update(|s| s.source_kind = "synthetic_nv12".into());
         Ok(session)
     }
     pub fn new(seconds: u32) -> Result<Arc<Self>, String> {
@@ -267,6 +286,8 @@ impl Session {
             direct_remote: Mutex::new(None),
             #[cfg(feature = "p006-session-probe")]
             synthetic: false,
+            #[cfg(feature = "p006-session-probe")]
+            synthetic_relay_pair: Mutex::new(None),
             #[cfg(feature = "p006-relay")]
             relay: None,
             #[cfg(feature = "p006-relay")]
@@ -646,6 +667,12 @@ impl Session {
             .map_err(|e| e.to_string())?;
         #[cfg(feature = "p3-lan")]
         let input_offer = offer.clone();
+        #[cfg(feature = "p006-session-probe")]
+        let relay_offer = if self.synthetic && self.relay.is_some() {
+            Some(crate::relay_diagnostic::endpoints(&offer)?)
+        } else {
+            None
+        };
         pc.set_remote_description(RTCSessionDescription::offer(offer).map_err(|e| e.to_string())?)
             .await
             .map_err(|e| e.to_string())?;
@@ -679,6 +706,18 @@ impl Session {
             .sdp;
         #[cfg(feature = "p006-direct")]
         let answer = self.direct_answer(answer)?;
+        #[cfg(feature = "p006-session-probe")]
+        let answer = if let Some(remote) = relay_offer {
+            let safe = crate::relay_diagnostic::redact(&answer)?;
+            let local = crate::relay_diagnostic::endpoints(&safe)?;
+            *self
+                .synthetic_relay_pair
+                .lock()
+                .map_err(|_| "R06_RELAY_PAIR_LOCK")? = Some((local, remote));
+            safe
+        } else {
+            answer
+        };
         let candidates: Vec<_> = answer
             .lines()
             .filter(|l| l.starts_with("a=candidate:"))
@@ -937,6 +976,10 @@ impl Session {
     #[cfg(feature = "p006-relay")]
     async fn verify_relay_pair(&self, pc: &Arc<dyn PeerConnection>) -> Result<(), String> {
         let r = self.relay.as_ref().ok_or("RELAY_POLICY_MISSING")?;
+        #[cfg(feature = "p006-session-probe")]
+        if self.synthetic {
+            self.shared.update(|s| s.native_selected_pair = None);
+        }
         let sctp = pc.sctp().await.ok_or("RELAY_SCTP_MISSING")?;
         let pair = sctp
             .transport()
@@ -953,6 +996,18 @@ impl Session {
                     .is_ok_and(|ip| r.grant.permits_candidate(ip, c.port))
         };
         let valid = permitted(pair.local()) && permitted(pair.remote());
+        #[cfg(feature = "p006-session-probe")]
+        let valid = valid
+            && (!self.synthetic
+                || self
+                    .synthetic_relay_pair
+                    .lock()
+                    .map_err(|_| "R06_RELAY_PAIR_LOCK")?
+                    .as_ref()
+                    .is_some_and(|(local, remote)| {
+                        crate::relay_diagnostic::matches(local, pair.local())
+                            && crate::relay_diagnostic::matches(remote, pair.remote())
+                    }));
         self.shared.update(|s| {
             s.native_selected_pair = Some(crate::turn_probe::PairSummary {
                 local_type: pair.local().typ.to_string(),
