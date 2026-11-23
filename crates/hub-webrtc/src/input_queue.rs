@@ -2,7 +2,7 @@
 //! not accept wire messages, authenticate peers or connect to an input driver.
 
 use crate::input_approval::{
-    Approval, Binding, Error as ApprovalError, InputScope, SessionSink, State,
+    Approval, Binding, Error as ApprovalError, InputScope, PendingDecision, SessionSink, State,
 };
 use std::{collections::VecDeque, time::Instant};
 
@@ -72,7 +72,27 @@ impl<S: SessionSink> InputQueue<S> {
         self.approval.state()
     }
 
-    /// Only a separate, host-local input consent decision may call this.
+    /// Begin a separate host-local prompt for the current verified device scope.
+    /// Input stays view-only while the prompt is pending.
+    pub fn begin_local_decision(&mut self, current: &InputScope) -> Result<PendingDecision, Error> {
+        self.begin_local_decision_at(current, Instant::now())
+    }
+
+    /// Complete one prompt on the original serialized owner. Sample the
+    /// current verified scope and local control before entering this turn;
+    /// a pending revoke, transport loss, or expiry wins over any response.
+    pub fn complete_local_decision(
+        &mut self,
+        pending: PendingDecision,
+        current: &InputScope,
+        approved: bool,
+        control: Control,
+    ) -> Result<(), Error> {
+        self.complete_local_decision_at(pending, current, approved, control, Instant::now())
+    }
+
+    /// Synchronous host-local input consent only. For a prompt crossing an
+    /// await, use the device-scoped begin/complete pair instead.
     pub fn decide_locally(&mut self, approved: bool) -> Result<(), Error> {
         self.decide_at(approved, Instant::now())
     }
@@ -107,6 +127,32 @@ impl<S: SessionSink> InputQueue<S> {
     /// when no input is queued. Release errors remain visible on later calls.
     pub fn advance(&mut self, control: Control) -> Result<State, Error> {
         self.advance_at(control, Instant::now())
+    }
+
+    fn begin_local_decision_at(
+        &mut self,
+        current: &InputScope,
+        now: Instant,
+    ) -> Result<PendingDecision, Error> {
+        self.advance_at(Control::Continue, now)?;
+        self.approval
+            .begin_local_decision(current, now)
+            .map_err(Error::from)
+    }
+
+    fn complete_local_decision_at(
+        &mut self,
+        pending: PendingDecision,
+        current: &InputScope,
+        approved: bool,
+        control: Control,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.advance_at(control, now)?;
+        let result = self
+            .approval
+            .complete_local_decision(pending, current, approved, now);
+        self.finish(result)
     }
 
     fn decide_at(&mut self, approved: bool, now: Instant) -> Result<(), Error> {
@@ -356,6 +402,126 @@ mod tests {
         );
         assert!(sink.borrow().applied.is_empty());
         assert_eq!(sink.borrow().release_calls, 0);
+    }
+
+    #[test]
+    fn pending_prompt_keeps_input_out_until_separate_local_approval() {
+        let now = Instant::now();
+        let (mut queue, sink) = view_only(now, Duration::from_secs(10));
+        let prompt = queue.begin_local_decision_at(&SCOPE, now).unwrap();
+        assert_eq!(queue.state(), State::ViewOnly);
+        assert_eq!(
+            queue.begin_local_decision_at(&SCOPE, now).err(),
+            Some(ApprovalError::NotAllowed.into())
+        );
+        assert_eq!(
+            queue.decide_at(true, now),
+            Err(ApprovalError::NotAllowed.into())
+        );
+        assert_eq!(
+            queue.enqueue_at(&SCOPE, DOWN, now),
+            Err(ApprovalError::NotAllowed.into())
+        );
+        assert_eq!(
+            queue.dispatch_at(&SCOPE, Control::Continue, now),
+            Err(ApprovalError::NotAllowed.into())
+        );
+        assert!(queue.pending.is_empty());
+        assert!(sink.borrow().applied.is_empty());
+
+        queue
+            .complete_local_decision_at(prompt, &SCOPE, true, Control::Continue, now)
+            .unwrap();
+        assert_eq!(queue.state(), State::Allowed);
+        queue.enqueue_at(&SCOPE, DOWN, now).unwrap();
+        assert_eq!(
+            queue.dispatch_at(&SCOPE, Control::Continue, now),
+            Ok(Dispatch::Applied)
+        );
+        assert_eq!(sink.borrow().applied, [DOWN]);
+    }
+
+    #[test]
+    fn declining_the_pending_prompt_never_grants_input() {
+        let now = Instant::now();
+        let (mut queue, sink) = view_only(now, Duration::from_secs(10));
+        let prompt = queue.begin_local_decision_at(&SCOPE, now).unwrap();
+        queue
+            .complete_local_decision_at(prompt, &SCOPE, false, Control::Continue, now)
+            .unwrap();
+        assert_eq!(queue.state(), State::Ended(End::Declined));
+        assert_eq!(
+            queue.enqueue_at(&SCOPE, DOWN, now),
+            Err(ApprovalError::NotAllowed.into())
+        );
+        assert_eq!(
+            queue.dispatch_at(&SCOPE, Control::Continue, now),
+            Ok(Dispatch::Closed)
+        );
+        assert!(sink.borrow().applied.is_empty());
+        assert_eq!(sink.borrow().release_calls, 0);
+    }
+
+    #[test]
+    fn foreign_prompt_does_not_consume_owners_decision_and_stale_scope_disconnects() {
+        let now = Instant::now();
+        let (mut queue, sink) = view_only(now, Duration::from_secs(10));
+        let (mut other, _) = view_only(now, Duration::from_secs(10));
+        let replaced = InputScope {
+            generation: [4; 32],
+            ..SCOPE
+        };
+
+        assert_eq!(
+            queue.begin_local_decision_at(&replaced, now).err(),
+            Some(ApprovalError::WrongScope.into())
+        );
+        let prompt = queue.begin_local_decision_at(&SCOPE, now).unwrap();
+        let foreign = other.begin_local_decision_at(&SCOPE, now).unwrap();
+        assert_eq!(
+            queue.complete_local_decision_at(foreign, &SCOPE, true, Control::Continue, now),
+            Err(ApprovalError::WrongScope.into())
+        );
+        assert_eq!(
+            queue.begin_local_decision_at(&SCOPE, now).err(),
+            Some(ApprovalError::NotAllowed.into()),
+            "foreign marker must leave the reserved prompt intact"
+        );
+        assert_eq!(
+            queue.complete_local_decision_at(prompt, &replaced, true, Control::Continue, now),
+            Err(ApprovalError::WrongScope.into())
+        );
+        assert_eq!(queue.state(), State::Ended(End::Disconnected));
+        assert!(queue.pending.is_empty());
+        assert!(sink.borrow().applied.is_empty());
+        assert_eq!(sink.borrow().release_calls, 0);
+    }
+
+    #[test]
+    fn current_stop_loss_or_exact_deadline_beats_delayed_yes() {
+        let now = Instant::now();
+        let ttl = Duration::from_secs(10);
+        let expires = now + ttl;
+        for (control, completed_at, reason) in [
+            (Control::Revoke, expires, End::Revoked),
+            (Control::TransportLost, expires, End::Disconnected),
+            (Control::Continue, expires, End::Expired),
+        ] {
+            let (mut queue, sink) = view_only(now, ttl);
+            let prompt = queue.begin_local_decision_at(&SCOPE, now).unwrap();
+            assert_eq!(
+                queue.complete_local_decision_at(prompt, &SCOPE, true, control, completed_at),
+                Err(ApprovalError::NotAllowed.into())
+            );
+            assert_eq!(queue.state(), State::Ended(reason));
+            assert_eq!(
+                queue.dispatch_at(&SCOPE, Control::Continue, completed_at),
+                Ok(Dispatch::Closed)
+            );
+            assert!(queue.pending.is_empty());
+            assert!(sink.borrow().applied.is_empty());
+            assert_eq!(sink.borrow().release_calls, 0);
+        }
     }
 
     #[test]

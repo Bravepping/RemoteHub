@@ -472,8 +472,11 @@ fn authenticated_public_video_sdp_with_data_channel_is_rejected_and_cannot_autho
 
 #[cfg(all(feature = "v2-public-video-wss", feature = "v2-input-approval"))]
 #[test]
-fn verified_public_video_never_grants_input_and_local_consent_is_single_use() {
-    use crate::input_approval::{Approval, End, Error, InputScope, SessionSink, SinkError, State};
+fn verified_public_video_requires_local_consent_before_queueing_and_drops_backlog_on_stop() {
+    use crate::{
+        input_approval::{Binding, End, Error, InputScope, SessionSink, SinkError, State},
+        input_queue::{Control, Dispatch, InputQueue},
+    };
     use std::{cell::Cell, time::Instant};
 
     // Fake input, never any wire connection, desktop capture, or OS event.
@@ -551,40 +554,67 @@ fn verified_public_video_never_grants_input_and_local_consent_is_single_use() {
         generation: [2; 32],
         ..input_scope
     };
-    let now = Instant::now();
-    let until = now + Duration::from_secs(5);
+    let until = Instant::now() + Duration::from_secs(30);
 
     for end in [End::Declined, End::Revoked, End::Disconnected, End::Expired] {
         let keys = MockKeys::default();
         keys.local_held.set(true);
-        let mut gate = Approval::view_only(input_scope, until, &keys);
-        assert_eq!(gate.apply(&input_scope, &(), now), Err(Error::NotAllowed));
+        let mut queue = InputQueue::view_only(input_scope, until, &keys);
+        assert_eq!(
+            queue.enqueue(&input_scope, ()),
+            Err(Error::NotAllowed.into())
+        );
+        let pending = queue.begin_local_decision(&input_scope).unwrap();
+        assert_eq!(
+            queue.enqueue(&input_scope, ()),
+            Err(Error::NotAllowed.into())
+        );
         assert_eq!(keys.applied.get(), 0);
 
-        if end == End::Declined {
-            gate.decide_locally(false, now).unwrap();
-        } else {
-            gate.decide_locally(true, now).unwrap();
-            assert_eq!(gate.decide_locally(true, now), Err(Error::NotAllowed));
+        queue
+            .complete_local_decision(
+                pending,
+                &input_scope,
+                end != End::Declined,
+                Control::Continue,
+            )
+            .unwrap();
+        if end != End::Declined {
             for wrong in [other_viewer, next_generation] {
-                assert_eq!(gate.apply(&wrong, &(), now), Err(Error::WrongScope));
+                assert_eq!(queue.enqueue(&wrong, ()), Err(Error::WrongScope.into()));
             }
-            gate.apply(&input_scope, &(), now).unwrap();
+            queue.enqueue(&input_scope, ()).unwrap();
+            assert_eq!(
+                queue.dispatch_next(&input_scope, Control::Continue),
+                Ok(Dispatch::Applied)
+            );
             assert!(keys.session_held.get());
-            // Revoke models the native emergency-stop signal, not a hotkey test.
-            match end {
-                End::Revoked => gate.revoke().unwrap(),
-                End::Disconnected => gate.disconnect().unwrap(),
-                End::Expired => gate.advance(until).unwrap(),
+
+            // Simulate one pending event at terminal transition. The fake
+            // sink must never observe it; only the already held key is released.
+            queue.enqueue(&input_scope, ()).unwrap();
+            let (control, now) = match end {
+                End::Revoked => (Control::Revoke, Instant::now()),
+                End::Disconnected => (Control::TransportLost, Instant::now()),
+                End::Expired => (Control::Continue, until),
                 _ => unreachable!(),
-            }
+            };
+            assert_eq!(
+                queue.dispatch_bound_at(&Binding::Device(input_scope), control, now),
+                Ok(Dispatch::Closed)
+            );
         }
 
-        let after = if end == End::Expired { until } else { now };
-        assert_eq!(gate.state(), State::Ended(end));
-        assert_eq!(gate.apply(&input_scope, &(), after), Err(Error::NotAllowed));
-        assert_eq!(gate.decide_locally(true, after), Err(Error::NotAllowed));
-        drop(gate);
+        assert_eq!(queue.state(), State::Ended(end));
+        assert_eq!(
+            queue.enqueue(&input_scope, ()),
+            Err(Error::NotAllowed.into())
+        );
+        assert_eq!(
+            queue.dispatch_next(&input_scope, Control::Continue),
+            Ok(Dispatch::Closed)
+        );
+        drop(queue);
         assert!(!keys.session_held.get());
         assert!(keys.local_held.get());
         let expected = u8::from(end != End::Declined);
@@ -593,13 +623,18 @@ fn verified_public_video_never_grants_input_and_local_consent_is_single_use() {
             (expected, expected)
         );
 
-        let mut next = Approval::view_only(next_generation, after + Duration::from_secs(5), &keys);
+        let mut next = InputQueue::view_only(next_generation, until, &keys);
         assert_eq!(
-            next.apply(&next_generation, &(), after),
-            Err(Error::NotAllowed)
+            next.enqueue(&next_generation, ()),
+            Err(Error::NotAllowed.into())
         );
-        next.decide_locally(true, after).unwrap();
-        assert_eq!(next.apply(&input_scope, &(), after), Err(Error::WrongScope));
+        let prompt = next.begin_local_decision(&next_generation).unwrap();
+        next.complete_local_decision(prompt, &next_generation, true, Control::Continue)
+            .unwrap();
+        assert_eq!(
+            next.enqueue(&input_scope, ()),
+            Err(Error::WrongScope.into())
+        );
         assert_eq!(keys.applied.get(), expected);
     }
 }
