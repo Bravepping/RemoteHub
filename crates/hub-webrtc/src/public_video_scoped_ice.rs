@@ -277,7 +277,7 @@ impl<'a> PublicVideoScopedIce<'a> {
     }
 
     #[cfg(test)]
-    fn new_loopback_fixture(
+    pub(crate) fn new_loopback_fixture(
         proof: PublicVideoProof<'a>,
         room: uuid::Uuid,
         local: SocketAddrV4,
@@ -586,7 +586,7 @@ impl<'a> PublicVideoScopedIce<'a> {
         self.start = None;
     }
 
-    fn check_current(&self, now: u64) -> Result<(), &'static str> {
+    pub(crate) fn check_current(&self, now: u64) -> Result<(), &'static str> {
         if !self.runtime.active() || !(self.issued_at..self.expires_at).contains(&now) {
             return Err(CLOSED);
         }

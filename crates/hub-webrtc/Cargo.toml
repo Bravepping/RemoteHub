@@ -66,3 +66,8 @@ windows-sys = { version = "=0.61.2", optional = true, features = ["Win32_Foundat
 
 [dev-dependencies]
 hub-identity = { path = "../hub-identity", features = ["ephemeral-test"] }
+futures-util = { version = "=0.3.34", features = ["sink"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["ring"] }
+rustls = { version = "=0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
+tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
+tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["handshake"] }

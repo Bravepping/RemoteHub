@@ -1,13 +1,13 @@
 //! Loopback TLS fixture for the public-video proof protocol. It does not
 //! connect to the public address carried in the proof, confer consent, or
-//! open an ICE or media connection. RTP helpers only operate on an existing
-//! caller-owned peer; product consent and socket scoping remain separate.
+//! by itself open ICE or media. The scoped actor ties ICE to the same device
+//! proof; its current binding is confined to the local integration fixture.
 
 use crate::{
     authenticated_relay::{AuthenticatedLoopbackRelay, AuthenticatedRelayEvent, ClientError},
-    direct_policy::{self, Candidate, Kind, PathSummary, VerifiedCandidates},
+    direct_policy::{self, Candidate, Kind, PathSummary, SelectedRoute, VerifiedCandidates},
     lan_wire::Key,
-    public_video::{PublicVideoProof, PublicVideoScope},
+    public_video::{PublicVideoProof, PublicVideoScope, PublicVideoScopedIce},
 };
 use hub_identity::{
     pairing::VerifiedPeer,
@@ -27,7 +27,10 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::time::{timeout_at, Instant};
+use tokio::{
+    sync::watch,
+    time::{timeout, timeout_at, Instant},
+};
 use uuid::Uuid;
 use webrtc::{
     media_stream::{
@@ -96,6 +99,15 @@ pub enum PublicVideoWssEvent {
     },
     /// A server lifecycle event, not a signed application message.
     PeerLeft,
+}
+
+struct ScopedWire {
+    relay: AuthenticatedLoopbackRelay,
+    role: Role,
+    peer_challenge: SessionChallenge,
+    proof_end: Instant,
+    scope_end: Instant,
+    expires_at: u64,
 }
 
 pub struct PublicVideoWss<'a> {
@@ -507,7 +519,37 @@ impl<'a> PendingPublicVideoWss<'a> {
 
     /// Run both roles concurrently. A fresh proof clock starts after Paired.
     /// No SDP methods are available while the challenges are exchanged.
-    pub async fn establish(mut self) -> Result<PublicVideoWss<'a>, &'static str> {
+    pub async fn establish(self) -> Result<PublicVideoWss<'a>, &'static str> {
+        let (wire, proof) = self.establish_proof().await?;
+        Ok(PublicVideoWss {
+            relay: Some(wire.relay),
+            proof,
+            role: wire.role,
+            peer_challenge: Some(wire.peer_challenge),
+            local_candidates: None,
+            remote_candidates: None,
+            deadline: wire.proof_end,
+            scope_expires_at: wire.expires_at,
+            scope_deadline: wire.scope_end,
+        })
+    }
+
+    // Loopback signaling must not open real public UDP traffic. Only the
+    // cfg(test) fixture can bind its restricted local ICE driver here.
+    #[cfg(test)]
+    async fn establish_scoped_fixture(
+        self,
+        make_ice: impl FnOnce(
+            PublicVideoProof<'a>,
+            u64,
+        ) -> Result<PublicVideoScopedIce<'a>, &'static str>,
+    ) -> Result<ScopedPublicVideoWss<'a>, &'static str> {
+        let (wire, proof) = self.establish_proof().await?;
+        let ice = make_ice(proof, wire.check()?)?;
+        Ok(ScopedPublicVideoWss { wire, ice })
+    }
+
+    async fn establish_proof(mut self) -> Result<(ScopedWire, PublicVideoProof<'a>), &'static str> {
         if self.context.role == Role::Host {
             self.register_host().await?;
         }
@@ -566,22 +608,238 @@ impl<'a> PendingPublicVideoWss<'a> {
         if wall_seconds()? >= ctx.scope.expires_at || Instant::now() >= scope_deadline {
             return Err(TIMEOUT);
         }
-        Ok(PublicVideoWss {
-            relay: Some(self.relay),
+        Ok((
+            ScopedWire {
+                relay: self.relay,
+                role: ctx.role,
+                peer_challenge,
+                proof_end: deadline,
+                scope_end: scope_deadline,
+                expires_at: ctx.scope.expires_at,
+            },
             proof,
-            role: ctx.role,
-            peer_challenge: Some(peer_challenge),
-            local_candidates: None,
-            remote_candidates: None,
-            deadline,
-            scope_expires_at: ctx.scope.expires_at,
-            scope_deadline,
-        })
+        ))
     }
 
     pub async fn leave(self) -> Result<(), &'static str> {
         self.relay.leave().await.map_err(relay_error)
     }
+}
+
+const SCOPED_POLL: Duration = Duration::from_millis(50);
+const SCOPED_LEAVE: Duration = Duration::from_millis(500);
+const SCOPED_PAIR_WAIT: Duration = Duration::from_secs(8);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScopedWssState {
+    Negotiating,
+    /// Both signed descriptions applied. This is not proof of a usable path
+    /// or of media, and must not be surfaced as video success.
+    Established,
+    /// Host RTP transport selected an exact signed pair. No video was sent.
+    HostPathVerified(SelectedRoute),
+    Closed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ScopedWssEnd {
+    Stopped,
+    PeerLeft,
+}
+
+/// One owner for the authenticated wire and the exact ICE driver. No raw
+/// PeerConnection, unsigned SDP injection, media, or input is exposed.
+pub struct ScopedPublicVideoWss<'a> {
+    wire: ScopedWire,
+    ice: PublicVideoScopedIce<'a>,
+}
+
+impl ScopedWire {
+    fn check(&self) -> Result<u64, &'static str> {
+        let now = wall_seconds()?;
+        if now >= self.expires_at || Instant::now() >= self.scope_end {
+            return Err(TIMEOUT);
+        }
+        Ok(now)
+    }
+
+    fn check_proof(&self) -> Result<u64, &'static str> {
+        let now = self.check()?;
+        if Instant::now() >= self.proof_end {
+            return Err(TIMEOUT);
+        }
+        Ok(now)
+    }
+
+    async fn send(&mut self, payload: String, signature: [u8; 64]) -> Result<(), &'static str> {
+        self.check_proof()?;
+        let data = serde_json::to_string(&SignedSdp {
+            payload,
+            signature: signature.to_vec(),
+        })
+        .map_err(|_| PROTOCOL)?;
+        timeout_at(
+            self.proof_end,
+            self.relay.send_signal(sdp_kind(self.role), data),
+        )
+        .await
+        .map_err(|_| TIMEOUT)?
+        .map_err(relay_error)?;
+        self.check_proof()?;
+        Ok(())
+    }
+
+    async fn receive(&mut self) -> Result<Option<(String, [u8; 64])>, &'static str> {
+        self.check_proof()?;
+        let left = self.proof_end.saturating_duration_since(Instant::now());
+        match self.relay.next_event(left).await {
+            Ok(AuthenticatedRelayEvent::PeerLeft) => Ok(None),
+            Ok(AuthenticatedRelayEvent::Signal { kind, data })
+                if kind == sdp_kind(self.role.peer()) =>
+            {
+                self.check_proof()?;
+                let desc: SignedSdp = serde_json::from_str(&data).map_err(|_| PROTOCOL)?;
+                let signature = desc.signature.try_into().map_err(|_| PROTOCOL)?;
+                Ok(Some((desc.payload, signature)))
+            }
+            Ok(_) => Err(PROTOCOL),
+            Err(error) => Err(relay_error(error)),
+        }
+    }
+
+    // Keep reading short polls while ICE gathers. Never drop a pending WSS
+    // read to start a send: cancellation consumes the authenticated stream.
+    // A peer cannot legitimately send another signature in this phase.
+    async fn while_no_signal<T>(
+        &mut self,
+        work: impl std::future::Future<Output = Result<T, &'static str>>,
+    ) -> Result<Option<T>, &'static str> {
+        let mut work = std::pin::pin!(work);
+        loop {
+            self.check_proof()?;
+            let poll = SCOPED_POLL.min(self.proof_end.saturating_duration_since(Instant::now()));
+            let mut read = std::pin::pin!(self.relay.next_event(poll));
+            let (event, ready) = tokio::select! {
+                biased;
+                event = &mut read => (event, None),
+                value = &mut work => (read.await, Some(value)),
+            };
+            match event {
+                Ok(AuthenticatedRelayEvent::PeerLeft) => return Ok(None),
+                Ok(_) => return Err(PROTOCOL),
+                Err(ClientError::Timeout) => {
+                    if let Some(value) = ready {
+                        return value.map(Some);
+                    }
+                }
+                Err(error) => return Err(relay_error(error)),
+            }
+        }
+    }
+}
+
+impl ScopedPublicVideoWss<'_> {
+    /// Consume the single session. An explicit stop, control-handle loss,
+    /// peer departure, timeout or protocol failure revokes UDP before close.
+    pub async fn run(
+        mut self,
+        mut stop: watch::Receiver<bool>,
+        state: watch::Sender<ScopedWssState>,
+    ) -> Result<ScopedWssEnd, &'static str> {
+        state.send_replace(ScopedWssState::Negotiating);
+        let result = tokio::select! {
+            biased;
+            () = stop_requested(&mut stop) => Ok(ScopedWssEnd::Stopped),
+            result = self.active(&state) => result,
+        };
+        self.ice.stop();
+        // Leave is best effort (the socket may already be gone). Do not
+        // make it a prerequisite for closing the native driver.
+        let (closed, _) = tokio::join!(
+            self.ice.close(),
+            timeout(SCOPED_LEAVE, self.wire.relay.leave()),
+        );
+        state.send_replace(ScopedWssState::Closed);
+        result.and_then(|end| closed.map(|()| end))
+    }
+
+    async fn active(
+        &mut self,
+        state: &watch::Sender<ScopedWssState>,
+    ) -> Result<ScopedWssEnd, &'static str> {
+        let now = self.wire.check_proof()?;
+        timeout_at(self.wire.proof_end, self.ice.start(now))
+            .await
+            .map_err(|_| TIMEOUT)??;
+        if self.wire.role == Role::Viewer {
+            if !self.publish_local().await? || !self.apply_remote().await? {
+                return Ok(ScopedWssEnd::PeerLeft);
+            }
+        } else if !self.apply_remote().await? || !self.publish_local().await? {
+            return Ok(ScopedWssEnd::PeerLeft);
+        }
+        self.ice.check_current(self.wire.check()?)?;
+        state.send_replace(ScopedWssState::Established);
+        let pair_end = Instant::now() + SCOPED_PAIR_WAIT;
+        let mut path = None;
+        loop {
+            let now = self.wire.check()?;
+            self.ice.check_current(now)?;
+            if self.wire.role == Role::Host {
+                match self.ice.selected_path(now).await {
+                    Ok(selected) => {
+                        if path != Some(selected.route) {
+                            path = Some(selected.route);
+                            state.send_replace(ScopedWssState::HostPathVerified(selected.route));
+                        }
+                    }
+                    Err(PAIR_UNAVAILABLE) if path.is_none() && Instant::now() < pair_end => {}
+                    Err(error) => return Err(error),
+                }
+            }
+            let poll = SCOPED_POLL.min(
+                self.wire
+                    .scope_end
+                    .saturating_duration_since(Instant::now()),
+            );
+            match self.wire.relay.next_event(poll).await {
+                Ok(AuthenticatedRelayEvent::PeerLeft) => return Ok(ScopedWssEnd::PeerLeft),
+                Ok(_) => return Err(PROTOCOL),
+                Err(ClientError::Timeout) => {}
+                Err(error) => return Err(relay_error(error)),
+            }
+        }
+    }
+
+    async fn publish_local(&mut self) -> Result<bool, &'static str> {
+        let now = self.wire.check_proof()?;
+        let challenge = self.wire.peer_challenge;
+        let Some((sdp, signature)) = self
+            .wire
+            .while_no_signal(self.ice.local_signal(challenge, now))
+            .await?
+        else {
+            return Ok(false);
+        };
+        self.wire.send(sdp, signature).await?;
+        Ok(true)
+    }
+
+    async fn apply_remote(&mut self) -> Result<bool, &'static str> {
+        let Some((payload, signature)) = self.wire.receive().await? else {
+            return Ok(false);
+        };
+        let now = self.wire.check_proof()?;
+        Ok(self
+            .wire
+            .while_no_signal(self.ice.apply_peer_signal(&payload, &signature, now))
+            .await?
+            .is_some())
+    }
+}
+
+async fn stop_requested(stop: &mut watch::Receiver<bool>) {
+    let _ = stop.wait_for(|stop| *stop).await;
 }
 
 #[derive(Serialize, Deserialize)]
@@ -656,3 +914,7 @@ fn sdp_kind(role: Role) -> SignalKind {
         Role::Viewer => SignalKind::Offer,
     }
 }
+
+#[cfg(test)]
+#[path = "public_video_scoped_wss_tests.rs"]
+mod scoped_tests;
