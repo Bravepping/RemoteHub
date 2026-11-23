@@ -11,6 +11,7 @@ const localCard = {
 };
 const peerCard = `RH2-${'14'.repeat(32)}`;
 const peerFingerprint = 'f9'.repeat(32);
+const prefillKey = 'remotehub.v2.peer-form-prefill.v1';
 const runtime = {
   app_version: 'fixture',
   os: 'windows',
@@ -23,7 +24,10 @@ const originalClipboard = Object.getOwnPropertyDescriptor(
   'clipboard',
 );
 
-beforeEach(() => vi.resetAllMocks());
+beforeEach(() => {
+  vi.resetAllMocks();
+  window.localStorage.removeItem(prefillKey);
+});
 afterEach(() => {
   if (originalClipboard)
     Object.defineProperty(navigator, 'clipboard', originalClipboard);
@@ -93,6 +97,82 @@ it('requires separately entered full fingerprint, fresh confirmation, and exact 
   expect(view.get('[role="status"]').text()).toContain('尚未连接或授权远控');
   await fpInput.setValue('');
   expect(view.find('[role="status"]').exists()).toBe(false);
+  view.unmount();
+});
+
+it('prefills only after explicit save and never restores consent or verification', async () => {
+  vi.mocked(invoke).mockResolvedValue({ fingerprint: peerFingerprint });
+  const first = mount(V2PeerPairing);
+  const save = () =>
+    first.findAll('button').find((b) => b.text() === '下次预填此设备');
+  await first.get('#v2-peer-card').setValue(peerCard);
+  await first.get('#v2-peer-fingerprint').setValue(peerFingerprint);
+  expect(save()).toBeUndefined();
+  await first.get('input[type="checkbox"]').setValue(true);
+  await first.get('form').trigger('submit');
+  await flushPromises();
+  expect(window.localStorage.getItem(prefillKey)).toBeNull();
+  await save()!.trigger('click');
+  expect(JSON.parse(window.localStorage.getItem(prefillKey)!)).toEqual({
+    card: peerCard,
+    fingerprint: peerFingerprint,
+  });
+  first.unmount();
+  vi.mocked(invoke).mockClear();
+
+  const again = mount(V2PeerPairing);
+  expect((again.get('#v2-peer-card').element as HTMLInputElement).value).toBe(
+    peerCard,
+  );
+  expect(
+    (again.get('#v2-peer-fingerprint').element as HTMLInputElement).value,
+  ).toBe(peerFingerprint);
+  expect(
+    (again.get('input[type="checkbox"]').element as HTMLInputElement).checked,
+  ).toBe(false);
+  expect(again.find('[role="status"]').exists()).toBe(false);
+  await again.get('form').trigger('submit');
+  expect(invoke).not.toHaveBeenCalled();
+  await again.get('input[type="checkbox"]').setValue(true);
+  await again.get('form').trigger('submit');
+  await flushPromises();
+  expect(invoke).toHaveBeenCalledExactlyOnceWith('verify_v2_peer', {
+    card: peerCard,
+    fingerprint: peerFingerprint,
+    consent: true,
+  });
+  await again
+    .findAll('button')
+    .find((b) => b.text() === '清除预填信息')!
+    .trigger('click');
+  expect(window.localStorage.getItem(prefillKey)).toBeNull();
+  expect(again.get('[role="status"]').text()).toContain(peerFingerprint);
+  again.unmount();
+
+  const clean = mount(V2PeerPairing);
+  expect((clean.get('#v2-peer-card').element as HTMLInputElement).value).toBe(
+    '',
+  );
+  clean.unmount();
+});
+
+it('ignores a cached record with unexpected fields and requires manual entry', () => {
+  window.localStorage.setItem(
+    prefillKey,
+    JSON.stringify({
+      card: peerCard,
+      fingerprint: peerFingerprint,
+      verified: true,
+    }),
+  );
+  const view = mount(V2PeerPairing);
+  expect((view.get('#v2-peer-card').element as HTMLInputElement).value).toBe(
+    '',
+  );
+  expect(
+    view.get('button[type="submit"]').attributes('disabled'),
+  ).toBeDefined();
+  expect(invoke).not.toHaveBeenCalled();
   view.unmount();
 });
 

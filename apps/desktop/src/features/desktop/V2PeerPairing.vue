@@ -5,8 +5,11 @@ import PanelCard from './PanelCard.vue';
 
 const cardPattern = /^RH2-[0-9a-f]{64}$/;
 const fingerprintPattern = /^[0-9a-f]{64}$/;
-const cardField = ref('');
-const fingerprintField = ref('');
+const prefillKey = 'remotehub.v2.peer-form-prefill.v1';
+type PublicPeerForm = { card: string; fingerprint: string };
+const saved = ref(readPrefill());
+const cardField = ref(saved.value?.card ?? '');
+const fingerprintField = ref(saved.value?.fingerprint ?? '');
 const consent = ref(false);
 const busy = ref<'read' | 'verify'>();
 const copying = ref(false);
@@ -14,6 +17,7 @@ const local = ref<{ card: string; fingerprint: string }>();
 const verified = ref<string>();
 const error = ref('');
 const copyFeedback = ref('');
+const prefillFeedback = ref('');
 let alive = true;
 let revision = 0;
 
@@ -29,6 +33,11 @@ const valid = computed(
   () =>
     cardPattern.test(card.value) && fingerprintPattern.test(fingerprint.value),
 );
+const alreadySaved = computed(
+  () =>
+    saved.value?.card === card.value &&
+    saved.value?.fingerprint === fingerprint.value,
+);
 
 watch(
   [cardField, fingerprintField],
@@ -37,6 +46,7 @@ watch(
     consent.value = false;
     verified.value = undefined;
     error.value = '';
+    prefillFeedback.value = '';
   },
   { flush: 'sync' },
 );
@@ -78,6 +88,50 @@ function strictStrings(value: unknown, keys: string[]): Record<string, string> {
   )
     throw new Error();
   return record as Record<string, string>;
+}
+
+function readPrefill(): PublicPeerForm | undefined {
+  try {
+    const raw = window.localStorage.getItem(prefillKey);
+    if (!raw || raw.length > 256) return;
+    const { card, fingerprint } = strictStrings(JSON.parse(raw), [
+      'card',
+      'fingerprint',
+    ]);
+    if (cardPattern.test(card) && fingerprintPattern.test(fingerprint))
+      return { card, fingerprint };
+  } catch {
+    // Unavailable or edited storage must never prevent manual verification.
+  }
+}
+
+function savePrefill() {
+  if (
+    !alive ||
+    busy.value ||
+    !valid.value ||
+    verified.value !== fingerprint.value
+  )
+    return;
+  const entry = { card: card.value, fingerprint: fingerprint.value };
+  try {
+    window.localStorage.setItem(prefillKey, JSON.stringify(entry));
+    saved.value = entry;
+    prefillFeedback.value = '已保存这两项公开信息，下次自动填入。';
+  } catch {
+    prefillFeedback.value = '无法保存预填信息，仍可手动验证。';
+  }
+}
+
+function clearPrefill() {
+  if (!alive || busy.value) return;
+  try {
+    window.localStorage.removeItem(prefillKey);
+    saved.value = undefined;
+    prefillFeedback.value = '已清除预填信息，下次不会自动填入。';
+  } catch {
+    prefillFeedback.value = '暂时无法清除预填信息。';
+  }
 }
 
 async function readLocal() {
@@ -203,7 +257,11 @@ async function verify() {
         spellcheck="false"
       />
       <p class="card-description">
-        不要从配对卡推算指纹。请向对方另行核对完整 64 位十六进制指纹。
+        {{
+          alreadySaved
+            ? '已填入本机保存的公开信息。这不代表已核验；若对方设备或指纹变了，请清除预填并重新核对。'
+            : '不要从配对卡推算指纹。请向对方另行核对完整 64 位十六进制指纹。'
+        }}
       </p>
       <p v-if="cardField && !cardPattern.test(card)">
         配对卡格式为 RH2- 加 64 位小写十六进制字符。
@@ -228,6 +286,25 @@ async function verify() {
       已在本机核对该对端指纹：<code>{{ verified }}</code
       >。尚未连接或授权远控。
     </p>
+    <button
+      v-if="verified && !alreadySaved"
+      class="outline-button"
+      type="button"
+      :disabled="!!busy"
+      @click="savePrefill"
+    >
+      下次预填此设备
+    </button>
+    <button
+      v-if="saved"
+      class="outline-button"
+      type="button"
+      :disabled="!!busy"
+      @click="clearPrefill"
+    >
+      清除预填信息
+    </button>
+    <p v-if="prefillFeedback" class="card-description">{{ prefillFeedback }}</p>
     <p v-if="error" role="alert">{{ error }}</p>
   </PanelCard>
 </template>
