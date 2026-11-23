@@ -31,6 +31,14 @@ pub(super) async fn start_tls(
     san: &'static str,
     app: Arc<App>,
 ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
+    start_tls_router(ca, san, router(app)).await
+}
+
+pub(super) async fn start_tls_router(
+    ca: &CertifiedIssuer<'static, KeyPair>,
+    san: &'static str,
+    router: Router,
+) -> (SocketAddr, tokio::task::JoinHandle<()>) {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let mut params = CertificateParams::new(vec![san.to_string()]).unwrap();
     params.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
@@ -48,7 +56,7 @@ pub(super) async fn start_tls(
     let task = tokio::spawn(async move {
         axum_server::from_tcp_rustls(listener, tls)
             .unwrap()
-            .serve(router(app).into_make_service_with_connect_info::<SocketAddr>())
+            .serve(router.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .unwrap();
     });

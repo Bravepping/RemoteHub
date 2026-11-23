@@ -1,4 +1,7 @@
-//! V2 signaling relay: loopback by default; explicit WSS-only two-peer private LAN.
+//! V2 signaling relay: loopback by default; explicit private/public WSS profiles.
+
+#[path = "v2_signaling/public_video_profile.rs"]
+mod public_video_profile;
 use axum::{
     extract::{
         rejection::ExtensionRejection,
@@ -527,6 +530,9 @@ fn read_access() -> Result<Access, &'static str> {
 }
 
 async fn run() -> Result<(), &'static str> {
+    if std::env::var("REMOTEHUB_V2_MODE").as_deref() == Ok("public-video") {
+        return public_video_profile::run_from_env().await;
+    }
     let access = read_access()?;
     let addr: SocketAddr = match std::env::var("REMOTEHUB_V2_BIND") {
         Ok(value) => value,
@@ -577,6 +583,10 @@ mod tls_smoke;
 #[cfg(test)]
 #[path = "v2_signaling/public_video_smoke.rs"]
 mod public_video_smoke;
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "v2_signaling/public_video_route_smoke.rs"]
+mod public_video_route_smoke;
 
 #[cfg(feature = "v2-synthetic-video")]
 #[path = "v2_signaling/verified_synthetic.rs"]
