@@ -26,6 +26,8 @@ pub mod lan_wire;
 pub mod pinned_runtime;
 #[cfg(all(feature = "v2-private-wss-lan", any(windows, test)))]
 mod private_wss_contract;
+#[cfg(feature = "v2-public-video")]
+pub mod public_video;
 #[cfg(all(windows, feature = "p006-relay"))]
 pub mod receiver_evidence;
 #[cfg(all(windows, feature = "p006-relay"))]
