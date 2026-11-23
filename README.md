@@ -153,7 +153,7 @@ cargo build --locked -p remotehub-desktop --bin remotehub-stream-display-check -
 
 ## 本分支已执行验证
 
-- 单机签名串流诊断：原生本机联测通过，验证两帧证据及取消清理；WebView2 页面通过 TypeScript、Vite 构建和模拟收帧、解码回调及停止检查。Windows 实机首轮报告 `STREAM_DISPLAY_PIXELS_MISMATCH`，失败路径清屏，未通过。修订诊断优先使用软件解码及便于读取的 2D 画布，仍要求四个区域满足原灰阶判定，失败时显示四区 RGBA 读数用于复查；Windows 实机复测（2026-11-23，用户报告，修订版 v2 `5d48eb4`）：测试正常，画面可见。未单独记录 `STREAM_DISPLAY_PASS`、停止清屏或重跑结果；不作为公网或真实桌面验收。
+- 单机签名串流诊断：原生本机联测通过，验证两帧证据及取消清理；WebView2 页面通过 TypeScript、Vite 构建和模拟收帧、解码回调及停止检查。Windows 实机首轮报告 `STREAM_DISPLAY_PIXELS_MISMATCH`，失败路径清屏，未通过。修订诊断优先使用软件解码及便于读取的 2D 画布，仍要求四个区域满足原灰阶判定，失败时显示四区 RGBA 读数用于复查；Windows 实机复测（2026-11-23，用户报告，修订版 v2 `5d48eb4`）：画面可见且显示 `STREAM_DISPLAY_PASS`；点击「停止并清屏」后，画面立即消失，未重新出现。通过 Windows 单机签名合成串流的显示与手动停止清屏验收。未单独验证重跑、公网或真实桌面。
 - 已校验串流的显示交接：原生接收器只从已验签且通过实际 ICE 核验的会话读取 RTP，按严格序号和时限组装有界 H.264 Annex B 帧；缺片、错误格式或停止均不得继续产出画面。Web 前端新增独立的 WebCodecs 显示组件，停止立即清空画布并关闭解码器，拒绝旧一轮的迟到回调。当前分别测原生回环解码与页面状态，尚未通过 Windows WebView2 实机验证两者之间的连接，也未启用公网入口。
 - WebView2 离线合成显示入口：独立二进制无远控或采集命令，前端仅播放内置的 320×180、24 fps、2 秒 H.264 文件，使用视频帧呈现回调及四个区域的像素核对。FFmpeg 已离线解码 48 帧验证图案；Windows 实机（2026-11-23，用户实测，修正版 v2 `95c59cc`）：四色图案可见，状态为 `DISPLAY_PASS`。该结果确认这台机器的 WebView2 能解码并呈现随包附带的本地合成 H.264 图案，不覆盖 WebRTC 串流、真实桌面或公网产品会话。
 - 合成画面解码：可选本机联测使用 FFmpeg/libx264 生成 32×32 四象限图案，经过已验签 WSS、真实回环 WebRTC 及 RTP 候选核验。接收端核对序号、RTP 时间戳及帧结束标记，重组后由 FFmpeg 解码，比较整帧亮度和色度样本（允许最大偏差 4；本次连续三轮的实测最大偏差均为 0）。复跑：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked public_video_wss_decodes_synthetic_pattern_pixels -- --ignored --nocapture`。FFmpeg 仅是这个测试的工具，不是产品依赖；未测 Windows WebView2 显示、真实桌面采集或公网。
