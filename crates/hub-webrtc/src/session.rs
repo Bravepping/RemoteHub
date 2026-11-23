@@ -162,6 +162,8 @@ pub struct Session {
     #[cfg(feature = "p006-session-probe")]
     synthetic: bool,
     #[cfg(feature = "p006-session-probe")]
+    redact_direct_sdp: bool,
+    #[cfg(feature = "p006-session-probe")]
     synthetic_relay_pair: Mutex<
         Option<(
             crate::relay_diagnostic::Endpoints,
@@ -286,6 +288,8 @@ impl Session {
             direct_remote: Mutex::new(None),
             #[cfg(feature = "p006-session-probe")]
             synthetic: false,
+            #[cfg(feature = "p006-session-probe")]
+            redact_direct_sdp: false,
             #[cfg(feature = "p006-session-probe")]
             synthetic_relay_pair: Mutex::new(None),
             #[cfg(feature = "p006-relay")]
@@ -625,6 +629,12 @@ impl Session {
                     ),
                 stopped: self.relay_stopped.clone(),
             }));
+        }
+        #[cfg(feature = "p006-direct")]
+        if let Some(d) = &self.direct {
+            builder = builder.with_host_candidates(
+                d.grant.host_candidates_allowed(d.publish_private_local),
+            );
         }
         #[cfg(feature = "p006-direct")]
         if let Some(boundary) = &self.direct_boundary {

@@ -19,7 +19,7 @@ pub struct PrivateConfig {
     pub(crate) synthetic_source: bool,
     #[cfg(feature = "p006-session-probe")]
     #[serde(skip)]
-    synthetic_relay_allowed: bool,
+    pub(crate) operator_role_scoped: bool,
     #[cfg(feature = "p006-session-probe")]
     #[serde(skip)]
     pub(crate) diagnostic_drop_direct: bool,
@@ -77,7 +77,7 @@ impl PrivateConfig {
     pub(crate) fn authorize_start(&self, role: Role, mode: PathMode) -> Result<(), String> {
         self.invitation(role)?;
         #[cfg(feature = "p006-session-probe")]
-        if self.synthetic_source && mode == PathMode::RelayOnly && !self.synthetic_relay_allowed {
+        if self.synthetic_source && mode == PathMode::RelayOnly && !self.operator_role_scoped {
             return Err("P006_SYNTHETIC_REQUIRES_DIRECT_MODE".into());
         }
         let _ = mode;
@@ -110,7 +110,7 @@ impl PrivateConfig {
             let mut c = c;
             c.synthetic_local = local_synthetic;
             c.synthetic_source = local_synthetic || only_role.is_some();
-            c.synthetic_relay_allowed = only_role.is_some();
+            c.operator_role_scoped = only_role.is_some();
             c
         };
         let valid = |token: &str| token.len() == 64 && token.bytes().all(|b| b.is_ascii_hexdigit());

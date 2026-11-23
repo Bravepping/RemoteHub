@@ -3,6 +3,7 @@ import { ControlClient } from '../p004/control';
 import { receiveStats } from '../p004/webrtc';
 import type { LanStatus, LanReceiver } from '../p004/lan';
 import { relayOptions, type IceConfig } from './ice';
+import { r06Candidate, r06Metadata } from './r06Sdp';
 import {
   evidenceCode,
   evidenceBounded,
@@ -47,33 +48,12 @@ function relayFields(
     ? fields.slice(0, 8)
     : undefined;
 }
-function canonicalRelay(fields: string[]): string {
-  const normalized = [...fields];
-  normalized[2] = 'udp';
-  return `a=candidate:${normalized.join(' ')} raddr 0.0.0.0 rport 0`;
-}
 function diagnosticMetadata(line: string): string {
-  if (
-    line.trim() !== line ||
-    line.includes('\r') ||
-    line.startsWith('a=remote-candidates:')
-  )
-    throw new Error('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
-  if (line.startsWith('o=')) {
-    const fields = line.slice(2).split(/\s+/);
-    if (
-      fields.length !== 6 ||
-      !/^\d+$/.test(fields[1]) ||
-      !/^\d+$/.test(fields[2]) ||
-      fields[3] !== 'IN' ||
-      !['IP4', 'IP6'].includes(fields[4])
-    )
-      throw new Error('BROWSER_RELAY_SDP_INVALID');
-    return `o=- ${fields[1]} ${fields[2]} IN IP4 0.0.0.0`;
-  }
-  if (line.startsWith('c=')) return 'c=IN IP4 0.0.0.0';
-  if (line.startsWith('a=rtcp:')) return 'a=rtcp:9 IN IP4 0.0.0.0';
-  return line;
+  return r06Metadata(
+    line,
+    'BROWSER_RELAY_SDP_INVALID',
+    'BROWSER_RELAY_CANDIDATE_UNVERIFIED',
+  );
 }
 export function relaySdp(sdp: string, ip: string, diagnostic = false): string {
   if (diagnostic && (sdp.length > 65536 || sdp.includes('\0')))
@@ -90,7 +70,7 @@ export function relaySdp(sdp: string, ip: string, diagnostic = false): string {
       count++;
       // Host-related addresses and browser extensions are not needed by the
       // peer: expose only the approved allocation plus the redacted sentinel.
-      return [diagnostic ? canonicalRelay(fields) : line];
+      return [diagnostic ? r06Candidate(fields) : line];
     })
     .join('\r\n');
   if (!count) throw new Error('BROWSER_RELAY_CANDIDATE_MISSING');
@@ -105,7 +85,7 @@ export function relayCandidateSet(sdp: string, ip: string): Candidate[] {
       throw new Error('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
     if (!line.startsWith('a=candidate:')) continue;
     const fields = relayFields(line, ip);
-    if (!fields || candidates.length >= 16 || line !== canonicalRelay(fields))
+    if (!fields || candidates.length >= 16 || line !== r06Candidate(fields))
       throw new Error('BROWSER_RELAY_CANDIDATE_UNVERIFIED');
     candidates.push({
       address: fields[4],
@@ -315,7 +295,11 @@ export class RelayProbe {
     });
     if (this.stopped) return;
     const directOffer = this.directScope
-      ? directSdp(pc.localDescription!.sdp, this.directScope)
+      ? directSdp(
+          pc.localDescription!.sdp,
+          this.directScope,
+          this.diagnosticMode === 'direct_preferred',
+        )
       : null;
     const offer =
       directOffer?.sdp ??
@@ -336,6 +320,7 @@ export class RelayProbe {
         this.remoteCandidates = directAnswerCandidates(
           answer,
           this.directScope,
+          this.diagnosticMode === 'direct_preferred',
         );
       else if (this.diagnosticMode === 'relay_only')
         this.remoteCandidates = relayCandidateSet(answer, this.server);

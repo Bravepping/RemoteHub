@@ -450,6 +450,7 @@ impl RelayClient {
                     },
                     c.ready.session_id.clone(),
                     self.config.diagnostic_drop_direct,
+                    self.config.operator_role_scoped,
                 );
             }
             return Session::new_direct(

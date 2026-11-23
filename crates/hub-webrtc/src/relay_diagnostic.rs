@@ -1,4 +1,4 @@
-//! The synthetic relay diagnostic publishes no ICE related/base address.
+//! The role-scoped synthetic diagnostic projects SDP without ICE related/base addresses.
 //! Keep the raw local SDP inside the ICE agent and require a canonical wire form.
 use std::{
     collections::BTreeSet,
@@ -8,14 +8,39 @@ use std::{
 pub(crate) type Endpoints = BTreeSet<SocketAddrV4>;
 
 pub(crate) fn redact(sdp: &str) -> Result<String, String> {
+    redact_wire(sdp, false)
+}
+
+pub(crate) fn redact_direct(sdp: &str) -> Result<String, String> {
+    redact_wire(sdp, true)
+}
+
+pub(crate) fn require_direct_wire(sdp: &str) -> Result<(), String> {
+    if !sdp.lines().eq(redact_direct(sdp)?.lines()) {
+        return Err("R06_DIRECT_SDP_NOT_REDACTED".into());
+    }
+    Ok(())
+}
+
+fn redact_wire(sdp: &str, direct: bool) -> Result<String, String> {
+    let invalid_sdp = if direct {
+        "R06_DIRECT_SDP_INVALID"
+    } else {
+        "R06_RELAY_SDP_INVALID"
+    };
+    let invalid_candidate = if direct {
+        invalid_sdp
+    } else {
+        "R06_RELAY_CANDIDATE_INVALID"
+    };
     let mut output = String::new();
     let mut count = 0;
     if sdp.len() > 65536 || sdp.contains('\0') {
-        return Err("R06_RELAY_SDP_INVALID".into());
+        return Err(invalid_sdp.into());
     }
     for line in sdp.lines() {
-        if line.trim() != line || line.starts_with("a=remote-candidates:") {
-            return Err("R06_RELAY_SDP_INVALID".into());
+        if line.trim() != line || line.contains('\r') || line.starts_with("a=remote-candidates:") {
+            return Err(invalid_sdp.into());
         }
         let public = if let Some(c) = line.strip_prefix("a=candidate:") {
             let p: Vec<_> = c.split_ascii_whitespace().collect();
@@ -30,22 +55,27 @@ pub(crate) fn redact(sdp: &str) -> Result<String, String> {
                 || p[4].parse::<Ipv4Addr>().is_err()
                 || !p[5].parse::<u16>().is_ok_and(|v| v > 0)
                 || p[6] != "typ"
-                || p[7] != "relay"
+                || !(p[7] == "relay" || (direct && matches!(p[7], "host" | "srflx")))
             {
-                return Err("R06_RELAY_CANDIDATE_INVALID".into());
+                return Err(invalid_candidate.into());
             }
             count += 1;
             if count > 32 {
-                return Err("R06_RELAY_CANDIDATE_INVALID".into());
+                return Err(invalid_candidate.into());
             }
+            let related = if p[7] == "host" {
+                ""
+            } else {
+                " raddr 0.0.0.0 rport 0"
+            };
             format!(
-                "a=candidate:{} 1 udp {} {} {} typ relay raddr 0.0.0.0 rport 0",
-                p[0], p[3], p[4], p[5]
+                "a=candidate:{} 1 udp {} {} {} typ {}{}",
+                p[0], p[3], p[4], p[5], p[7], related
             )
         } else if let Some(origin) = line.strip_prefix("o=") {
             let p: Vec<_> = origin.split_ascii_whitespace().collect();
             if p.len() != 6 || p[1].parse::<u64>().is_err() || p[2].parse::<u64>().is_err() {
-                return Err("R06_RELAY_SDP_INVALID".into());
+                return Err(invalid_sdp.into());
             }
             format!("o=- {} {} IN IP4 0.0.0.0", p[1], p[2])
         } else if line.starts_with("c=") {
@@ -59,7 +89,7 @@ pub(crate) fn redact(sdp: &str) -> Result<String, String> {
         output.push_str("\r\n");
     }
     if count == 0 {
-        return Err("R06_RELAY_CANDIDATE_INVALID".into());
+        return Err(invalid_candidate.into());
     }
     Ok(output)
 }
@@ -124,6 +154,27 @@ pub(crate) fn metrics_without_path(data: &serde_json::Value) -> Result<serde_jso
 mod tests {
     use super::*;
     use webrtc::peer_connection::{RTCIceCandidate, RTCIceCandidateType, RTCIceProtocol};
+
+    #[test]
+    fn direct_wire_removes_related_address_without_changing_candidate_tuples() {
+        let raw = concat!(
+            "o=- 42 2 IN IP4 192.168.1.5\r\n",
+            "a=candidate:h 1 UDP 123 192.0.2.1 50000 typ host generation 1\r\n",
+            "a=candidate:s 1 udp 123 192.0.2.1 50001 typ srflx raddr 192.168.1.5 rport 50123\r\n",
+            "a=candidate:r 1 udp 123 192.0.2.1 49160 typ relay raddr 192.168.1.5 rport 50123\r\n",
+        );
+        assert!(require_direct_wire(raw).is_err());
+        let wire = redact_direct(raw).unwrap();
+        assert!(require_direct_wire(&wire).is_ok());
+        assert!(!wire.contains("192.168.1.5"));
+        assert!(!wire.contains("50123"));
+        assert_eq!(wire.matches("raddr 0.0.0.0 rport 0").count(), 2);
+        assert!(wire.contains("50000 typ host\r\n"));
+        for c in wire.lines().filter_map(|l| l.strip_prefix("a=candidate:")) {
+            assert!(rtc::ice::candidate::unmarshal_candidate(c).is_ok());
+        }
+        assert!(redact(&wire).is_err());
+    }
 
     #[test]
     fn relay_metrics_keep_the_legacy_schema_and_reject_unproven_playback() {

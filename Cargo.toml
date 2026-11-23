@@ -1,5 +1,6 @@
 [workspace]
 members = ["apps/desktop/src-tauri", "crates/hub-capture-win", "crates/hub-encode-win", "crates/hub-webrtc", "crates/hub-turn-credentials", "crates/hub-probe-wire", "crates/hub-rendezvous-probe", "crates/hub-identity", "crates/hub-signal-v2"]
+exclude = ["vendor/webrtc-0.21.1"]
 resolver = "2"
 
 [workspace.package]
@@ -23,3 +24,6 @@ strip = true
 inherits = "release"
 lto = false
 codegen-units = 16
+
+[patch.crates-io]
+webrtc = { path = "vendor/webrtc-0.21.1" }

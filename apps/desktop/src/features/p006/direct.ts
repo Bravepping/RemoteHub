@@ -4,6 +4,7 @@ import {
   type IceConfig,
   type RelayApproval,
 } from './ice';
+import { r06Candidate, r06Metadata } from './r06Sdp';
 export type ConnectionPath = 'direct' | 'relay' | 'unknown';
 export interface DirectScope {
   serverIp: string;
@@ -95,35 +96,78 @@ function scope(s: DirectScope) {
 export function directSdp(
   sdp: string,
   s: DirectScope,
+  diagnostic = false,
 ): { sdp: string; candidates: Candidate[] } {
   scope(s);
   if (sdp.length > 65536 || sdp.includes('\0'))
     throw new Error('DIRECT_SDP_SIZE');
   const candidates: Candidate[] = [];
-  const result = sdp
-    .split(/\r?\n/)
-    .filter((l) => {
-      if (!l.startsWith('a=candidate:')) return true;
+  const lines = sdp.split(/\r?\n/);
+  if (diagnostic) r06DirectLayout(lines);
+  const result = lines
+    .flatMap((l) => {
+      if (!l.startsWith('a=candidate:'))
+        return [
+          diagnostic
+            ? r06Metadata(l, 'R06_DIRECT_SDP_INVALID')
+            : l.startsWith('c=')
+              ? 'c=IN IP4 0.0.0.0'
+              : l,
+        ];
       const c = parsed(l);
-      if (!c || !permitted(c, s, true)) return false;
+      if (!c || !permitted(c, s, true)) return [];
       candidates.push(c);
       if (candidates.length > 16) throw new Error('DIRECT_CANDIDATE_BUDGET');
-      return true;
+      return [diagnostic ? canonicalDirect(l) : l];
     })
-    .map((l) => (l.startsWith('c=') ? 'c=IN IP4 0.0.0.0' : l))
     .join('\r\n');
   if (!candidates.length) throw new Error('DIRECT_LOCAL_CANDIDATE_MISSING');
   return { sdp: result, candidates };
 }
-export function directAnswerCandidates(
-  sdp: string,
-  s: DirectScope,
-): Candidate[] {
-  scope(s);
-  if (sdp.length > 65536 || sdp.includes('\0'))
-    throw new Error('DIRECT_SDP_SIZE');
-  const lines = sdp.split(/\r?\n/),
-    media = lines.filter((l) => l.startsWith('m='));
+function canonicalDirect(line: string): string {
+  const fields = line.slice(12).trim().split(/\s+/);
+  if (
+    fields[0].length > 64 ||
+    !/^\d{1,10}$/.test(fields[3]) ||
+    Number(fields[3]) > 4294967295
+  )
+    throw new Error('R06_DIRECT_SDP_INVALID');
+  return r06Candidate(fields);
+}
+
+function r06DirectLayout(lines: string[]) {
+  const invalid = () => {
+    throw new Error('R06_DIRECT_SDP_INVALID');
+  };
+  let origins = 0;
+  let section = -1;
+  const perSection = new Set<string>();
+  for (const line of lines) {
+    // Reject indented lookalikes before filtering candidate types or fields.
+    r06Metadata(line, 'R06_DIRECT_SDP_INVALID');
+    if (line.startsWith('m=')) section++;
+    if (line.startsWith('o=') && (++origins > 1 || section !== -1)) invalid();
+    for (const prefix of ['c=', 'a=rtcp:', 'a=mid:']) {
+      if (!line.startsWith(prefix)) continue;
+      const key = `${section}:${prefix}`;
+      if (perSection.has(key) || (section < 0 && prefix !== 'c=')) invalid();
+      perSection.add(key);
+    }
+    if (line.startsWith('a=candidate:') && section < 0) invalid();
+  }
+  // The synthetic media and simulated control channel are already bundled.
+  // Each section must declare its own MID; the common parser checks order/types.
+  if (
+    section !== 1 ||
+    !perSection.has('0:a=mid:') ||
+    !perSection.has('1:a=mid:')
+  )
+    invalid();
+  directLayout(lines, 'R06_DIRECT_SDP_INVALID');
+}
+
+function directLayout(lines: string[], code: string) {
+  const media = lines.filter((l) => l.startsWith('m='));
   const mids = lines
     .filter((l) => l.startsWith('a=mid:'))
     .map((l) => l.slice(6));
@@ -142,16 +186,34 @@ export function directAnswerCandidates(
     !hashes.length ||
     hashes.some((h) => !/^sha-256 ([0-9A-Fa-f]{2}:){31}[0-9A-Fa-f]{2}$/.test(h))
   )
-    throw new Error('DIRECT_ANSWER_MEDIA_OR_IDENTITY');
+    throw new Error(code);
+}
+
+export function directAnswerCandidates(
+  sdp: string,
+  s: DirectScope,
+  diagnostic = false,
+): Candidate[] {
+  scope(s);
+  if (sdp.length > 65536 || sdp.includes('\0'))
+    throw new Error('DIRECT_SDP_SIZE');
+  const lines = sdp.split(/\r?\n/);
+  if (diagnostic) r06DirectLayout(lines);
+  else directLayout(lines, 'DIRECT_ANSWER_MEDIA_OR_IDENTITY');
   const candidates: Candidate[] = [];
-  for (const l of lines)
+  for (const l of lines) {
+    if (diagnostic && l !== r06Metadata(l, 'R06_DIRECT_SDP_INVALID'))
+      throw new Error('R06_DIRECT_SDP_NOT_REDACTED');
     if (l.startsWith('a=candidate:')) {
       const c = parsed(l);
       if (!c || !permitted(c, s, false))
         throw new Error('DIRECT_REMOTE_CANDIDATE_REJECTED');
+      if (diagnostic && l !== canonicalDirect(l))
+        throw new Error('R06_DIRECT_SDP_NOT_REDACTED');
       candidates.push(c);
       if (candidates.length > 16) throw new Error('DIRECT_CANDIDATE_BUDGET');
     }
+  }
   if (!candidates.length) throw new Error('DIRECT_REMOTE_CANDIDATE_MISSING');
   return candidates;
 }

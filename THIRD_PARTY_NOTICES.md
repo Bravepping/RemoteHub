@@ -31,6 +31,8 @@
 | jsdom / Prettier | https://github.com/jsdom/jsdom / https://github.com/prettier/prettier | MIT |
 | RFC5769 STUN测试向量（仅开发测试） | https://www.rfc-editor.org/rfc/rfc5769.html | IETF Trust Simplified BSD，附scripts/RFC5769_TEST_VECTOR_LICENSE.txt |
 
+`vendor/webrtc-0.21.1` 来自锁定的 crates.io 发布包，保留 MIT / Apache-2.0 许可证；RemoteHub 只增加单连接的 Host 候选收集开关，默认保持上游行为。
+
 精确版本由 Cargo.lock 和 pnpm-lock.yaml 固定。锁文件含全部传递依赖，分发前仍需按最终二进制和全部传递依赖生成完整 SBOM/许可附件；本文不是完整分发法律审查。P0-03 已通过系统 Media Foundation 编码 H.264，不随产品附带外部编码器；FFmpeg 只作为本机开发解码/封装验证工具，不作为客户端运行依赖打包。
 
 开发工具不打包分发：Rust 官方工具链，Microsoft MSVC / Windows SDK；其自身适用对应许可。项目内临时准备工具脚本参考 https://gist.github.com/mmozeiko/7f3162ec2988e81e56d5c4e22cde9977 ，从 Microsoft 清单下载并逐文件 SHA-256 校验，仅用于本机 `.tools` 目录，排除于交付。此脚本不是产品运行依赖。

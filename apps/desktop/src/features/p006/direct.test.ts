@@ -109,6 +109,89 @@ it('strictly checks authenticated answer candidate scope identity and budgets', 
     directAnswerCandidates(answer(), { ...scope, expiresAt: 1 }),
   ).toThrow();
 });
+it('publishes only R06 approved routes and scrubs related addresses and network metadata', () => {
+  const raw = answer()
+    .replace('v=0', 'v=0\r\no=private-fixture 11 22 IN IP4 192.168.1.8')
+    .replace(
+      candidate('192.168.1.3'),
+      [
+        'c=IN IP4 192.168.1.8',
+        'a=rtcp:5000 IN IP4 192.168.1.8',
+        `${candidate(scope.localIp)} network-id 5`,
+        candidate('192.168.1.8'),
+        `${candidate('1.1.1.1', 'srflx').replace('udp', 'UDP')} raddr 192.168.1.8 rport 5000 private-extension fixture`,
+        `${candidate('8.8.8.8', 'relay', 49160)} raddr 10.0.0.9 rport 56789 generation 0`,
+      ].join('\r\n'),
+    );
+  const diagnostic = directSdp(raw, scope, true);
+  expect(diagnostic.candidates).toEqual([
+    { address: scope.localIp, port: 50000, type: 'host' },
+    { address: '1.1.1.1', port: 50000, type: 'srflx' },
+    { address: '8.8.8.8', port: 49160, type: 'relay' },
+  ]);
+  expect(diagnostic.sdp).toContain('o=- 11 22 IN IP4 0.0.0.0');
+  expect(diagnostic.sdp).toContain('c=IN IP4 0.0.0.0');
+  expect(diagnostic.sdp).toContain('a=rtcp:9 IN IP4 0.0.0.0');
+  expect(diagnostic.sdp).toContain(`${candidate(scope.localIp)}\r\n`);
+  for (const c of [
+    candidate('1.1.1.1', 'srflx'),
+    candidate('8.8.8.8', 'relay', 49160),
+  ])
+    expect(diagnostic.sdp).toContain(`${c} raddr 0.0.0.0 rport 0`);
+  expect(diagnostic.sdp).not.toMatch(
+    /192\.168\.1\.8|10\.0\.0\.9|network-id|generation|fixture/,
+  );
+  expect(
+    directSdp(raw, { ...scope, publishPrivateLocal: false }, true).sdp,
+  ).not.toContain(` ${scope.localIp} `);
+  expect(directSdp(raw, scope).sdp).toContain('raddr 192.168.1.8');
+});
+
+it('requires canonical R06 answers before ICE and rejects ambiguous offer layout', () => {
+  const canonical = answer()
+    .replace('v=0', 'v=0\r\no=- 1 2 IN IP4 0.0.0.0')
+    .replace(
+      candidate('192.168.1.3'),
+      [
+        'c=IN IP4 0.0.0.0',
+        'a=rtcp:9 IN IP4 0.0.0.0',
+        candidate('192.168.1.3'),
+        `${candidate('1.1.1.1', 'srflx')} raddr 0.0.0.0 rport 0`,
+      ].join('\r\n'),
+    );
+  expect(directAnswerCandidates(canonical, scope, true)).toEqual([
+    { address: '192.168.1.3', port: 50000, type: 'host' },
+    { address: '1.1.1.1', port: 50000, type: 'srflx' },
+  ]);
+  for (const noncanonical of [
+    canonical.replace('o=-', 'o=private'),
+    canonical.replace('c=IN IP4 0.0.0.0', 'c=IN IP4 10.0.0.9'),
+    canonical.replace('a=rtcp:9', 'a=rtcp:10000'),
+    canonical.replace(
+      candidate('192.168.1.3'),
+      `${candidate('192.168.1.3')} network-id 1`,
+    ),
+    canonical.replace('raddr 0.0.0.0 rport 0', 'raddr 10.0.0.9 rport 5000'),
+    canonical.replace('raddr 0.0.0.0 rport 0', ''),
+  ])
+    expect(() => directAnswerCandidates(noncanonical, scope, true)).toThrow();
+  for (const ambiguous of [
+    canonical.replace('a=candidate:', ' a=candidate:'),
+    canonical + '\r\na=remote-candidates:1 10.0.0.9 50000',
+    canonical
+      .replace('a=mid:0', 'a=mid:0\r\na=mid:1')
+      .replace(/\r\na=mid:1(?=\r\na=sctp)/, ''),
+    canonical.replace('v=0', `v=0\r\n${candidate(scope.localIp)}`),
+    canonical.replace('v=0', 'v=0\r\no=- 3 4 IN IP4 0.0.0.0'),
+  ]) {
+    expect(() => directSdp(ambiguous, scope, true)).toThrow(
+      'R06_DIRECT_SDP_INVALID',
+    );
+    expect(() => directAnswerCandidates(ambiguous, scope, true)).toThrow(
+      'R06_DIRECT_SDP_INVALID',
+    );
+  }
+});
 it('requires both actual selected endpoints and labels a mixed pair relay', () => {
   const local = directSdp(candidate(scope.localIp), scope).candidates;
   const remote = directAnswerCandidates(answer(), scope);

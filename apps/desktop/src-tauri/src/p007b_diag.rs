@@ -4,7 +4,7 @@ use hub_webrtc::relay_client::PrivateConfig;
 use std::{path::Path, sync::Arc};
 
 pub const SECONDS: u32 = 8;
-pub const BUILD_TAG: &str = "p007b-r06-v4";
+pub const BUILD_TAG: &str = "p007b-r06-v5";
 pub const PRIVATE_FILE: &str = "r06-private.json";
 
 pub fn validate(mode: PathMode, seconds: u32) -> Result<(), String> {

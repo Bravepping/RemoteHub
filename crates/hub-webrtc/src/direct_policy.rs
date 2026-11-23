@@ -93,6 +93,9 @@ impl DirectGrant {
     pub fn local(&self) -> Ipv4Addr {
         self.local
     }
+    pub(crate) fn host_candidates_allowed(&self, private_local_approved: bool) -> bool {
+        !self.local.is_private() || private_local_approved
+    }
     pub(crate) fn scope(&self) -> uuid::Uuid {
         self.scope
     }
@@ -275,8 +278,7 @@ pub fn publish_sdp(sdp: &str, grant: &DirectGrant, private_local_allowed: bool) 
             }
             !(f.get(7) == Some(&"host")
                 && f.get(4).is_some_and(|p| *p == grant.local.to_string())
-                && grant.local.is_private()
-                && !private_local_allowed)
+                && !grant.host_candidates_allowed(private_local_allowed))
         })
         .map(|l| {
             if l.starts_with("c=") {
@@ -419,6 +421,15 @@ mod tests {
             ["AB"; 32].join(":")
         )
     }
+    #[test]
+    fn private_native_host_gathering_needs_the_same_publication_approval() {
+        let g = grant();
+        assert!(!g.host_candidates_allowed(false));
+        assert!(g.host_candidates_allowed(true));
+        assert!(!publish_sdp(&sdp(), &g, false).contains("typ host"));
+        assert!(publish_sdp(&sdp(), &g, true).contains("typ host"));
+    }
+
     #[test]
     fn rejects_scope_size_fingerprint_media_expiry_and_dangerous_addresses() {
         let g = grant();

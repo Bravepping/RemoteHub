@@ -56,9 +56,11 @@ impl Session {
         settings: DirectSettings,
         id: String,
         drop_direct: bool,
+        redact_direct_sdp: bool,
     ) -> Result<Arc<Self>, String> {
         let mut s = Self::new_direct_synthetic(seconds, settings, id)?;
         let inner = Arc::get_mut(&mut s).ok_or("SESSION_ALREADY_SHARED")?;
+        inner.redact_direct_sdp = redact_direct_sdp;
         let grant = &inner.direct.as_ref().ok_or("DIRECT_POLICY_MISSING")?.grant;
         inner.direct_boundary = Some(crate::direct_runtime::Boundary::diagnostic(
             grant,
@@ -81,6 +83,13 @@ impl Session {
         if self.started.load(Ordering::Acquire) || self.shared.stop.is_stopped() {
             self.cancel();
             return Err("DIRECT_STOPPED_OR_REPLAYED".into());
+        }
+        #[cfg(feature = "p006-session-probe")]
+        if self.redact_direct_sdp {
+            if let Err(error) = crate::relay_diagnostic::require_direct_wire(sdp) {
+                self.cancel();
+                return Err(error);
+            }
         }
         let outcome = crate::signaling::validate_direct_video_description(
             sdp,
@@ -116,6 +125,12 @@ impl Session {
             return Ok(sdp);
         };
         let answer = crate::direct_policy::publish_sdp(&sdp, &d.grant, d.publish_private_local);
+        #[cfg(feature = "p006-session-probe")]
+        let answer = if self.redact_direct_sdp {
+            crate::relay_diagnostic::redact_direct(&answer)?
+        } else {
+            answer
+        };
         let (_, local) = crate::signaling::validate_direct_video_description(
             &answer,
             &d.grant,
