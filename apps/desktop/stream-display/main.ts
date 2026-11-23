@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { checkQuadrants } from './pixels';
 import {
   CanvasVideoAdapter,
   MAX_PENDING_VIDEO_FRAMES,
@@ -11,14 +12,14 @@ const DECODE_TIMEOUT_MS = 6_000;
 const MAX_AU_BYTES = 1024 * 1024;
 const MAX_BATCH_BYTES = 2 * MAX_AU_BYTES;
 const SIZE = 32;
-const centers = [
-  [8, 8],
-  [24, 8],
-  [8, 24],
-  [24, 24],
-] as const;
 
 const canvas = document.querySelector<HTMLCanvasElement>('#display')!;
+// This small diagnostics page reads every frame. Request a CPU-backed canvas
+// before the adapter acquires it, without changing product rendering settings.
+const readback = canvas.getContext('2d', {
+  alpha: false,
+  willReadFrequently: true,
+});
 const startButton = document.querySelector<HTMLButtonElement>('#start')!;
 const stopButton = document.querySelector<HTMLButtonElement>('#stop')!;
 const resetButton = document.querySelector<HTMLButtonElement>('#reset')!;
@@ -146,25 +147,6 @@ function readFrames(value: unknown): NativeVideoFrame[] | undefined {
   return frames;
 }
 
-function verifyPattern() {
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error();
-  const shades = centers.map(([x, y]) => {
-    const rgba = context.getImageData(x - 1, y - 1, 3, 3).data;
-    let sum = 0;
-    for (let i = 0; i < rgba.length; i += 4) {
-      const [r, g, b, a] = [rgba[i], rgba[i + 1], rgba[i + 2], rgba[i + 3]];
-      if (a !== 255 || Math.max(r, g, b) - Math.min(r, g, b) > 14) return NaN;
-      sum += (r + g + b) / 3;
-    }
-    return sum / 9;
-  });
-  return shades.every(
-    (shade, i) =>
-      Number.isFinite(shade) && (i === 0 || shade - shades[i - 1] >= 12),
-  );
-}
-
 function afterPaint(run: Run) {
   if (current !== run) return;
   if (canvas.width !== SIZE || canvas.height !== SIZE) {
@@ -176,11 +158,13 @@ function afterPaint(run: Run) {
     return;
   }
   try {
-    if (!verifyPattern()) {
+    if (!readback) throw new Error();
+    const sample = checkQuadrants(readback);
+    if (!sample.pass) {
       fail(
         run,
         'STREAM_DISPLAY_PIXELS_MISMATCH',
-        '实际呈现的四个灰度采样区不符合预期。',
+        `四个灰度区未通过。RGBA（左上、右上、左下、右下）：${sample.rgba}`,
       );
       return;
     }
@@ -260,7 +244,20 @@ async function start() {
           },
         });
         run.decoder = decoder;
-        return decoder;
+        // Prefer the software decoder for this two-frame diagnostic to
+        // avoid relying on hardware-surface import into the canvas.
+        return {
+          get decodeQueueSize() {
+            return decoder.decodeQueueSize;
+          },
+          configure: (config) =>
+            decoder.configure({
+              ...config,
+              hardwareAcceleration: 'prefer-software',
+            }),
+          decode: (chunk) => decoder.decode(chunk),
+          close: () => decoder.close(),
+        };
       },
       () =>
         fail(
