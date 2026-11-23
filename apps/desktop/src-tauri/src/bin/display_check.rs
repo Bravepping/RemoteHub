@@ -4,6 +4,19 @@
 fn main() {
     use tauri::{webview::NewWindowResponse, WebviewUrl, WebviewWindowBuilder};
 
+    // Tauri resolves config by the directory, not by an arbitrary file name.
+    // This standard-named config is deliberately outside the product config directory.
+    let context = tauri::generate_context!("display-check/tauri.conf.json");
+    assert_eq!(context.config().identifier, "local.remotehub.display-check");
+    assert!(context.config().app.windows.is_empty());
+    assert!(context.config().build.dev_url.is_none());
+    for asset in ["index.html", "display.js", "display.css", "pattern.mp4"] {
+        assert!(
+            context.assets().get(&asset.into()).is_some(),
+            "DISPLAY_PACKAGE_INVALID: missing {asset}"
+        );
+    }
+
     // No product commands, native plugins, app state, or remote destinations.
     tauri::Builder::default()
         .setup(|app| {
@@ -26,9 +39,7 @@ fn main() {
                 .build()?;
             Ok(())
         })
-        .run(tauri::generate_context!(
-            "tauri.synthetic-display.conf.json"
-        ))
+        .run(context)
         .expect("failed to open the synthetic display check");
 }
 

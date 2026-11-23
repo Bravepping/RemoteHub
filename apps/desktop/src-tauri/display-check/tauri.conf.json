@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "identifier": "local.remotehub.display-check",
   "build": {
-    "frontendDist": "../synthetic-display"
+    "frontendDist": "../../synthetic-display"
   },
   "app": {
     "windows": [],
@@ -22,6 +22,6 @@
   },
   "bundle": {
     "active": false,
-    "icon": ["icons/icon.ico"]
+    "icon": ["../icons/icon.ico"]
   }
 }

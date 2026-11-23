@@ -135,6 +135,8 @@ R06 诊断版要求两端分别手动选择同一个模式：「优先直连，�
 cargo build --locked -p remotehub-desktop --bin remotehub-display-check --profile probe --features synthetic-display-check,custom-protocol
 ```
 
+早期测试包误加载主程序的 Tauri 配置，会多开窗口且找不到播放按钮。请不要继续使用旧包。修正版把测试配置放入独立目录，并在启动前核对包内的配置标识和静态资源。
+
 运行后点「播放并测试」。看见左上红、右上绿、左下蓝、右下黄和移动白块，且显示 `DISPLAY_PASS`，才算这台机器的 WebView2 本地解码/呈现通过。点「停止」可结束；「重置」后可重试。若失败，记录状态码；无需提供屏幕截图或设备信息。
 
 ## 本分支已执行验证
