@@ -2,7 +2,9 @@
 
 use super::*;
 use crate::{
-    direct_policy::SelectedRoute, ice_policy::IceMode, public_video::PublicVideoScopedIce,
+    direct_policy::{Kind, SelectedRoute},
+    ice_policy::IceMode,
+    public_video::PublicVideoScopedIce,
 };
 use futures_util::{SinkExt, StreamExt};
 use hub_identity::pairing::PairingCandidate;
@@ -36,7 +38,7 @@ mod fixture_net;
 use fixture_net::{FixtureNat, FixtureSide};
 #[path = "public_video_turn_fixture_net.rs"]
 mod turn_fixture;
-use turn_fixture::{FixtureTurn, RELAY_LABEL, RELAY_PORTS};
+use turn_fixture::{FixtureDirectSide, FixtureTurn, RELAY_LABEL, RELAY_PORTS};
 
 const WAIT: Duration = Duration::from_secs(6);
 const TURN_TTL_SECS: u32 = 8;
@@ -215,17 +217,29 @@ fn owner<'a>(
     )
 }
 
-async fn exercise(abrupt: bool, relay_only: bool) {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TestPath {
+    DirectOnly,
+    RelayOnly,
+    PreferDirect { blocked: bool },
+}
+
+async fn exercise(abrupt: bool, path: TestPath) {
     let mut tls = RelayFixture::start().await;
-    let (nat, turn) = if relay_only {
-        (None, Some(FixtureTurn::start(TURN_TTL_SECS).await.unwrap()))
-    } else {
+    let relay_only = path == TestPath::RelayOnly;
+    let (nat, turn) = if path == TestPath::DirectOnly {
         (Some(FixtureNat::start().await.unwrap()), None)
-    };
-    let route = if relay_only {
-        SelectedRoute::TurnRelay
     } else {
-        SelectedRoute::ServerReflexiveDirect
+        (None, Some(FixtureTurn::start(TURN_TTL_SECS).await.unwrap()))
+    };
+    let blocked = matches!(path, TestPath::PreferDirect { blocked: true });
+    if let Some(turn) = &turn {
+        turn.block_direct(blocked);
+    }
+    let route = if relay_only || blocked {
+        (SelectedRoute::TurnRelay, Kind::Relay)
+    } else {
+        (SelectedRoute::ServerReflexiveDirect, Kind::Srflx)
     };
     let host = Identity::generate_ephemeral().unwrap();
     let viewer = Identity::generate_ephemeral().unwrap();
@@ -272,12 +286,29 @@ async fn exercise(abrupt: bool, relay_only: bool) {
         .unwrap();
     let make = |proof, now, side| match (&nat, &turn) {
         (Some(nat), None) => owner(proof, now, nat, room, side),
-        (None, Some(turn)) => PublicVideoScopedIce::new_turn_loopback_fixture(
+        (None, Some(turn)) if relay_only => PublicVideoScopedIce::new_turn_loopback_fixture(
             proof,
             turn.server(),
             turn.ice_server(),
             now,
         ),
+        (None, Some(turn)) => {
+            let side = match side {
+                FixtureSide::Host => FixtureDirectSide::Host,
+                FixtureSide::Viewer => FixtureDirectSide::Viewer,
+            };
+            PublicVideoScopedIce::new_loopback_fixture(
+                proof,
+                room,
+                SocketAddrV4::new(LOOPBACK, 0),
+                turn.server(),
+                RTCConfigurationBuilder::default()
+                    .with_ice_servers(vec![turn.combined_ice_server()])
+                    .build(),
+                turn.runtime(side),
+                now,
+            )
+        }
         _ => unreachable!("exact fixture mode"),
     };
     let (h, v) = tokio::try_join!(
@@ -292,15 +323,20 @@ async fn exercise(abrupt: bool, relay_only: bool) {
     let (host_state_tx, mut host_state) = watch::channel(ScopedWssState::Negotiating);
     let (viewer_state_tx, mut viewer_state) = watch::channel(ScopedWssState::Negotiating);
     let control = async {
-        host_state
+        let selected = *host_state
             .wait_for(|s| {
                 matches!(
                     s,
-                    ScopedWssState::HostPathVerified(actual) if *actual == route
+                    ScopedWssState::HostPathVerified(..) | ScopedWssState::Closed
                 )
             })
             .await
             .unwrap();
+        assert_eq!(
+            selected,
+            ScopedWssState::HostPathVerified(route.0, route.1, route.1),
+            "first admitted native ICE pair",
+        );
         viewer_state
             .wait_for(|s| matches!(s, ScopedWssState::Established))
             .await
@@ -309,8 +345,32 @@ async fn exercise(abrupt: bool, relay_only: bool) {
             let active = turn.stats();
             assert_eq!(active.allocations_created, 2);
             assert_eq!(active.active, 2);
-            assert!(active.permissions_created >= 2);
-            assert!(active.forwarded_packets > 0);
+            if relay_only || blocked {
+                assert!(active.permissions_created >= 2);
+                assert!(active.forwarded_packets > 0);
+            }
+            match path {
+                TestPath::PreferDirect { blocked: true } => {
+                    assert!(active.direct_dropped > 0);
+                    assert!(active.direct_checks_dropped > 0);
+                    assert_eq!(active.direct_forwarded, 0);
+                }
+                TestPath::PreferDirect { blocked: false } => {
+                    assert_eq!(active.direct_dropped, 0);
+                    assert!(active.direct_forwarded > 0);
+                }
+                _ => {}
+            }
+            if let TestPath::PreferDirect { .. } = path {
+                let host_direct = turn.direct_candidate(FixtureDirectSide::Host).unwrap();
+                let viewer_direct = turn.direct_candidate(FixtureDirectSide::Viewer).unwrap();
+                // The alternate genuinely existed in signed SDP even when
+                // connectivity checks were intentionally dropped.
+                assert!(host_runtime.allows_turn_peer(viewer_direct.into()));
+                assert!(viewer_runtime.allows_turn_peer(host_direct.into()));
+                assert!(!host_runtime.allows_turn_peer(host_direct.into()));
+                assert!(!viewer_runtime.allows_turn_peer(viewer_direct.into()));
+            }
             let allowed = |runtime: &dyn webrtc::runtime::Runtime| {
                 assert!(!runtime.allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, 49154).into()));
                 [RELAY_PORTS.0, RELAY_PORTS.1]
@@ -353,17 +413,32 @@ async fn exercise(abrupt: bool, relay_only: bool) {
     assert!(matches!(&*host_state.borrow(), ScopedWssState::Closed));
     assert!(matches!(&*viewer_state.borrow(), ScopedWssState::Closed));
     if let Some(turn) = &turn {
-        // A local close is not evidence of a server deallocation. Both
-        // allocations remain until lifetime expiry in this fixture.
-        let closed = turn.stats();
-        assert_eq!(closed.active, 2);
-        assert_eq!(closed.released, 0);
         for runtime in [&host_runtime, &viewer_runtime] {
             for relay_port in [RELAY_PORTS.0, RELAY_PORTS.1] {
                 assert!(
                     !runtime.allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, relay_port).into())
                 );
             }
+        }
+        if !relay_only {
+            // The DirectRuntime also denies every physical destination once
+            // stopped, including the shared STUN/TURN listener.
+            assert!(host_runtime
+                .resolve_host(&turn.server().to_string())
+                .await
+                .is_err());
+            assert!(viewer_runtime
+                .resolve_host(&turn.server().to_string())
+                .await
+                .is_err());
+            return;
+        }
+        // A local close is not evidence of a server deallocation. Both
+        // allocations remain until lifetime expiry in this fixture.
+        let closed = turn.stats();
+        assert_eq!(closed.active, 2);
+        assert_eq!(closed.released, 0);
+        for runtime in [&host_runtime, &viewer_runtime] {
             let local = std::net::UdpSocket::bind((LOOPBACK, 0)).unwrap();
             local.set_nonblocking(true).unwrap();
             let scoped = runtime.wrap_udp_socket(local).unwrap();
@@ -393,15 +468,25 @@ async fn exercise(abrupt: bool, relay_only: bool) {
 
 #[tokio::test]
 async fn scoped_loopback_wss_applies_signed_video_and_closes_both_roles() {
-    exercise(false, false).await;
+    exercise(false, TestPath::DirectOnly).await;
 }
 
 #[tokio::test]
 async fn scoped_loopback_wss_closes_both_roles_when_transport_drops() {
-    exercise(true, false).await;
+    exercise(true, TestPath::DirectOnly).await;
 }
 
 #[tokio::test]
 async fn scoped_loopback_turn_selects_relay_and_allocations_expire_after_stop() {
-    exercise(false, true).await;
+    exercise(false, TestPath::RelayOnly).await;
+}
+
+#[tokio::test]
+async fn scoped_combined_prefers_srflx_when_both_routes_are_available() {
+    exercise(false, TestPath::PreferDirect { blocked: false }).await;
+}
+
+#[tokio::test]
+async fn scoped_combined_falls_back_to_turn_when_direct_checks_are_blocked() {
+    exercise(false, TestPath::PreferDirect { blocked: true }).await;
 }

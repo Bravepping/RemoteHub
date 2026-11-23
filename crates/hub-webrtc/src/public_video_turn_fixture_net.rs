@@ -1,6 +1,7 @@
 //! Two-allocation TURN fixture for tests only. Real UDP is confined to one
 //! IPv4 loopback socket and the two authenticated loopback peers. Relayed
-//! addresses are labels embedded inside TURN messages, never OS destinations.
+//! addresses and optional server-reflexive NAT addresses are labels, never
+//! OS destinations. The simulated fault is per fixture, never system-wide.
 
 use rtc::{
     crypto::RTCCryptoProvider,
@@ -25,10 +26,16 @@ use rtc::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::{Arc, Mutex},
-    time::Duration,
+    future::Future,
+    io::{self, IoSliceMut},
+    net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, UdpSocket as StdUdpSocket},
+    pin::Pin,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    task::{Context, Poll},
+    time::{Duration, Instant as StdInstant},
 };
 use tokio::{
     net::UdpSocket,
@@ -36,7 +43,13 @@ use tokio::{
     time::{interval, Instant},
 };
 use uuid::Uuid;
-use webrtc::peer_connection::RTCIceServer;
+use webrtc::{
+    peer_connection::RTCIceServer,
+    runtime::{
+        AsyncInterval, AsyncTcpListener, AsyncTcpStream, AsyncUdpSocket,
+        JoinHandle as RuntimeJoinHandle, RecvMeta, Runtime, Transmit,
+    },
+};
 
 const LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const REALM: &str = "turn.fixture.invalid";
@@ -52,6 +65,42 @@ pub(super) struct TurnFixtureStats {
     pub(super) released: usize,
     pub(super) expired: usize,
     pub(super) active: usize,
+    pub(super) direct_forwarded: usize,
+    pub(super) direct_dropped: usize,
+    pub(super) direct_checks_dropped: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum FixtureDirectSide {
+    Host,
+    Viewer,
+}
+
+impl FixtureDirectSide {
+    pub(super) fn ip(self) -> Ipv4Addr {
+        match self {
+            Self::Host => Ipv4Addr::new(1, 1, 1, 1),
+            Self::Viewer => Ipv4Addr::new(8, 8, 4, 4),
+        }
+    }
+
+    fn index(self) -> usize {
+        match self {
+            Self::Host => 0,
+            Self::Viewer => 1,
+        }
+    }
+
+    fn peer(self) -> Self {
+        match self {
+            Self::Host => Self::Viewer,
+            Self::Viewer => Self::Host,
+        }
+    }
+
+    fn label(self, socket: SocketAddrV4) -> SocketAddr {
+        SocketAddrV4::new(self.ip(), socket.port()).into()
+    }
 }
 
 pub(super) struct FixtureTurn {
@@ -59,6 +108,7 @@ pub(super) struct FixtureTurn {
     username: String,
     credential: String,
     statistics: Arc<Mutex<TurnFixtureStats>>,
+    direct: Arc<DirectNetwork>,
     task: JoinHandle<()>,
 }
 
@@ -85,6 +135,12 @@ impl FixtureTurn {
         )
         .map_err(io::Error::other)?;
         let statistics = Arc::new(Mutex::new(TurnFixtureStats::default()));
+        let direct = Arc::new(DirectNetwork {
+            server: address,
+            sockets: Mutex::new([None, None]),
+            blocked: AtomicBool::new(false),
+            statistics: statistics.clone(),
+        });
         let actor = FixtureState {
             nonce: Uuid::new_v4().simple().to_string(),
             username: username.clone(),
@@ -92,6 +148,7 @@ impl FixtureTurn {
             crypto,
             lifetime: Duration::from_secs(lifetime_seconds.into()),
             allocations: HashMap::with_capacity(2),
+            direct: direct.clone(),
             statistics: statistics.clone(),
         };
         let task = tokio::spawn(actor.run(udp));
@@ -100,6 +157,7 @@ impl FixtureTurn {
             username,
             credential,
             statistics,
+            direct,
             task,
         })
     }
@@ -122,6 +180,31 @@ impl FixtureTurn {
             username: self.username().to_owned(),
             credential: self.credential().to_owned(),
         }
+    }
+
+    pub(super) fn combined_ice_server(&self) -> RTCIceServer {
+        let mut server = self.ice_server();
+        server.urls.push(format!("stun:{}", self.server()));
+        server
+    }
+
+    pub(super) fn direct_candidate(&self, side: FixtureDirectSide) -> Option<SocketAddrV4> {
+        let socket = self.direct.sockets.lock().ok()?[side.index()]?;
+        Some(SocketAddrV4::new(side.ip(), socket.port()))
+    }
+
+    pub(super) fn runtime(&self, side: FixtureDirectSide) -> Arc<dyn Runtime> {
+        Arc::new(DirectFixtureRuntime {
+            inner: webrtc::runtime::default_runtime().expect("fixture requires tokio runtime"),
+            network: self.direct.clone(),
+            side,
+        })
+    }
+
+    // Affect only exact NAT peer datagrams, never requests to the fixture
+    // listener or TURN relayed packets handled at that listener.
+    pub(super) fn block_direct(&self, block: bool) {
+        self.direct.blocked.store(block, Ordering::Release);
     }
 
     pub(super) fn stats(&self) -> TurnFixtureStats {
@@ -149,6 +232,7 @@ struct FixtureState {
     crypto: Arc<dyn RTCCryptoProvider>,
     lifetime: Duration,
     allocations: HashMap<SocketAddr, Allocation>,
+    direct: Arc<DirectNetwork>,
     statistics: Arc<Mutex<TurnFixtureStats>>,
 }
 
@@ -222,16 +306,17 @@ impl FixtureState {
             return None;
         }
         if message.typ.method == METHOD_BINDING {
-            // STUN remains simulated too; expose the loopback reflector's
-            // actual observation, which is not used in the relay-only test.
+            // Combined tests see the label of the exact registered socket.
+            // The TURN-only tests continue seeing their observed loopback address.
+            let mapped = self.direct.mapped_client(source).unwrap_or(source);
             return self.reply(
                 source,
                 &message,
                 CLASS_SUCCESS_RESPONSE,
                 false,
                 vec![Box::new(XorMappedAddress {
-                    ip: source.ip(),
-                    port: source.port(),
+                    ip: mapped.ip(),
+                    port: mapped.port(),
                 })],
             );
         }
@@ -307,6 +392,7 @@ impl FixtureState {
             stats.active = self.allocations.len();
         }
         let allocation = self.allocations.get(&source)?;
+        let mapped = self.direct.mapped_client(source).unwrap_or(source);
         self.reply(
             source,
             request,
@@ -318,8 +404,8 @@ impl FixtureState {
                     port: allocation.label.port(),
                 }),
                 Box::new(XorMappedAddress {
-                    ip: source.ip(),
-                    port: source.port(),
+                    ip: mapped.ip(),
+                    port: mapped.port(),
                 }),
                 Box::new(Lifetime(remaining(allocation, now))),
             ],
@@ -482,4 +568,224 @@ fn remaining(allocation: &Allocation, now: Instant) -> Duration {
             .as_secs()
             .max(1),
     )
+}
+
+#[derive(Debug)]
+struct DirectNetwork {
+    server: SocketAddrV4,
+    sockets: Mutex<[Option<SocketAddrV4>; 2]>,
+    blocked: AtomicBool,
+    statistics: Arc<Mutex<TurnFixtureStats>>,
+}
+
+impl DirectNetwork {
+    fn register(&self, side: FixtureDirectSide, socket: SocketAddrV4) -> io::Result<()> {
+        let mut sockets = self.sockets.lock().map_err(|_| direct_denied())?;
+        if *socket.ip() != LOOPBACK
+            || socket.port() == 0
+            || socket == self.server
+            || sockets[side.index()].is_some()
+            || sockets[side.peer().index()] == Some(socket)
+        {
+            return Err(direct_denied());
+        }
+        sockets[side.index()] = Some(socket);
+        Ok(())
+    }
+
+    fn unregister(&self, side: FixtureDirectSide, socket: SocketAddrV4) {
+        if let Ok(mut sockets) = self.sockets.lock() {
+            if sockets[side.index()] == Some(socket) {
+                sockets[side.index()] = None;
+            }
+        }
+    }
+
+    fn observed_peer(&self, side: FixtureDirectSide) -> Option<SocketAddrV4> {
+        self.sockets.lock().ok()?[side.peer().index()]
+    }
+
+    fn mapped_client(&self, source: SocketAddr) -> Option<SocketAddr> {
+        let sockets = self.sockets.lock().ok()?;
+        [FixtureDirectSide::Host, FixtureDirectSide::Viewer]
+            .into_iter()
+            .find_map(|side| {
+                let socket = sockets[side.index()]?;
+                (source == SocketAddr::V4(socket)).then_some(side.label(socket))
+            })
+    }
+
+    fn record_drop(&self, contents: &[u8]) {
+        let mut stats = self.statistics.lock().expect("fixture statistics");
+        stats.direct_dropped += 1;
+        if contents.len() >= 20
+            && contents[..2] == [0, 1]
+            && contents[4..8] == [0x21, 0x12, 0xa4, 0x42]
+        {
+            stats.direct_checks_dropped += 1;
+        }
+    }
+}
+
+fn direct_denied() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        "off-fixture direct transport",
+    )
+}
+
+#[derive(Debug)]
+struct DirectFixtureRuntime {
+    inner: Arc<dyn Runtime>,
+    network: Arc<DirectNetwork>,
+    side: FixtureDirectSide,
+}
+
+impl Runtime for DirectFixtureRuntime {
+    fn spawn(&self, task: Pin<Box<dyn Future<Output = ()> + Send>>) -> Box<dyn RuntimeJoinHandle> {
+        self.inner.spawn(task)
+    }
+
+    fn spawn_reactor(
+        &self,
+        n: usize,
+        task: Pin<Box<dyn Future<Output = ()> + Send>>,
+    ) -> Box<dyn RuntimeJoinHandle> {
+        self.inner.spawn_reactor(n, task)
+    }
+
+    fn wrap_udp_socket(&self, socket: StdUdpSocket) -> io::Result<Arc<dyn AsyncUdpSocket>> {
+        let SocketAddr::V4(local) = socket.local_addr()? else {
+            return Err(direct_denied());
+        };
+        if *local.ip() != LOOPBACK {
+            return Err(direct_denied());
+        }
+        let inner = self.inner.wrap_udp_socket(socket)?;
+        self.network.register(self.side, local)?;
+        Ok(Arc::new(DirectFixtureSocket {
+            inner,
+            local,
+            network: self.network.clone(),
+            side: self.side,
+        }))
+    }
+
+    fn wrap_tcp_listener(&self, _: TcpListener) -> io::Result<Arc<dyn AsyncTcpListener>> {
+        Err(direct_denied())
+    }
+
+    fn connect_tcp(
+        &self,
+        _: SocketAddr,
+    ) -> Pin<Box<dyn Future<Output = io::Result<Arc<dyn AsyncTcpStream>>> + Send + '_>> {
+        Box::pin(async { Err(direct_denied()) })
+    }
+
+    fn resolve_host<'a>(
+        &'a self,
+        requested: &'a str,
+    ) -> Pin<Box<dyn Future<Output = io::Result<Vec<SocketAddr>>> + Send + 'a>> {
+        Box::pin(async move {
+            let address = requested.parse().map_err(|_| direct_denied())?;
+            if address != SocketAddr::V4(self.network.server) {
+                return Err(direct_denied());
+            }
+            Ok(vec![address])
+        })
+    }
+
+    fn now(&self) -> StdInstant {
+        self.inner.now()
+    }
+
+    fn sleep(&self, d: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+        self.inner.sleep(d)
+    }
+
+    fn interval(&self, d: Duration) -> Box<dyn AsyncInterval> {
+        self.inner.interval(d)
+    }
+
+    fn block_on(&self, task: Pin<Box<dyn Future<Output = ()> + '_>>) {
+        self.inner.block_on(task);
+    }
+}
+
+#[derive(Debug)]
+struct DirectFixtureSocket {
+    inner: Arc<dyn AsyncUdpSocket>,
+    local: SocketAddrV4,
+    network: Arc<DirectNetwork>,
+    side: FixtureDirectSide,
+}
+
+impl Drop for DirectFixtureSocket {
+    fn drop(&mut self) {
+        self.network.unregister(self.side, self.local);
+    }
+}
+
+impl AsyncUdpSocket for DirectFixtureSocket {
+    fn local_addr(&self) -> io::Result<SocketAddr> {
+        Ok(self.local.into())
+    }
+
+    fn poll_send(&self, cx: &mut Context<'_>, tx: &Transmit<'_>) -> Poll<io::Result<usize>> {
+        if tx.src_ip.is_some_and(|ip| ip != IpAddr::V4(LOOPBACK)) {
+            return Poll::Ready(Err(direct_denied()));
+        }
+        if tx.destination == SocketAddr::V4(self.network.server) {
+            return self.inner.poll_send(cx, tx);
+        }
+        let Some(peer) = self.network.observed_peer(self.side) else {
+            return Poll::Ready(Err(direct_denied()));
+        };
+        if tx.destination != self.side.peer().label(peer) {
+            return Poll::Ready(Err(direct_denied()));
+        }
+        if self.network.blocked.load(Ordering::Acquire) {
+            self.network.record_drop(tx.contents);
+            return Poll::Ready(Ok(tx.contents.len()));
+        }
+        let mut mapped = tx.clone();
+        mapped.destination = peer.into();
+        let result = self.inner.poll_send(cx, &mapped);
+        if matches!(&result, Poll::Ready(Ok(n)) if *n > 0) {
+            self.network.statistics.lock().unwrap().direct_forwarded += 1;
+        }
+        result
+    }
+
+    fn poll_recv(
+        &self,
+        cx: &mut Context<'_>,
+        buffers: &mut [IoSliceMut<'_>],
+        meta: &mut [RecvMeta],
+    ) -> Poll<io::Result<usize>> {
+        if buffers.is_empty() || meta.is_empty() {
+            return Poll::Ready(Err(io::ErrorKind::InvalidInput.into()));
+        }
+        for _ in 0..32 {
+            match self.inner.poll_recv(cx, &mut buffers[..1], &mut meta[..1]) {
+                Poll::Ready(Ok(1)) => {
+                    if meta[0].addr == SocketAddr::V4(self.network.server) {
+                        return Poll::Ready(Ok(1));
+                    }
+                    if let Some(peer) = self.network.observed_peer(self.side) {
+                        if meta[0].addr == SocketAddr::V4(peer)
+                            && !self.network.blocked.load(Ordering::Acquire)
+                        {
+                            meta[0].addr = self.side.peer().label(peer);
+                            meta[0].dst_ip = Some(IpAddr::V4(LOOPBACK));
+                            return Poll::Ready(Ok(1));
+                        }
+                    }
+                }
+                result => return result,
+            }
+        }
+        cx.waker().wake_by_ref();
+        Poll::Pending
+    }
 }

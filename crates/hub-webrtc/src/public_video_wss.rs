@@ -637,7 +637,7 @@ pub enum ScopedWssState {
     /// or of media, and must not be surfaced as video success.
     Established,
     /// Host RTP transport selected an exact signed pair. No video was sent.
-    HostPathVerified(SelectedRoute),
+    HostPathVerified(SelectedRoute, Kind, Kind),
     Closed,
 }
 
@@ -788,9 +788,12 @@ impl ScopedPublicVideoWss<'_> {
             if self.wire.role == Role::Host {
                 match self.ice.selected_path(now).await {
                     Ok(selected) => {
-                        if path != Some(selected.route) {
-                            path = Some(selected.route);
-                            state.send_replace(ScopedWssState::HostPathVerified(selected.route));
+                        let key = (selected.route, selected.local_type, selected.remote_type);
+                        if path != Some(key) {
+                            path = Some(key);
+                            state.send_replace(ScopedWssState::HostPathVerified(
+                                key.0, key.1, key.2,
+                            ));
                         }
                     }
                     Err(PAIR_UNAVAILABLE) if path.is_none() && Instant::now() < pair_end => {}
