@@ -190,12 +190,22 @@ impl<'a> PublicVideoProof<'a> {
         now: u64,
     ) -> Result<crate::direct_policy::VerifiedCandidates, &'static str> {
         let sdp = self.open(sdp, signature, now)?;
-        let values = crate::public_video_ice::validate(
+        let values = match crate::public_video_ice::validate(
             sdp,
             self.scope,
             self.role == SessionRole::Viewer,
             now,
-        )?;
+        ) {
+            Ok(values) => values,
+            Err(error) => {
+                // The signed description was authenticated, not admitted.
+                // The consumed challenge stays consumed, and rejected SDP
+                // cannot become the offer to which this host signs an answer.
+                self.offer = None;
+                self.outgoing_available = false;
+                return Err(error);
+            }
+        };
         Ok(crate::direct_policy::VerifiedCandidates {
             values,
             scope: self.room,

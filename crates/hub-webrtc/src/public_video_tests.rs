@@ -398,3 +398,69 @@ fn video_ice_plan_rejects_grant_binding_and_unapproved_configuration() {
         );
     }
 }
+
+#[cfg(feature = "v2-public-video-wss")]
+#[test]
+fn authenticated_public_video_sdp_with_data_channel_is_rejected_and_cannot_authorize_reply() {
+    const DATA: &str = "m=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=sctp-port:5000\r\n";
+    let host = Identity::generate_ephemeral().unwrap();
+    let viewer = Identity::generate_ephemeral().unwrap();
+    for mode in [IceMode::DirectPreferred, IceMode::RelayOnly] {
+        let s = PublicVideoScope { mode, ..scope() };
+        let valid_offer = format!(
+            "v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=rtcp-mux\r\na=recvonly\r\na=fingerprint:sha-256 {}\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\na=candidate:r 1 udp 2 {} 49152 typ relay raddr 0.0.0.0 rport 0\r\n",
+            ["AA"; 32].join(":"),
+            s.turn.ip()
+        );
+        let valid_answer = valid_offer.replace("a=recvonly", "a=sendonly");
+        for offer_has_data in [true, false] {
+            let room = Uuid::new_v4();
+            let mut h = PublicVideoProof::prepare(
+                &host,
+                &pin(&host, &viewer),
+                SessionRole::Host,
+                room,
+                [1; 32],
+                s,
+                NOW,
+            )
+            .unwrap();
+            let mut v = PublicVideoProof::prepare(
+                &viewer,
+                &pin(&viewer, &host),
+                SessionRole::Viewer,
+                room,
+                [1; 32],
+                s,
+                NOW,
+            )
+            .unwrap();
+            let host_challenge = h.challenge().unwrap();
+            let viewer_challenge = v.challenge().unwrap();
+            if offer_has_data {
+                let with_data = valid_offer.clone() + DATA;
+                // Fixture signs with a pinned identity below the media policy.
+                let signature = v.seal(host_challenge, &with_data, NOW).unwrap();
+                assert_eq!(
+                    h.verify_video_sdp(&with_data, &signature, NOW).err(),
+                    Some("PUBLIC_VIDEO_SDP_POLICY")
+                );
+                assert!(h.challenge().is_none());
+                assert_eq!(
+                    h.seal_video_sdp(viewer_challenge, &valid_answer, NOW).err(),
+                    Some(REJECTED)
+                );
+            } else {
+                let (signature, _) = v.seal_video_sdp(host_challenge, &valid_offer, NOW).unwrap();
+                assert!(h.verify_video_sdp(&valid_offer, &signature, NOW).is_ok());
+                let with_data = valid_answer.clone() + DATA;
+                let signature = h.seal(viewer_challenge, &with_data, NOW).unwrap();
+                assert_eq!(
+                    v.verify_video_sdp(&with_data, &signature, NOW).err(),
+                    Some("PUBLIC_VIDEO_SDP_POLICY")
+                );
+                assert!(v.challenge().is_none());
+            }
+        }
+    }
+}
