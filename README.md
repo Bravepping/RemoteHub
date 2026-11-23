@@ -90,19 +90,19 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 ### 用角色启动脚本，免手动加载环境变量
 
-将仓库的 `scripts/start-private-wss.ps1` 放到解压后的测试包目录，与 EXE 同级。实际测试先取得同意，再从该目录分别运行下列命令。每条独立执行；路径在提示出现后粘贴，不加引号。若脚本被本机执行策略拦截，先停下，不修改策略。
+将仓库的 `scripts/start-private-wss.ps1` 放到解压后的测试包目录，与 EXE 同级。实际测试先取得同意，再从该目录分别运行下列命令。每条独立执行；脚本会自行提示应粘贴的 JSON 完整路径。也可在命令末尾直接写 `-Profile '完整路径'`，无需再套 `Read-Host`。若脚本被本机执行策略拦截，先停下，不修改策略。
 
-- 共享端第一个 PowerShell 窗口，选择刚生成的 `host.json`。保持窗口打开，结束时按 Ctrl+C。
+- 共享端第一个 PowerShell 窗口，选择刚生成的 `host.json`。中继在当前窗口运行，不会另开窗口；保持窗口打开，结束时按 Ctrl+C。
   ```powershell
-  .\start-private-wss.ps1 -Role Relay -Profile (Read-Host 'host.json path')
+  .\start-private-wss.ps1 -Role Relay
   ```
 - 共享端第二个窗口，选择同一份 `host.json`。
   ```powershell
-  .\start-private-wss.ps1 -Role Host -Profile (Read-Host 'host.json path')
+  .\start-private-wss.ps1 -Role Host
   ```
 - 观看端选择私下收到的 `viewer.json`。脚本要求输入共享端生成器显示的完整 CA SHA-256，不一致就拒绝启动。
   ```powershell
-  .\start-private-wss.ps1 -Role Viewer -Profile (Read-Host 'viewer.json path')
+  .\start-private-wss.ps1 -Role Viewer
   ```
 
 脚本仅为所选进程传递该角色需要的固定环境变量，不把令牌写入命令参数、打印到终端或改写系统环境。它不修改证书信任、防火墙或启动远控会话。启动后仍需双方核验设备完整指纹、手动选择「私网 WSS 信令（仅视频）」并分别批准本次会话。只共享空白记事本的测试画面；点「停止并回收」，关闭两端程序和中继窗口。不启用键鼠。只反馈结果和固定错误码，不上传截图、配置、临时配对码、证书私钥或令牌。

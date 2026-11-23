@@ -13,6 +13,28 @@ function Assert-Throws([string]$Code, [scriptblock]$Action) {
     throw "Expected error: $Code"
 }
 
+function Test-RemoteHubProfilePrompt {
+    $script:rhPrompt = ''
+    $script:rhAnswer = ' "C:\Test Folder\host.json" '
+    function Read-Host([string]$Prompt) {
+        $script:rhPrompt = $Prompt
+        return $script:rhAnswer
+    }
+    $resolved = Resolve-RemoteHubWssProfile -Role Relay -Prompt
+    Assert-True ($resolved -ceq 'C:\Test Folder\host.json') 'pasted path with quotes'
+    Assert-True ($script:rhPrompt -like '*host.json*') 'relay asks for host profile'
+    $script:rhAnswer = 'C:\Test Folder\viewer.json'
+    $resolved = Resolve-RemoteHubWssProfile -Role Viewer -Prompt
+    Assert-True ($resolved -ceq $script:rhAnswer -and $script:rhPrompt -like '*viewer.json*') 'viewer asks for viewer profile'
+    $script:rhPrompt = ''
+    $resolved = Resolve-RemoteHubWssProfile -Role Host -ProfilePath $script:rhAnswer
+    Assert-True ($resolved -ceq $script:rhAnswer -and !$script:rhPrompt) 'explicit profile does not prompt'
+    $script:rhAnswer = ' '
+    Assert-Throws 'REMOTEHUB_WSS_PROFILE_REQUIRED' { Resolve-RemoteHubWssProfile -Role Viewer -Prompt }
+    Assert-Throws 'REMOTEHUB_WSS_PROFILE_REQUIRED' { Resolve-RemoteHubWssProfile -Role Viewer -ProfilePath '' }
+}
+Test-RemoteHubProfilePrompt
+
 # Stub file names exercise path selection; no executable or relay is started.
 $root = Join-Path ([IO.Path]::GetTempPath()) ('remotehub-wss tests ' + [guid]::NewGuid().ToString('N'))
 $originalToken = $env:REMOTEHUB_V2_TOKEN

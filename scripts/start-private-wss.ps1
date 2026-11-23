@@ -5,6 +5,26 @@ param(
     [string]$BinDir = $PSScriptRoot
 )
 
+function Resolve-RemoteHubWssProfile {
+    param(
+        [ValidateSet('Relay', 'Host', 'Viewer')][string]$Role,
+        [string]$ProfilePath,
+        [switch]$Prompt
+    )
+    if ($Prompt) {
+        $name = if ($Role -eq 'Viewer') { 'viewer.json' } else { 'host.json' }
+        $ProfilePath = [string](Read-Host "Paste the full path to $name, then press Enter")
+        $ProfilePath = $ProfilePath.Trim()
+        if ($ProfilePath.Length -ge 2 -and $ProfilePath.StartsWith('"') -and $ProfilePath.EndsWith('"')) {
+            $ProfilePath = $ProfilePath.Substring(1, $ProfilePath.Length - 2)
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace($ProfilePath)) {
+        throw 'REMOTEHUB_WSS_PROFILE_REQUIRED'
+    }
+    return $ProfilePath
+}
+
 function New-RemoteHubWssStartInfo {
     param(
         [ValidateSet('Relay', 'Host', 'Viewer')][string]$Role,
@@ -87,16 +107,17 @@ function New-RemoteHubWssStartInfo {
 
 if ($MyInvocation.InvocationName -ne '.') {
     if ($env:OS -ne 'Windows_NT') { throw 'REMOTEHUB_WSS_WINDOWS_REQUIRED' }
-    if (!$Role -or !$Profile) { throw 'Specify -Role Relay|Host|Viewer and -Profile <path>' }
+    if (!$Role) { throw 'Specify -Role Relay|Host|Viewer' }
+    $profilePath = Resolve-RemoteHubWssProfile -Role $Role -ProfilePath $Profile -Prompt:(!$PSBoundParameters.ContainsKey('Profile'))
     $expectedCa = if ($Role -eq 'Viewer') {
         Read-Host 'Enter the full 64-character CA SHA-256 shown on the sharing PC'
     } else { '' }
-    $startInfo = New-RemoteHubWssStartInfo $Role $Profile $BinDir $expectedCa
-    if ($Role -eq 'Relay') { Write-Host 'Keep this relay window open. Press Ctrl+C to stop the relay.' }
+    $startInfo = New-RemoteHubWssStartInfo $Role $profilePath $BinDir $expectedCa
     try { $process = [Diagnostics.Process]::Start($startInfo) }
     catch { throw 'REMOTEHUB_WSS_START_FAILED' }
     try {
         if ($Role -eq 'Relay') {
+            Write-Host 'Relay runs in this PowerShell window. Press Ctrl+C to stop it.'
             # Poll so PowerShell can process Ctrl+C while the relay shares its console.
             while (!$process.WaitForExit(250)) {}
             if ($process.ExitCode -ne 0) { exit $process.ExitCode }
