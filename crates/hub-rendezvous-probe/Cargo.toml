@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+v2-synthetic-video = ["dep:hub-identity", "dep:hub-webrtc", "dep:rtc", "dep:async-trait", "dep:webrtc"]
+
 [dependencies]
 hub-signal-v2 = { path = "../hub-signal-v2" }
 hub-probe-wire = { path = "../hub-probe-wire" }
@@ -23,6 +26,11 @@ ring = "=0.17.14"
 
 rcgen = { version = "=0.14.10", default-features = false, features = ["ring", "pem"] }
 time = "=0.3.55"
+hub-identity = { path = "../hub-identity", features = ["ephemeral-test"], optional = true }
+rtc = { version = "=0.21.1", default-features = false, optional = true }
+async-trait = { version = "=0.1.92", optional = true }
+hub-webrtc = { path = "../hub-webrtc", features = ["v2-public-video-wss"], optional = true }
+webrtc = { version = "=0.21.1", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_Threading", "Win32_System_SystemServices", "Win32_System_WindowsProgramming", "Win32_System_Com", "Win32_UI_Shell"] }

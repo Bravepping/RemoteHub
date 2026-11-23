@@ -11,7 +11,13 @@ name = "remotehub-display-check"
 path = "src/bin/display_check.rs"
 required-features = ["synthetic-display-check", "custom-protocol"]
 
+[[bin]]
+name = "remotehub-stream-display-check"
+path = "src/bin/stream_display_check.rs"
+required-features = ["synthetic-stream-display-check", "custom-protocol"]
+
 [features]
+synthetic-stream-display-check = ["dep:hub-rendezvous-probe", "dep:tokio"]
 synthetic-display-check = []
 p3-lan = ["p005-control", "hub-webrtc/p3-lan"]
 v2-peer-pairing = ["p3-lan"]
@@ -35,6 +41,7 @@ tauri = { version = "=2.12.7", features = ["tray-icon"] }
 serde.workspace = true
 hub-capture-win = { path = "../../../crates/hub-capture-win" }
 hub-identity = { path = "../../../crates/hub-identity" }
+hub-rendezvous-probe = { path = "../../../crates/hub-rendezvous-probe", features = ["v2-synthetic-video"], optional = true }
 hub-webrtc = { path = "../../../crates/hub-webrtc", optional = true }
 hub-probe-wire = { path = "../../../crates/hub-probe-wire", optional = true }
 tokio = { version = "=1.54.1", features = ["sync", "time"], optional = true }

@@ -3540,6 +3540,7 @@ dependencies = [
  "hub-capture-win",
  "hub-identity",
  "hub-probe-wire",
+ "hub-rendezvous-probe",
  "hub-webrtc",
  "serde",
  "serde_json",

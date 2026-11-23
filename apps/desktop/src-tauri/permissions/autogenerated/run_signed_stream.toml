@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-run-signed-stream"
+description = "Enables the run_signed_stream command without any pre-configured scope."
+commands.allow = ["run_signed_stream"]
+
+[[permission]]
+identifier = "deny-run-signed-stream"
+description = "Denies the run_signed_stream command without any pre-configured scope."
+commands.deny = ["run_signed_stream"]

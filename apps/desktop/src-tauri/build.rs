@@ -26,6 +26,8 @@ fn main() {
             "p006_metrics",
             "p006_stop",
             "p006_save",
+            "run_signed_stream",
+            "stop_signed_stream",
         ]),
     ))
     .expect("RemoteHub build configuration failed");

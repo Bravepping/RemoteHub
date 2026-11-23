@@ -578,6 +578,10 @@ mod tls_smoke;
 #[path = "v2_signaling/public_video_smoke.rs"]
 mod public_video_smoke;
 
+#[cfg(feature = "v2-synthetic-video")]
+#[path = "v2_signaling/verified_synthetic.rs"]
+pub mod verified_synthetic;
+
 #[cfg(test)]
 mod tests {
     use super::*;

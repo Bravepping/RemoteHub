@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src ipc: http://ipc.localhost https://ipc.localhost; base-uri 'none'; form-action 'none'; object-src 'none'"
+    />
+    <title>RemoteHub · 单机签名视频诊断</title>
+    <link rel="stylesheet" href="./style.css" />
+    <script type="module" src="./main.ts"></script>
+  </head>
+  <body>
+    <main>
+      <h1>单机签名视频诊断</h1>
+      <p>
+        只通过本机回环传送内置合成帧，不采集桌面，不操作键鼠，不连接其他电脑或云服务。
+      </p>
+      <canvas
+        id="display"
+        width="32"
+        height="32"
+        aria-label="合成灰度视频预览"
+      ></canvas>
+      <p>
+        预期是四个由暗到亮的灰块，依次位于左上、右上、左下、右下。请同时肉眼确认。
+      </p>
+      <div class="actions">
+        <button id="start" type="button">开始本机诊断</button>
+        <button id="stop" type="button" disabled>停止并清屏</button>
+        <button id="reset" type="button" disabled>重置</button>
+      </div>
+      <section
+        class="result"
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+      >
+        <output id="result-code">STREAM_DISPLAY_READY</output>
+        <p id="result-text">等待手动开始。</p>
+      </section>
+      <p>此测试不代表双机或公网远控通过。</p>
+    </main>
+  </body>
+</html>

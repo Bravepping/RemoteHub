@@ -139,8 +139,21 @@ cargo build --locked -p remotehub-desktop --bin remotehub-display-check --profil
 
 运行后点「播放并测试」。看见左上红、右上绿、左下蓝、右下黄和移动白块，且显示 `DISPLAY_PASS`，才算这台机器的 WebView2 本地解码/呈现通过。点「停止」可结束；「重置」后可重试。若失败，记录状态码；无需提供屏幕截图或设备信息。
 
+### Windows WebView2 单机签名串流检查
+
+独立的 `remotehub-stream-display-check` 启动进程内回环 WSS 和模拟 STUN，用临时身份完成双向核验及 WebRTC DTLS/SRTP 传输。原生仅向本窗口返回两帧内置的 32×32 灰阶图案，不读取用户文件、不采集屏幕、不注入输入、不连接真实服务器。Windows x64 需要现有的 WebView2 Runtime。重新构建：
+
+```powershell
+pnpm --dir apps/desktop exec tsc -p stream-display/tsconfig.json
+pnpm --dir apps/desktop exec vite build stream-display --base ./ --outDir dist
+cargo build --locked -p remotehub-desktop --bin remotehub-stream-display-check --profile probe --features synthetic-stream-display-check,custom-protocol
+```
+
+运行后点「开始本机诊断」。画布可见四个从暗到亮的灰阶区域、且出现 `STREAM_DISPLAY_PASS`，才算 Windows 显示通过。点「停止并清屏」后画面应变空白，状态显示 `STREAM_DISPLAY_STOPPED`，旧画面不能恢复；可再启动验证。这里验证的是两帧的单机诊断，不是连续帧速率或公网会话。
+
 ## 本分支已执行验证
 
+- 单机签名串流诊断：原生本机联测通过，验证两帧证据及取消清理；WebView2 页面通过 TypeScript、Vite 构建和模拟收帧、解码回调及停止检查。尚未验证 Windows 实机的 WebCodecs 解码/显示，不作为公网或实际桌面验收。
 - 已校验串流的显示交接：原生接收器只从已验签且通过实际 ICE 核验的会话读取 RTP，按严格序号和时限组装有界 H.264 Annex B 帧；缺片、错误格式或停止均不得继续产出画面。Web 前端新增独立的 WebCodecs 显示组件，停止立即清空画布并关闭解码器，拒绝旧一轮的迟到回调。当前分别测原生回环解码与页面状态，尚未通过 Windows WebView2 实机验证两者之间的连接，也未启用公网入口。
 - WebView2 离线合成显示入口：独立二进制无远控或采集命令，前端仅播放内置的 320×180、24 fps、2 秒 H.264 文件，使用视频帧呈现回调及四个区域的像素核对。FFmpeg 已离线解码 48 帧验证图案；Windows 实机（2026-11-23，用户实测，修正版 v2 `95c59cc`）：四色图案可见，状态为 `DISPLAY_PASS`。该结果确认这台机器的 WebView2 能解码并呈现随包附带的本地合成 H.264 图案，不覆盖 WebRTC 串流、真实桌面或公网产品会话。
 - 合成画面解码：可选本机联测使用 FFmpeg/libx264 生成 32×32 四象限图案，经过已验签 WSS、真实回环 WebRTC 及 RTP 候选核验。接收端核对序号、RTP 时间戳及帧结束标记，重组后由 FFmpeg 解码，比较整帧亮度和色度样本（允许最大偏差 4；本次连续三轮的实测最大偏差均为 0）。复跑：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked public_video_wss_decodes_synthetic_pattern_pixels -- --ignored --nocapture`。FFmpeg 仅是这个测试的工具，不是产品依赖；未测 Windows WebView2 显示、真实桌面采集或公网。
