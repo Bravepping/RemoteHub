@@ -24,6 +24,7 @@ const BACKPRESSURE: &str = "PUBLIC_VIDEO_MEDIA_BACKPRESSURE";
 const UNAVAILABLE: &str = "PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE";
 const START_WAIT: Duration = Duration::from_secs(8);
 const IDLE: Duration = Duration::from_millis(100);
+const VIEWER_QUEUE_WAIT: Duration = Duration::from_millis(150);
 const RTP_GAP: &str = "PUBLIC_VIDEO_RTP_GAP";
 const REORDER_PACKETS: u16 = 48;
 const REORDER_WAIT: Duration = Duration::from_millis(80);
@@ -229,7 +230,11 @@ async fn run_viewer(
             order.insert(packet, Instant::now())?;
             while let Some(packet) = order.pop() {
                 if let Some(frame) = assembler.push(&packet)? {
-                    frames.try_send(frame).map_err(|_| BACKPRESSURE)?;
+                    if !enqueue_viewer_frame(frames, frame, || ice.check_current(wall_seconds()?))
+                        .await?
+                    {
+                        return Ok(());
+                    }
                     seen_frame = true;
                 }
             }
@@ -237,6 +242,24 @@ async fn run_viewer(
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
         tokio::task::yield_now().await;
+    }
+}
+
+/// Hold at most one additional complete AU while waiting for the existing
+/// bounded queue. The owning WSS actor can cancel this wait on stop or leave.
+async fn enqueue_viewer_frame(
+    frames: &mpsc::Sender<VerifiedVideoFrame>,
+    frame: VerifiedVideoFrame,
+    check_scope: impl FnOnce() -> Result<(), &'static str>,
+) -> Result<bool, &'static str> {
+    match timeout(VIEWER_QUEUE_WAIT, frames.reserve()).await {
+        Ok(Ok(permit)) => {
+            check_scope()?;
+            permit.send(frame);
+            Ok(true)
+        }
+        Ok(Err(_)) => Ok(false),
+        Err(_) => Err(BACKPRESSURE),
     }
 }
 
@@ -295,6 +318,66 @@ impl RtpOrder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn complete_frame(sequence: u64) -> VerifiedVideoFrame {
+        VerifiedVideoFrame {
+            sequence,
+            timestamp_us: sequence * 40_000,
+            keyframe: sequence == 0,
+            annex_b: vec![0; 16],
+        }
+    }
+
+    #[tokio::test]
+    async fn transient_viewer_queue_pressure_preserves_frame_order() {
+        let (media, mut receiver) = ScopedVideoMedia::viewer();
+        let Port::Viewer(queue) = &media.port else {
+            panic!("viewer queue")
+        };
+        for sequence in 0..3 {
+            assert!(
+                enqueue_viewer_frame(queue, complete_frame(sequence), || Ok(()))
+                    .await
+                    .unwrap()
+            );
+        }
+        let waiting = enqueue_viewer_frame(queue, complete_frame(3), || Ok(()));
+        tokio::pin!(waiting);
+        assert!(futures_util::poll!(&mut waiting).is_pending());
+        assert_eq!(receiver.next_frame().await.unwrap().sequence, 0);
+        assert_eq!(waiting.await, Ok(true));
+        for expected in 1..=3 {
+            assert_eq!(receiver.next_frame().await.unwrap().sequence, expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn stalled_viewer_queue_times_out_without_dropping_and_resuming() {
+        let (tx, mut rx) = mpsc::channel(1);
+        assert!(enqueue_viewer_frame(&tx, complete_frame(0), || Ok(()))
+            .await
+            .unwrap());
+        assert_eq!(
+            enqueue_viewer_frame(&tx, complete_frame(1), || panic!("no permit")).await,
+            Err(BACKPRESSURE)
+        );
+        assert_eq!(rx.try_recv().unwrap().sequence, 0);
+        assert!(rx.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn capacity_return_does_not_bypass_revoked_scope() {
+        let (tx, mut rx) = mpsc::channel(1);
+        assert!(enqueue_viewer_frame(&tx, complete_frame(0), || Ok(()))
+            .await
+            .unwrap());
+        let waiting = enqueue_viewer_frame(&tx, complete_frame(1), || Err("test scope ended"));
+        tokio::pin!(waiting);
+        assert!(futures_util::poll!(&mut waiting).is_pending());
+        assert_eq!(rx.try_recv().unwrap().sequence, 0);
+        assert_eq!(waiting.await, Err("test scope ended"));
+        assert!(rx.try_recv().is_err());
+    }
 
     fn packet(seq: u16, timestamp: u32, marker: bool, payload: &[u8]) -> Packet {
         let mut packet = Packet::default();
