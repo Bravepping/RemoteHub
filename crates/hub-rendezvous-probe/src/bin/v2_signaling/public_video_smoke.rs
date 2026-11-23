@@ -29,6 +29,9 @@ use webrtc::media_stream::track_remote::TrackRemote;
 #[path = "public_video_fixture_net.rs"]
 mod fixture_net;
 use fixture_net::{FixtureNat, FixtureSide};
+#[path = "public_video_decode.rs"]
+mod decode;
+use decode::decode_pattern_round_trip;
 use tokio::time::{sleep, timeout};
 use webrtc::peer_connection::{RTCIceCandidate, RTCIceCandidateType, RTCIceProtocol};
 use webrtc::{
@@ -277,6 +280,7 @@ enum Scenario {
     UnsignedSelectedPort,
     LiveUnsignedPair,
     LiveSignedMedia,
+    LiveDecodedPattern,
     LiveMediaStop,
     LiveMediaPeerDrop,
     LiveUnavailable,
@@ -396,8 +400,15 @@ async fn exchange(scenario: Scenario) {
         assert!(server.await.unwrap_err().is_cancelled());
         return;
     }
-    if matches!(scenario, Scenario::LiveSignedMedia) {
-        positive_signed_rtp(&mut h, &mut v).await;
+    if matches!(
+        scenario,
+        Scenario::LiveSignedMedia | Scenario::LiveDecodedPattern
+    ) {
+        if matches!(scenario, Scenario::LiveDecodedPattern) {
+            decode_pattern_round_trip(&mut h, &mut v).await;
+        } else {
+            positive_signed_rtp(&mut h, &mut v).await;
+        }
         h.leave().await.unwrap();
         assert!(matches!(
             v.next_event(WAIT).await.unwrap(),
@@ -434,6 +445,7 @@ async fn exchange(scenario: Scenario) {
     match scenario {
         Scenario::WrongTlsTrust
         | Scenario::LiveSignedMedia
+        | Scenario::LiveDecodedPattern
         | Scenario::LiveMediaStop
         | Scenario::LiveMediaPeerDrop => unreachable!(),
         Scenario::BadLocalSdp => (),

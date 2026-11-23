@@ -129,6 +129,7 @@ R06 诊断版要求两端分别手动选择同一个模式：「优先直连，�
 
 ## 本分支已执行验证
 
+- 合成画面解码：可选本机联测使用 FFmpeg/libx264 生成 32×32 四象限图案，经过已验签 WSS、真实回环 WebRTC 及 RTP 候选核验。接收端核对序号、RTP 时间戳及帧结束标记，重组后由 FFmpeg 解码，比较整帧亮度和色度样本（允许最大偏差 4；本次连续三轮的实测最大偏差均为 0）。复跑：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked public_video_wss_decodes_synthetic_pattern_pixels -- --ignored --nocapture`。FFmpeg 仅是这个测试的工具，不是产品依赖；未测 Windows WebView2 显示、真实桌面采集或公网。
 - 公网仅视频的本机停止联动：新增会话驱动统一持有 WSS 和 WebRTC，主动停止或发现对端离开后不再接受 RTP，关闭原生 PeerConnection 并报告回收结果。回环 TLS/模拟 NAT 联测覆盖正在收发时主动停止及对端 WSS 意外断开；检查停止后收发均拒绝、接收端 PeerConnection 关闭、房间和连接槽释放。未接入桌面产品入口或部署公网。
 - 公网仅视频的 RTP 放行：写入前检查当前发送轨道的 DTLS/ICE 候选对；接收端在应用读取和交付包时也验证实际轨道。回环 WSS + 进程内 STUN/NAT 测试让真实 WebRTC 选中已签名的映射候选，收到了合成 H.264 RTP 测试字节；未签名的回环选路禁止写入且未触发接收轨道。测试网络只用回环，不访问公网，不解码或渲染画面。正式会话的授权、停止联动及实际媒体仍待接入。
 - 公网仅视频的原生候选读取：从唯一且方向正确的视频 RTP transceiver 的 DTLS/ICE 传输读取当前选中的 UDP 候选对，不借用 SCTP。读不到、超时或不匹配即关闭信令。本机测试建立两端真实 WebRTC 视频传输（无媒体帧），证实未列入签名 SDP 的已选回环候选对被拒绝、服务端房间释放；未做成功播放验收或开放公网入口。
