@@ -138,10 +138,19 @@ impl<S: SessionSink<Event = Event>> LanInputQueue<S> {
         current: &LanInputScope,
         control: Control,
     ) -> Result<Option<u64>, Error> {
+        self.dispatch_next_at(current, control, Instant::now())
+    }
+
+    fn dispatch_next_at(
+        &mut self,
+        current: &LanInputScope,
+        control: Control,
+        now: Instant,
+    ) -> Result<Option<u64>, Error> {
         let seq = self.pending_seq.take();
         match self
             .queue
-            .dispatch_bound(&Binding::LegacyLan(*current), control)?
+            .dispatch_bound_at(&Binding::LegacyLan(*current), control, now)?
         {
             Dispatch::Closed | Dispatch::Idle => Ok(None),
             Dispatch::Applied => match seq {
@@ -240,16 +249,16 @@ mod tests {
     type Fixture = LanInputQueue<Rc<RefCell<Fake>>>;
 
     fn fixture() -> (LanInputScope, Fixture, Rc<RefCell<Fake>>) {
+        fixture_until(Instant::now() + Duration::from_secs(20))
+    }
+
+    fn fixture_until(until: Instant) -> (LanInputScope, Fixture, Rc<RefCell<Fake>>) {
         let scope = LanInputScope::from_verified_lan(ROOM, PAIR).unwrap();
         let sink = Rc::new(RefCell::new(Fake {
             local_press: true,
             ..Fake::default()
         }));
-        let queue = LanInputQueue::view_only(
-            scope,
-            Instant::now() + Duration::from_secs(20),
-            sink.clone(),
-        );
+        let queue = LanInputQueue::view_only(scope, until, sink.clone());
         (scope, queue, sink)
     }
 
@@ -399,6 +408,68 @@ mod tests {
             assert_eq!(sink.release_calls, 1);
             assert_eq!(sink.released, 1);
             assert!(sink.local_press);
+        }
+    }
+
+    #[test]
+    fn idle_transport_loss_releases_a_held_key_without_waiting_for_another_message() {
+        let (scope, mut queue, sink) = fixture();
+        queue.decide_locally(true).unwrap();
+        assert_eq!(
+            queue.process_v1(&scope, &wire(ROOM, 1, DOWN), true, || Control::Continue),
+            Ok(Some(1))
+        );
+        assert!(sink.borrow().pressed);
+        assert_eq!(
+            queue.advance(Control::TransportLost),
+            Ok(State::Ended(End::Disconnected))
+        );
+        assert_eq!(
+            queue.enqueue_v1(&scope, &wire(ROOM, 2, UP), true),
+            Err(Error::NotAllowed)
+        );
+        assert_eq!(queue.dispatch_next(&scope, Control::Continue), Ok(None));
+        drop(queue);
+        let sink = sink.borrow();
+        assert!(!sink.pressed);
+        assert!(sink.local_press);
+        assert_eq!(
+            (sink.attempts, sink.release_calls, sink.released),
+            (1, 1, 1)
+        );
+    }
+
+    #[test]
+    fn expiry_at_dispatch_drops_pending_without_ack_and_preserves_release_status() {
+        for release_fails in [false, true] {
+            let until = Instant::now() + Duration::from_secs(20);
+            let (scope, mut queue, sink) = fixture_until(until);
+            queue.decide_locally(true).unwrap();
+            queue
+                .enqueue_v1(&scope, &wire(ROOM, 1, DOWN), true)
+                .unwrap();
+            assert_eq!(queue.dispatch_next(&scope, Control::Continue), Ok(Some(1)));
+            queue.enqueue_v1(&scope, &wire(ROOM, 2, UP), true).unwrap();
+            sink.borrow_mut().release_fails = release_fails;
+            let expected = if release_fails {
+                Err(Error::Queue(ApprovalError::ReleaseUnconfirmed.into()))
+            } else {
+                Ok(None)
+            };
+            assert_eq!(
+                queue.dispatch_next_at(&scope, Control::Continue, until),
+                expected
+            );
+            assert_eq!(queue.state(), State::Ended(End::Expired));
+            assert_eq!(queue.pending_seq, None);
+            assert_eq!(queue.dispatch_next(&scope, Control::Revoke), expected);
+            assert!(queue.decide_locally(true).is_err());
+            drop(queue);
+            let sink = sink.borrow();
+            assert_eq!(sink.pressed, release_fails);
+            assert!(sink.local_press);
+            assert_eq!((sink.attempts, sink.release_calls), (1, 1));
+            assert_eq!(sink.released, u8::from(!release_fails));
         }
     }
 

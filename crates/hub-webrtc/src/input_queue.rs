@@ -162,7 +162,7 @@ impl<S: SessionSink> InputQueue<S> {
         self.dispatch_bound_at(&Binding::Device(*scope), control, now)
     }
 
-    fn dispatch_bound_at(
+    pub(super) fn dispatch_bound_at(
         &mut self,
         scope: &Binding,
         control: Control,
