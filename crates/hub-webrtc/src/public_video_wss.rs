@@ -1,6 +1,7 @@
 //! Loopback TLS fixture for the public-video proof protocol. It does not
 //! connect to the public address carried in the proof, confer consent, or
-//! open an ICE or media connection.
+//! open an ICE or media connection. RTP helpers only operate on an existing
+//! caller-owned peer; product consent and socket scoping remain separate.
 
 use crate::{
     authenticated_relay::{AuthenticatedLoopbackRelay, AuthenticatedRelayEvent, ClientError},
@@ -18,6 +19,7 @@ use rtc::{
     peer_connection::transport::{
         RTCDtlsTransportState, RTCIceCandidatePair, RTCIceTransportState,
     },
+    rtp::packet::Packet,
     rtp_transceiver::rtp_sender::RtpCodecKind,
 };
 use serde::{Deserialize, Serialize};
@@ -29,6 +31,10 @@ use std::{
 use tokio::time::{timeout_at, Instant};
 use uuid::Uuid;
 use webrtc::{
+    media_stream::{
+        track_local::TrackLocal,
+        track_remote::{TrackRemote, TrackRemoteEvent},
+    },
     peer_connection::{PeerConnection, RTCIceCandidate, RTCIceCandidateType, RTCIceProtocol},
     rtp_transceiver::RTCRtpTransceiverDirection,
 };
@@ -38,6 +44,7 @@ pub use crate::authenticated_relay::{LoopbackTlsTrust, RelayToken, Role, SignalK
 const JOIN_WAIT: Duration = Duration::from_secs(5);
 const CHALLENGE_WAIT: Duration = Duration::from_secs(3);
 const PROOF_TTL: Duration = Duration::from_secs(15);
+const MEDIA_IO: &str = "PUBLIC_VIDEO_RTP_UNAVAILABLE";
 const PAIR_READ_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_CHALLENGE_WIRE: usize = CHALLENGE_BYTES * 4 + 3;
 const PROTOCOL: &str = "PUBLIC_VIDEO_WSS_PROTOCOL";
@@ -275,6 +282,80 @@ impl<'a> PublicVideoWss<'a> {
         pc: &dyn PeerConnection,
     ) -> Result<PathSummary, &'static str> {
         let relay = self.relay.take().ok_or(CLOSED)?;
+        let (path, _) = self.checked_live_track(pc).await?;
+        self.relay = Some(relay);
+        Ok(path)
+    }
+
+    /// Write one video RTP packet using the same sender whose live path
+    /// passed verification. This neither starts capture nor grants consent.
+    pub async fn send_checked_rtp(
+        &mut self,
+        pc: &dyn PeerConnection,
+        packet: Packet,
+    ) -> Result<(), &'static str> {
+        let relay = self.relay.take().ok_or(CLOSED)?;
+        if self.role != Role::Host {
+            return Err(PROTOCOL);
+        }
+        let (_, VideoTrack::Local(track)) = self.checked_live_track(pc).await? else {
+            return Err(MEDIA_IO);
+        };
+        let deadline = self.scope_deadline.min(Instant::now() + PAIR_READ_TIMEOUT);
+        timeout_at(deadline, track.write_rtp(packet))
+            .await
+            .map_err(|_| MEDIA_IO)?
+            .map_err(|_| MEDIA_IO)?;
+        self.check_scope()?;
+        self.relay = Some(relay);
+        Ok(())
+    }
+
+    /// Release one incoming packet to the caller after checking the receiver
+    /// path. Call only after the track-open event; RTP itself creates the
+    /// receiver handle in this wrapper, but need not reach a decoder yet.
+    pub async fn recv_checked_rtp(
+        &mut self,
+        pc: &dyn PeerConnection,
+    ) -> Result<Packet, &'static str> {
+        let relay = self.relay.take().ok_or(CLOSED)?;
+        if self.role != Role::Viewer {
+            return Err(PROTOCOL);
+        }
+        let (_, VideoTrack::Remote(track)) = self.checked_live_track(pc).await? else {
+            return Err(MEDIA_IO);
+        };
+        let deadline = self.scope_deadline.min(Instant::now() + PAIR_READ_TIMEOUT);
+        let packet = timeout_at(deadline, async {
+            loop {
+                match track.poll().await {
+                    Some(TrackRemoteEvent::OnRtpPacket(packet)) => return Ok(packet),
+                    Some(
+                        TrackRemoteEvent::OnError
+                        | TrackRemoteEvent::OnEnding
+                        | TrackRemoteEvent::OnEnded,
+                    )
+                    | None => return Err(MEDIA_IO),
+                    Some(_) => continue,
+                }
+            }
+        })
+        .await
+        .map_err(|_| MEDIA_IO)??;
+        let (_, VideoTrack::Remote(current)) = self.checked_live_track(pc).await? else {
+            return Err(MEDIA_IO);
+        };
+        if !Arc::ptr_eq(&track, &current) {
+            return Err(MEDIA_IO);
+        }
+        self.relay = Some(relay);
+        Ok(packet)
+    }
+
+    async fn checked_live_track(
+        &self,
+        pc: &dyn PeerConnection,
+    ) -> Result<(PathSummary, VideoTrack), &'static str> {
         self.check_scope()?;
         if self.local_candidates.is_none() || self.remote_candidates.is_none() {
             return Err(PAIR_REJECTED);
@@ -282,10 +363,9 @@ impl<'a> PublicVideoWss<'a> {
         let deadline = self.scope_deadline.min(Instant::now() + PAIR_READ_TIMEOUT);
         let read = timeout_at(deadline, read_video_pair(pc, self.role)).await;
         self.check_scope()?;
-        let pair = read.map_err(|_| PAIR_UNAVAILABLE)??;
+        let (pair, track) = read.map_err(|_| PAIR_UNAVAILABLE)??;
         let path = self.validate_selected_pair(pair.local(), pair.remote())?;
-        self.relay = Some(relay);
-        Ok(path)
+        Ok((path, track))
     }
 
     fn validate_selected_pair(
@@ -322,10 +402,15 @@ impl<'a> PublicVideoWss<'a> {
     }
 }
 
+enum VideoTrack {
+    Local(Arc<dyn TrackLocal>),
+    Remote(Arc<dyn TrackRemote>),
+}
+
 async fn read_video_pair(
     pc: &dyn PeerConnection,
     role: Role,
-) -> Result<RTCIceCandidatePair, &'static str> {
+) -> Result<(RTCIceCandidatePair, VideoTrack), &'static str> {
     let transceivers = pc.get_transceivers().await;
     let [video] = transceivers.as_slice() else {
         return Err(PAIR_UNAVAILABLE);
@@ -343,7 +428,7 @@ async fn read_video_pair(
     {
         return Err(PAIR_UNAVAILABLE);
     }
-    let dtls = match role {
+    let (dtls, track) = match role {
         Role::Host => {
             let sender = video
                 .sender()
@@ -353,7 +438,10 @@ async fn read_video_pair(
             if sender.track().kind().await != RtpCodecKind::Video {
                 return Err(PAIR_UNAVAILABLE);
             }
-            sender.transport().await
+            (
+                sender.transport().await,
+                VideoTrack::Local(sender.track().clone()),
+            )
         }
         Role::Viewer => {
             let receiver = video
@@ -364,11 +452,15 @@ async fn read_video_pair(
             if receiver.track().kind().await != RtpCodecKind::Video {
                 return Err(PAIR_UNAVAILABLE);
             }
-            receiver.transport().await
+            (
+                receiver.transport().await,
+                VideoTrack::Remote(receiver.track().clone()),
+            )
         }
-    }
-    .map_err(|_| PAIR_UNAVAILABLE)?
-    .ok_or(PAIR_UNAVAILABLE)?;
+    };
+    let dtls = dtls
+        .map_err(|_| PAIR_UNAVAILABLE)?
+        .ok_or(PAIR_UNAVAILABLE)?;
     if dtls.state().await.map_err(|_| PAIR_UNAVAILABLE)? != RTCDtlsTransportState::Connected {
         return Err(PAIR_UNAVAILABLE);
     }
@@ -390,7 +482,7 @@ async fn read_video_pair(
     if !connected(ice.state().await.map_err(|_| PAIR_UNAVAILABLE)?) {
         return Err(PAIR_UNAVAILABLE);
     }
-    Ok(pair)
+    Ok((pair, track))
 }
 
 impl<'a> PendingPublicVideoWss<'a> {
