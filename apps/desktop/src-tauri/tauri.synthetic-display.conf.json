@@ -1,0 +1,27 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "RemoteHub Display Check",
+  "version": "0.1.0",
+  "identifier": "local.remotehub.display-check",
+  "build": {
+    "frontendDist": "../synthetic-display"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "capabilities": [
+        {
+          "identifier": "display-check-no-ipc",
+          "description": "The synthetic display window has no native command permissions.",
+          "windows": ["display-check"],
+          "permissions": []
+        }
+      ],
+      "csp": "default-src 'none'; script-src 'self'; style-src 'self'; media-src 'self'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    }
+  },
+  "bundle": {
+    "active": false,
+    "icon": ["icons/icon.ico"]
+  }
+}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; media-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'" />
+    <title>RemoteHub · 离线合成显示测试</title>
+    <link rel="stylesheet" href="display.css" />
+    <script src="display.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>离线合成显示测试</h1>
+      <p>仅播放随应用附带的合成图案，不联网、不采集屏幕、不操作键鼠。</p>
+      <video id="pattern" width="320" height="180" preload="none" muted playsinline src="pattern.mp4" aria-label="左上红、右上绿、左下蓝、右下黄的合成视频"></video>
+      <p>预期画面：左上红、右上绿、左下蓝、右下黄；左上方白块会向右移动。</p>
+      <div class="actions">
+        <button id="play" type="button">播放并测试</button>
+        <button id="stop" type="button" disabled>停止</button>
+        <button id="reset" type="button" disabled>重置</button>
+      </div>
+      <div class="result" role="status" aria-live="polite" aria-atomic="true">
+        <output id="result-code">DISPLAY_READY</output>
+        <p id="result-text">等待手动播放。</p>
+      </div>
+      <p>此结果只验证本窗口的浏览器视频解码、帧呈现回调与像素。请同时肉眼确认四色图案；这不是双机远程串流验收。</p>
+    </main>
+  </body>
+</html>

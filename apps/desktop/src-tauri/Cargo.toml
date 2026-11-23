@@ -1,11 +1,18 @@
 [package]
 name = "remotehub-desktop"
+default-run = "remotehub-desktop"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "remotehub-display-check"
+path = "src/bin/display_check.rs"
+required-features = ["synthetic-display-check", "custom-protocol"]
+
 [features]
+synthetic-display-check = []
 p3-lan = ["p005-control", "hub-webrtc/p3-lan"]
 v2-peer-pairing = ["p3-lan"]
 v2-verified-lan = ["v2-peer-pairing", "hub-webrtc/v2-verified-lan"]

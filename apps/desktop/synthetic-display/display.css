@@ -1,0 +1,55 @@
+:root {
+  color-scheme: dark;
+  background: #111827;
+  color: #e5edf7;
+  font: 16px/1.5 "Microsoft YaHei UI", system-ui, sans-serif;
+}
+body {
+  margin: 0;
+}
+main {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 20px;
+}
+h1 {
+  margin: 0 0 10px;
+  font-size: 1.45rem;
+}
+p {
+  margin: 8px 0;
+}
+video {
+  display: block;
+  width: min(100%, 480px);
+  height: auto;
+  aspect-ratio: 16 / 9;
+  background: #080e1b;
+  border: 1px solid #566880;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+button {
+  font: inherit;
+  padding: 7px 12px;
+  background: #245494;
+  color: #fff;
+  border: 1px solid #80a8df;
+  border-radius: 5px;
+}
+button:disabled {
+  opacity: 0.45;
+}
+.result {
+  border: 1px solid #566880;
+  padding: 9px 12px;
+}
+output {
+  color: #add3ff;
+  font: 700 0.91rem ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}

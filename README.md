@@ -127,8 +127,19 @@ R06 诊断版要求两端分别手动选择同一个模式：「优先直连，�
 
 脚本只构建并打包，不运行应用、不安装 SDK、不启动公网诊断。`artifacts` 下输出带提交号的未签名 ZIP，只含 `remotehub-r06-synthetic.exe` 和该程序的 SHA-256 清单；不会把现有配置、证书或测试统计放进包。此包不是安装器，运行需要 WebView2；脚本被系统策略拦截时先停下，不绕过策略。
 
+### Windows WebView2 离线显示检查
+
+独立的 `remotehub-display-check` 只打开内置静态页面，不注册产品命令，不建立 WebRTC/WSS 会话。需要 Windows x64 和现有 WebView2 Runtime，不需要安装 RemoteHub。构建：
+
+```powershell
+cargo build --locked -p remotehub-desktop --bin remotehub-display-check --profile probe --features synthetic-display-check,custom-protocol
+```
+
+运行后点「播放并测试」。看见左上红、右上绿、左下蓝、右下黄和移动白块，且显示 `DISPLAY_PASS`，才算这台机器的 WebView2 本地解码/呈现通过。点「停止」可结束；「重置」后可重试。若失败，记录状态码；无需提供屏幕截图或设备信息。
+
 ## 本分支已执行验证
 
+- WebView2 离线合成显示入口：独立二进制无远控或采集命令，前端仅播放内置的 320×180、24 fps、2 秒 H.264 文件，使用视频帧呈现回调及四个区域的像素核对。FFmpeg 已离线解码 48 帧验证图案；Windows WebView2 窗口须实测。此检查不能替代签名或公网串流验收。
 - 合成画面解码：可选本机联测使用 FFmpeg/libx264 生成 32×32 四象限图案，经过已验签 WSS、真实回环 WebRTC 及 RTP 候选核验。接收端核对序号、RTP 时间戳及帧结束标记，重组后由 FFmpeg 解码，比较整帧亮度和色度样本（允许最大偏差 4；本次连续三轮的实测最大偏差均为 0）。复跑：`cargo test -p hub-rendezvous-probe --bin v2_signaling --locked public_video_wss_decodes_synthetic_pattern_pixels -- --ignored --nocapture`。FFmpeg 仅是这个测试的工具，不是产品依赖；未测 Windows WebView2 显示、真实桌面采集或公网。
 - 公网仅视频的本机停止联动：新增会话驱动统一持有 WSS 和 WebRTC，主动停止或发现对端离开后不再接受 RTP，关闭原生 PeerConnection 并报告回收结果。回环 TLS/模拟 NAT 联测覆盖正在收发时主动停止及对端 WSS 意外断开；检查停止后收发均拒绝、接收端 PeerConnection 关闭、房间和连接槽释放。未接入桌面产品入口或部署公网。
 - 公网仅视频的 RTP 放行：写入前检查当前发送轨道的 DTLS/ICE 候选对；接收端在应用读取和交付包时也验证实际轨道。回环 WSS + 进程内 STUN/NAT 测试让真实 WebRTC 选中已签名的映射候选，收到了合成 H.264 RTP 测试字节；未签名的回环选路禁止写入且未触发接收轨道。测试网络只用回环，不访问公网，不解码或渲染画面。正式会话的授权、停止联动及实际媒体仍待接入。
