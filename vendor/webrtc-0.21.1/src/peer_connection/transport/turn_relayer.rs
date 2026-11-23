@@ -416,6 +416,14 @@ impl RTCTurnRelayer {
     ///
     /// [webrtc#890]: https://github.com/webrtc-rs/webrtc/issues/890
     fn matching_client_key(&self, msg: &TaggedBytesMut) -> Option<FourTuple> {
+        let exact = FourTuple::from(&msg.transport);
+        let strict = self.runtime.requires_exact_turn_source();
+        if strict
+            && (msg.transport.transport_protocol != TransportProtocol::UDP
+                || !self.clients.contains_key(&exact))
+        {
+            return None;
+        }
         // ChannelData is not STUN-framed and carries no transaction id, so addresses are all there
         // is — and they suffice, because the gatherer neither sends nor receives it.
         if ChannelData::is_channel_data(&msg.message) {
@@ -442,7 +450,16 @@ impl RTCTurnRelayer {
             // no client is waiting on is not ours — most often a Binding response for the gatherer,
             // arriving from the address we share with it.
             CLASS_SUCCESS_RESPONSE | CLASS_ERROR_RESPONSE => {
-                self.match_by_transaction(&stun_message.transaction_id)
+                if strict {
+                    self.clients
+                        .get(&exact)
+                        .filter(|managed| {
+                            managed.client.has_transaction(&stun_message.transaction_id)
+                        })
+                        .map(|_| exact)
+                } else {
+                    self.match_by_transaction(&stun_message.transaction_id)
+                }
             }
 
             // An inbound request on these sockets is an ICE connectivity check, which belongs to
@@ -559,6 +576,10 @@ impl RTCTurnRelayer {
     }
 
     fn flush_pending_packets(&mut self, relay_addr: SocketAddr, peer_addr: SocketAddr) {
+        if !self.runtime.allows_turn_peer(peer_addr) {
+            self.pending_packets.remove(&(relay_addr, peer_addr));
+            return;
+        }
         let Some(four_tuple) = self.relay_addrs.get(&relay_addr).copied() else {
             return;
         };
@@ -570,6 +591,9 @@ impl RTCTurnRelayer {
         };
 
         while let Some(packet) = packets.pop_front() {
+            if !self.runtime.allows_turn_peer(peer_addr) {
+                return; // Do not retain packets after revocation.
+            }
             match managed_client
                 .client
                 .relay(relay_addr)
@@ -611,12 +635,21 @@ impl Protocol<TaggedBytesMut, TaggedBytesMut, RTCTurnRelayEventIn> for RTCTurnRe
     }
 
     fn poll_read(&mut self) -> Option<Self::Rout> {
-        self.routs.pop_front()
+        while let Some(message) = self.routs.pop_front() {
+            if self.runtime.allows_turn_peer(message.transport.peer_addr) {
+                return Some(message);
+            }
+        }
+        None
     }
 
     fn handle_write(&mut self, msg: TaggedBytesMut) -> Result<()> {
         let relay_addr = msg.transport.local_addr;
         let peer_addr = msg.transport.peer_addr;
+        if !self.runtime.allows_turn_peer(peer_addr) {
+            // Intentional policy drop, not an error on the TURN socket.
+            return Ok(());
+        }
 
         let Some(four_tuple) = self.relay_addrs.get(&relay_addr).copied() else {
             return Err(Error::Other(format!(
@@ -638,6 +671,9 @@ impl Protocol<TaggedBytesMut, TaggedBytesMut, RTCTurnRelayEventIn> for RTCTurnRe
         {
             Ok(()) => Ok(()),
             Err(Error::ErrNoPermission) => {
+                if !self.runtime.allows_turn_peer(peer_addr) {
+                    return Ok(());
+                }
                 if !self
                     .pending_permission_pairs
                     .contains_key(&(relay_addr, peer_addr))
@@ -657,7 +693,9 @@ impl Protocol<TaggedBytesMut, TaggedBytesMut, RTCTurnRelayEventIn> for RTCTurnRe
                         .insert((relay_addr, peer_addr), tid);
                 }
 
-                self.buffer_packet(relay_addr, peer_addr, msg);
+                if self.runtime.allows_turn_peer(peer_addr) {
+                    self.buffer_packet(relay_addr, peer_addr, msg);
+                }
                 Ok(())
             }
             Err(err) => Err(err),
@@ -739,7 +777,9 @@ impl Protocol<TaggedBytesMut, TaggedBytesMut, RTCTurnRelayEventIn> for RTCTurnRe
                             }
                         }
                         TurnEvent::DataIndicationOrChannelData(_, peer_addr, data) => {
-                            if let Some(relay_addr) = managed_client.relay_addr {
+                            if self.runtime.allows_turn_peer(peer_addr)
+                                && let Some(relay_addr) = managed_client.relay_addr
+                            {
                                 read_msgs.push(TaggedBytesMut {
                                     now: self.runtime.now(),
                                     transport: TransportContext {
@@ -871,6 +911,173 @@ mod tests {
             },
             message: BytesMut::from(raw),
         }
+    }
+
+    #[derive(Debug)]
+    struct FixtureGate {
+        peer: SocketAddr,
+        enabled: std::sync::atomic::AtomicBool,
+    }
+
+    impl Runtime for FixtureGate {
+        fn spawn(
+            &self,
+            _: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>,
+        ) -> Box<dyn crate::runtime::JoinHandle> {
+            panic!("test fixture spawns no I/O");
+        }
+
+        fn wrap_udp_socket(
+            &self,
+            _: std::net::UdpSocket,
+        ) -> std::io::Result<Arc<dyn crate::runtime::AsyncUdpSocket>> {
+            panic!("test fixture opens no sockets");
+        }
+
+        fn wrap_tcp_listener(
+            &self,
+            _: std::net::TcpListener,
+        ) -> std::io::Result<Arc<dyn crate::runtime::AsyncTcpListener>> {
+            panic!("test fixture opens no sockets");
+        }
+
+        fn connect_tcp<'a>(
+            &'a self,
+            _: SocketAddr,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<
+                        Output = std::io::Result<Arc<dyn crate::runtime::AsyncTcpStream>>,
+                    > + Send
+                    + 'a,
+            >,
+        > {
+            panic!("test fixture opens no sockets");
+        }
+
+        fn resolve_host<'a>(
+            &'a self,
+            host: &'a str,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = std::io::Result<Vec<SocketAddr>>> + Send + 'a>,
+        > {
+            Box::pin(async {
+                host.parse()
+                    .map(|addr| vec![addr])
+                    .map_err(std::io::Error::other)
+            })
+        }
+
+        fn allows_turn_peer(&self, peer: SocketAddr) -> bool {
+            peer == self.peer && self.enabled.load(std::sync::atomic::Ordering::Acquire)
+        }
+
+        fn requires_exact_turn_source(&self) -> bool {
+            true
+        }
+
+        fn sleep(
+            &self,
+            _: Duration,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'static>> {
+            panic!("test fixture advances no timers");
+        }
+
+        fn interval(&self, _: Duration) -> Box<dyn crate::runtime::AsyncInterval> {
+            panic!("test fixture advances no timers");
+        }
+
+        fn block_on(&self, future: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + '_>>) {
+            futures::executor::block_on(future);
+        }
+    }
+
+    #[test]
+    fn scoped_turn_peer_blocks_unsignaled_port_and_discards_queued_data_on_revoke() {
+        use rtc::stun::message::METHOD_DATA;
+        use rtc::turn::proto::{data::Data, peeraddr::PeerAddress};
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        let local = "127.0.0.1:50000".parse().unwrap();
+        let turn = "127.0.0.1:3478".parse().unwrap();
+        let relay = "192.0.2.1:49152".parse().unwrap();
+        let admitted: SocketAddr = "192.0.2.1:49153".parse().unwrap();
+        let denied = "192.0.2.1:49154".parse().unwrap();
+        let gate = Arc::new(FixtureGate {
+            peer: admitted,
+            enabled: AtomicBool::new(true),
+        });
+        let mut relayer = RTCTurnRelayer::new(
+            vec![local],
+            vec![RTCIceServer {
+                urls: vec![format!("turn:{turn}?transport=udp")],
+                username: "fixture".into(),
+                credential: "fixture".into(),
+            }],
+            RTCIceTransportPolicy::Relay,
+            None,
+            gate.clone(),
+            rtc::crypto::default_provider().unwrap(),
+        );
+        futures::executor::block_on(relayer.gather()).unwrap();
+        let allocate = relayer.poll_write().unwrap();
+        assert_eq!(allocate.transport.peer_addr, turn);
+        let mut request = StunMessage::new();
+        request.raw = allocate.message.to_vec();
+        request.decode().unwrap();
+        let response = build_turn_allocate_unauthorized(request.transaction_id);
+        assert!(relayer.is_turn_message(&tagged(local, turn, &response.raw)));
+        assert!(!relayer.is_turn_message(&tagged(local, admitted, &response.raw)));
+        let channel_data = [0x40u8, 0, 0, 4, 1, 2, 3, 4];
+        assert!(relayer.is_turn_message(&tagged(local, turn, &channel_data)));
+        assert!(!relayer.is_turn_message(&tagged(local, admitted, &channel_data)));
+
+        // A rejected logical destination never reaches the allocation or
+        // permission path (the fixture has no real allocation to send on).
+        assert!(relayer.handle_write(tagged(relay, denied, b"no")).is_ok());
+        assert!(
+            relayer
+                .handle_write(tagged(relay, admitted, b"yes"))
+                .is_err()
+        );
+        assert!(relayer.pending_permission_pairs.is_empty());
+        assert!(relayer.pending_packets.is_empty());
+        assert!(relayer.poll_write().is_none());
+
+        // Exercise the actual decoded event handoff with harmless in-memory
+        // indication payloads and a fixture-only local allocation label.
+        relayer.clients.values_mut().next().unwrap().relay_addr = Some(relay);
+        for peer in [denied, admitted, admitted] {
+            let mut indication = StunMessage::new();
+            indication
+                .build(&[
+                    Box::new(TransactionId::new()),
+                    Box::new(MessageType::new(METHOD_DATA, CLASS_INDICATION)),
+                    Box::new(PeerAddress {
+                        ip: peer.ip(),
+                        port: peer.port(),
+                    }),
+                    Box::new(Data(vec![1, 2, 3])),
+                ])
+                .unwrap();
+            // A direct authorized peer still cannot impersonate the TURN
+            // server by wrapping an allowed inner address.
+            let wrong_outer = tagged(local, admitted, &indication.raw);
+            assert!(!relayer.is_turn_message(&wrong_outer));
+            relayer.handle_read(wrong_outer).unwrap();
+            relayer
+                .handle_read(tagged(local, turn, &indication.raw))
+                .unwrap();
+        }
+        let _ = relayer.poll_event();
+        assert_eq!(relayer.routs.len(), 2); // Disallowed exact port never enters the queue.
+        assert_eq!(relayer.poll_read().unwrap().transport.peer_addr, admitted);
+        relayer.buffer_packet(relay, admitted, tagged(relay, admitted, b"queued"));
+        gate.enabled.store(false, Ordering::Release);
+        assert!(relayer.poll_read().is_none()); // Previously allowed, now revoked.
+        relayer.flush_pending_packets(relay, admitted);
+        assert!(relayer.pending_packets.is_empty());
+        assert!(relayer.poll_write().is_none());
     }
 
     fn build_turn_allocate_unauthorized(transaction_id: TransactionId) -> StunMessage {

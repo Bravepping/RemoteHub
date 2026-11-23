@@ -141,8 +141,8 @@ impl<'a> PublicVideoProof<'a> {
         PublicVideoIcePlan::prepare(self.scope, self.room, grant, config, now)
     }
 
-    /// Prepare the physical UDP boundary for this exact proof. Does not
-    /// bind/dial sockets or authorize capture, and is not a TURN peer gate.
+    /// Prepare the physical UDP and logical TURN gates for this exact proof.
+    /// Does not bind/dial sockets or authorize capture.
     #[cfg(feature = "v2-public-video-wss")]
     pub fn stage_ice(
         self,

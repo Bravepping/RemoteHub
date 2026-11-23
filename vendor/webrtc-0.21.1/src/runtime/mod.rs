@@ -161,6 +161,25 @@ pub trait Runtime: Send + Sync + Debug + 'static {
         host: &'a str,
     ) -> Pin<Box<dyn Future<Output = io::Result<Vec<SocketAddr>>> + Send + 'a>>;
 
+    /// Permit a logical peer inside a TURN allocation, independently of the
+    /// UDP address of the TURN server. Called before TURN data or permission
+    /// requests are produced, and before delivering decapsulated peer data.
+    ///
+    /// Defaults to the original unrestricted behavior. An overriding policy
+    /// should be synchronous and permanently deny after revocation. The
+    /// runtime must still enforce physical endpoints on its sockets, including
+    /// already-encoded datagrams pending at the moment of revocation.
+    fn allows_turn_peer(&self, _peer: SocketAddr) -> bool {
+        true
+    }
+
+    /// Require TURN input to match the exact configured allocation socket
+    /// pair, including the TURN server's source IP and port. Strict runtimes
+    /// must not use the legacy fallback for multihomed TURN servers.
+    fn requires_exact_turn_source(&self) -> bool {
+        false
+    }
+
     /// The current instant, as this runtime measures it.
     ///
     /// **This is the clock the sans-I/O core sees.** The core is *told* the time — through

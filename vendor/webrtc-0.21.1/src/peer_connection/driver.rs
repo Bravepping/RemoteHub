@@ -2137,7 +2137,15 @@ where
         if !turn_messages.is_empty() {
             let mut core = self.inner.core.lock().await;
             for message in turn_messages {
-                core.handle_read(message)?;
+                // The boundary may have been revoked while waiting for the
+                // core lock after the relayer drained its own read queue.
+                if self
+                    .inner
+                    .runtime
+                    .allows_turn_peer(message.transport.peer_addr)
+                {
+                    core.handle_read(message)?;
+                }
             }
         }
 

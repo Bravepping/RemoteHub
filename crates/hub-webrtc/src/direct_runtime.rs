@@ -109,6 +109,10 @@ impl Boundary {
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
     }
+    #[cfg(feature = "v2-public-video-wss")]
+    pub(crate) fn deadline(&self) -> Instant {
+        self.deadline
+    }
     fn active(&self) -> bool {
         !self.stopped.load(Ordering::Acquire) && Instant::now() < self.deadline
     }
