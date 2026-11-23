@@ -115,9 +115,20 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 首轮跨网验收：两台 Windows 分别走宽带和热点，不填私网对端，确认收到并解码合成图案，两侧实际选中的候选匹配已验证信令且走非中继公网路径，最后两端均释放资源。若实际选中 TURN，只记录中继结果，不算公网直连；受控回退测试须另行批准。只有候选收集、画面或最后一次旧样本不能判定选路通过。尚未运行跨网实测。
 
+### 构建 Windows x64 便携诊断包
+
+在已安装项目工具链的 Windows 电脑上，从 **Developer PowerShell for VS（x64）** 进入干净的 `v2/clean-core` 检出目录后运行：
+
+```powershell
+.\scripts\build-r06.ps1
+```
+
+脚本只构建并打包，不运行应用、不安装 SDK、不启动公网诊断。`artifacts` 下输出带提交号的未签名 ZIP，只含 `remotehub-r06-synthetic.exe` 和该程序的 SHA-256 清单；不会把现有配置、证书或测试统计放进包。此包不是安装器，运行需要 WebView2；脚本被系统策略拦截时先停下，不绕过策略。
+
 ## 本分支已执行验证
 
-- Linux：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 通过（42 项）；覆盖发送、接收各自配置、错角色、双令牌拒绝及单机双令牌格式保持。Windows 交叉检查因当前环境缺 MSVC `lib.exe` 停在依赖构建，尚未生成新 Windows 安装包。
+- `scripts/build-r06.ps1` 在 PowerShell 7 用替身编译器验证了 ZIP 文件白名单、可核对的 SHA-256、临时文件清理及拒绝覆盖/脏工作树；没有用替身产物冒充可执行包。前端冻结依赖、构建及 135 项测试通过。
+- Linux：`cargo test -p hub-webrtc --features p006-session-probe --lib --locked --offline` 通过（42 项）；覆盖发送、接收各自配置、错角色、双令牌拒绝及单机双令牌格式保持。后续已通过 `cargo check -p remotehub-desktop --target x86_64-pc-windows-msvc --features p007b-diag,custom-protocol --locked --offline`；这是编译检查，不等同于链接出正式 MSVC EXE 或实机测试。
 - Linux：`cargo test -p hub-webrtc --features p006-direct-probe --lib --locked --offline` 40 项通过。新增自动回归只绑定 `127.0.0.1`，使用两端各自的授权范围建立真实原生 WebRTC DataChannel，100 条合成文本全部收齐并收到 ACK；读取两端实际选中的 UDP 主机候选对后，双方正常关闭。测试入口不编入正式探测器；`cargo check -p hub-webrtc --features p006-direct-probe --bin ice-path-probe --locked --offline` 通过。此前 `p006-session-probe` 编译检查也已通过。未启动 STUN/TURN，未做跨网双机验证。
 - Linux PowerShell 7.4：`pwsh -NoProfile -File scripts/test-private-wss-launcher.ps1` 通过；覆盖角色与入口匹配、指纹错误、错误角色与损坏配置拒绝、子进程环境隔离。使用替身文件，不启动程序或中继；新脚本尚未在 Windows 实机验证。
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（135 项）、`pnpm lint`、`pnpm build` 通过。
