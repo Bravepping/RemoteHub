@@ -34,8 +34,12 @@ use webrtc::peer_connection::RTCConfigurationBuilder;
 #[path = "../../hub-rendezvous-probe/src/bin/v2_signaling/public_video_fixture_net.rs"]
 mod fixture_net;
 use fixture_net::{FixtureNat, FixtureSide};
+#[path = "public_video_turn_fixture_net.rs"]
+mod turn_fixture;
+use turn_fixture::{FixtureTurn, RELAY_LABEL, RELAY_PORTS};
 
 const WAIT: Duration = Duration::from_secs(6);
+const TURN_TTL_SECS: u32 = 8;
 const LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
 const TOKEN: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
 
@@ -211,9 +215,18 @@ fn owner<'a>(
     )
 }
 
-async fn exercise(abrupt: bool) {
+async fn exercise(abrupt: bool, relay_only: bool) {
     let mut tls = RelayFixture::start().await;
-    let nat = FixtureNat::start().await.unwrap();
+    let (nat, turn) = if relay_only {
+        (None, Some(FixtureTurn::start(TURN_TTL_SECS).await.unwrap()))
+    } else {
+        (Some(FixtureNat::start().await.unwrap()), None)
+    };
+    let route = if relay_only {
+        SelectedRoute::TurnRelay
+    } else {
+        SelectedRoute::ServerReflexiveDirect
+    };
     let host = Identity::generate_ephemeral().unwrap();
     let viewer = Identity::generate_ephemeral().unwrap();
     let host_pin = pin(&host, &viewer);
@@ -222,13 +235,17 @@ async fn exercise(abrupt: bool) {
     let key = Arc::new(Key::generate());
     let room = Uuid::new_v4();
     let wire_nonce = Uuid::new_v4().to_string();
-    let label = Ipv4Addr::new(93, 184, 216, 34); // proof context only, never dialed
+    let label = RELAY_LABEL; // logical/signature label, never dialed
     let scope = PublicVideoScope {
         wss: SocketAddrV4::new(label, 8443),
         ca_sha256: tls.ca_hash,
         turn: SocketAddrV4::new(label, 3478),
         relay_ports: (49152, 49200),
-        mode: IceMode::DirectPreferred,
+        mode: if relay_only {
+            IceMode::RelayOnly
+        } else {
+            IceMode::DirectPreferred
+        },
         expires_at: wall_seconds().unwrap() + 120,
     };
     let cfg = |role, local_identity, peer| PublicVideoWssConfig {
@@ -253,11 +270,23 @@ async fn exercise(abrupt: bool) {
     let v = PublicVideoWss::connect_loopback_wss(cfg(Role::Viewer, &viewer, &viewer_pin))
         .await
         .unwrap();
+    let make = |proof, now, side| match (&nat, &turn) {
+        (Some(nat), None) => owner(proof, now, nat, room, side),
+        (None, Some(turn)) => PublicVideoScopedIce::new_turn_loopback_fixture(
+            proof,
+            turn.server(),
+            turn.ice_server(),
+            now,
+        ),
+        _ => unreachable!("exact fixture mode"),
+    };
     let (h, v) = tokio::try_join!(
-        h.establish_scoped_fixture(|proof, now| owner(proof, now, &nat, room, FixtureSide::Host)),
-        v.establish_scoped_fixture(|proof, now| owner(proof, now, &nat, room, FixtureSide::Viewer)),
+        h.establish_scoped_fixture(|proof, now| make(proof, now, FixtureSide::Host)),
+        v.establish_scoped_fixture(|proof, now| make(proof, now, FixtureSide::Viewer)),
     )
     .unwrap();
+    let host_runtime = h.ice.fixture_runtime();
+    let viewer_runtime = v.ice.fixture_runtime();
     let (host_stop, host_rx) = watch::channel(false);
     let (_viewer_stop, viewer_rx) = watch::channel(false);
     let (host_state_tx, mut host_state) = watch::channel(ScopedWssState::Negotiating);
@@ -267,7 +296,7 @@ async fn exercise(abrupt: bool) {
             .wait_for(|s| {
                 matches!(
                     s,
-                    ScopedWssState::HostPathVerified(SelectedRoute::ServerReflexiveDirect)
+                    ScopedWssState::HostPathVerified(actual) if *actual == route
                 )
             })
             .await
@@ -276,6 +305,27 @@ async fn exercise(abrupt: bool) {
             .wait_for(|s| matches!(s, ScopedWssState::Established))
             .await
             .unwrap();
+        if let Some(turn) = &turn {
+            let active = turn.stats();
+            assert_eq!(active.allocations_created, 2);
+            assert_eq!(active.active, 2);
+            assert!(active.permissions_created >= 2);
+            assert!(active.forwarded_packets > 0);
+            let allowed = |runtime: &dyn webrtc::runtime::Runtime| {
+                assert!(!runtime.allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, 49154).into()));
+                [RELAY_PORTS.0, RELAY_PORTS.1]
+                    .into_iter()
+                    .filter(|&port| {
+                        runtime.allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, port).into())
+                    })
+                    .collect::<Vec<_>>()
+            };
+            let host_peer = allowed(host_runtime.as_ref());
+            let viewer_peer = allowed(viewer_runtime.as_ref());
+            assert_eq!(host_peer.len(), 1);
+            assert_eq!(viewer_peer.len(), 1);
+            assert_ne!(host_peer, viewer_peer);
+        }
         if abrupt {
             tls.task.abort();
         } else {
@@ -302,14 +352,56 @@ async fn exercise(abrupt: bool) {
     }
     assert!(matches!(&*host_state.borrow(), ScopedWssState::Closed));
     assert!(matches!(&*viewer_state.borrow(), ScopedWssState::Closed));
+    if let Some(turn) = &turn {
+        // A local close is not evidence of a server deallocation. Both
+        // allocations remain until lifetime expiry in this fixture.
+        let closed = turn.stats();
+        assert_eq!(closed.active, 2);
+        assert_eq!(closed.released, 0);
+        for runtime in [&host_runtime, &viewer_runtime] {
+            for relay_port in [RELAY_PORTS.0, RELAY_PORTS.1] {
+                assert!(
+                    !runtime.allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, relay_port).into())
+                );
+            }
+            let local = std::net::UdpSocket::bind((LOOPBACK, 0)).unwrap();
+            local.set_nonblocking(true).unwrap();
+            let scoped = runtime.wrap_udp_socket(local).unwrap();
+            assert_eq!(
+                scoped
+                    .send_to(b"closed", turn.server().into())
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                std::io::ErrorKind::PermissionDenied,
+            );
+        }
+        // Separate setup and expiry budgets; the first allocation can
+        // precede the second, and pre-stop datagrams may already be in flight.
+        timeout(Duration::from_secs(u64::from(TURN_TTL_SECS) + 2), async {
+            while turn.stats().active != 0 {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await
+        .expect("server's advertised allocation lifetimes expired");
+        let ended = turn.stats();
+        assert_eq!(ended.expired, 2);
+        assert_eq!(ended.released, 0);
+    }
 }
 
 #[tokio::test]
 async fn scoped_loopback_wss_applies_signed_video_and_closes_both_roles() {
-    exercise(false).await;
+    exercise(false, false).await;
 }
 
 #[tokio::test]
 async fn scoped_loopback_wss_closes_both_roles_when_transport_drops() {
-    exercise(true).await;
+    exercise(true, false).await;
+}
+
+#[tokio::test]
+async fn scoped_loopback_turn_selects_relay_and_allocations_expire_after_stop() {
+    exercise(false, true).await;
 }

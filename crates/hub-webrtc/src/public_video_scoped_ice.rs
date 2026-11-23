@@ -312,6 +312,67 @@ impl<'a> PublicVideoScopedIce<'a> {
         })
     }
 
+    // Reuse the production relay socket guard, logical TURN gate and ICE
+    // driver. The test seam fixes the physical listener to loopback.
+    #[cfg(test)]
+    pub(crate) fn new_turn_loopback_fixture(
+        proof: PublicVideoProof<'a>,
+        endpoint: SocketAddrV4,
+        server: webrtc::peer_connection::RTCIceServer,
+        now: u64,
+    ) -> Result<Self, &'static str> {
+        use std::net::Ipv4Addr;
+        use webrtc::peer_connection::{RTCConfigurationBuilder, RTCIceTransportPolicy};
+
+        if *endpoint.ip() != Ipv4Addr::LOCALHOST
+            || endpoint.port() == 0
+            || server.urls != [format!("turn:{endpoint}?transport=udp")]
+        {
+            return Err(SETUP);
+        }
+        let deadline = Instant::now() + Duration::from_secs(120);
+        let stopped = Arc::new(AtomicBool::new(false));
+        Ok(Self {
+            proof,
+            runtime: Arc::new(ScopedRuntime {
+                physical: RouteRuntime::Relay(RelayRuntime {
+                    base: PinnedRuntime {
+                        inner: webrtc::runtime::default_runtime().ok_or(SETUP)?,
+                        local: Ipv4Addr::LOCALHOST.into(),
+                        peer: Ipv4Addr::LOCALHOST.into(),
+                        counters: Arc::default(),
+                    },
+                    endpoint: endpoint.into(),
+                    deadline,
+                    stopped: stopped.clone(),
+                }),
+                peers: RwLock::new(None),
+                stopped,
+                deadline,
+            }),
+            issued_at: now,
+            expires_at: now + 120,
+            start: Some(DriverStart {
+                config: RTCConfigurationBuilder::default()
+                    .with_ice_servers(vec![server])
+                    .with_ice_transport_policy(RTCIceTransportPolicy::Relay)
+                    .build(),
+                local: SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0),
+                host_candidates: false,
+            }),
+            pc: None,
+            gathered: None,
+            local_candidates: None,
+            remote_applied: false,
+            path_verified: false,
+        })
+    }
+
+    #[cfg(test)]
+    pub(crate) fn fixture_runtime(&self) -> Arc<dyn Runtime> {
+        self.runtime.clone()
+    }
+
     /// Bind one UDP4 interface only; caller must obtain native consent and
     /// ensure the approved signaling lifetime owns the returned driver.
     pub async fn start(&mut self, now: u64) -> Result<(), &'static str> {
