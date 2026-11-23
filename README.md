@@ -16,7 +16,7 @@
 | 私网 WSS 信令（仅视频） | 桌面可选模式，双方设备证明及停止仍走直接 TCP；签名 offer/answer 由私网 WSS 中继转发，视频仍走指定对端的 LAN WebRTC。两台 Windows 实机已确认画面、共享端手动停止后两端结束，以及关闭中继后无法建立新连接 |
 | 已验证设备 LAN（仅视频） | 可选模式，原生明确同意后，用临时配对码及双方设备签名核验；身份或信令不符直接结束，不回退。Windows 双机画面、共享端手动停止、自然结束及未核验拒绝通过（`c8122d2`） |
 | Axum WebSocket 信令 | Rust 原生客户端与 Axum 已在回环打通。两个真实 WebRTC PeerConnection 通过带会话鉴权的 offer/answer/ICE 建立 DataChannel 并传输合成文本；桌面可选构建增加原生授权后的本机信令诊断；实际远控仍使用既有 LAN TCP |
-| STUN/ICE + TURN | 历史研究/实验曾通过，V2 正式产品路径尚未集成；**R06 仍 OPEN** |
+| STUN/ICE + TURN | 历史研究/实验曾通过；精简分支已修正选路探测的候选核验并加入脱敏选路分类，未验证公网双机，正式产品路径未集成；**R06 仍 OPEN** |
 | Windows 安装包 | 未交付 |
 
 **注意**：表中帧数和输入 ACK 数来自原版历史测试；本次精简分支双机回归未单独记录这些计数。远控只允许在已授权的 Windows 设备上进行。
@@ -107,8 +107,13 @@ $testDir = Join-Path $env:LOCALAPPDATA ('RemoteHub-WssTest-' + [guid]::NewGuid()
 
 脚本仅为所选进程传递该角色需要的固定环境变量，不把令牌写入命令参数、打印到终端或改写系统环境。它不修改证书信任、防火墙或启动远控会话。启动后仍需双方核验设备完整指纹、手动选择「私网 WSS 信令（仅视频）」并分别批准本次会话。只共享空白记事本的测试画面；点「停止并回收」，关闭两端程序和中继窗口。不启用键鼠。只反馈结果和固定错误码，不上传截图、配置、临时配对码、证书私钥或令牌。
 
+## 公网选路探测（非产品入口）
+
+`ice-path-probe` 还是单机双原生 PeerConnection、仅合成文本的显式探测工具，不采集桌面、不发键鼠。每侧只用在自身授权范围内验证过的 offer/answer 候选检查实际选中对；发包前后分别核对，没有读到新候选对时不把旧值当成最终结果。报告保留粗分类 `path`（直连/中继），另用 `route` 区分私网主机、公网主机、STUN 映射候选和 TURN 中继，用 `selected_phase` 区分流量前后；都不输出 IP、端口或凭据。仅收集到候选、或选到私网主机候选，并不证明公网连通。外网测试须确认具体端点和范围后另行执行。
+
 ## 本分支已执行验证
 
+- Linux：`cargo test -p hub-webrtc --features p006-direct-probe --lib --locked --offline` 39 项通过，覆盖两端不同授权范围、实际候选分类输出和未授权候选拒绝；`cargo check -p hub-webrtc --features p006-session-probe --locked --offline` 通过。未启动公网 STUN/TURN，未做跨网双机验证。
 - Linux PowerShell 7.4：`pwsh -NoProfile -File scripts/test-private-wss-launcher.ps1` 通过；覆盖角色与入口匹配、指纹错误、错误角色与损坏配置拒绝、子进程环境隔离。使用替身文件，不启动程序或中继；新脚本尚未在 Windows 实机验证。
 - Linux：`pnpm install --frozen-lockfile`、`pnpm typecheck`、`pnpm test`（135 项）、`pnpm lint`、`pnpm build` 通过。
 - Linux：`cargo test -p hub-webrtc --features v2-private-wss-lan,v2-verified-signaling --locked` 36 项通过、1 项忽略；覆盖 WSS/TCP 会话引导、不同模式/中继拒绝、精确 answer 的 TCP 确认及旧 LAN v1 帧逐字节兼容。

@@ -343,12 +343,22 @@ pub fn data_sdp(sdp: &str, grant: &DirectGrant, now: u64) -> Result<VerifiedCand
     }
     Ok(checked)
 }
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SelectedRoute {
+    PrivateHostDirect,
+    PublicHostDirect,
+    ServerReflexiveDirect,
+    TurnRelay,
+}
+
 #[derive(Clone, Serialize)]
 pub struct PathSummary {
     pub local_type: Kind,
     pub remote_type: Kind,
     pub protocol: &'static str,
     pub path: &'static str,
+    pub route: SelectedRoute,
 }
 pub fn selected(
     local: Candidate,
@@ -362,15 +372,26 @@ pub fn selected(
     if !local_candidates.values.contains(&local) || !remote_candidates.values.contains(&remote) {
         return Err("DIRECT_SELECTED_PAIR_NOT_APPROVED".into());
     }
+    let route = match (local.kind, remote.kind) {
+        (Kind::Relay, _) | (_, Kind::Relay) => SelectedRoute::TurnRelay,
+        (Kind::Srflx, _) | (_, Kind::Srflx) => SelectedRoute::ServerReflexiveDirect,
+        (Kind::Host, Kind::Host)
+            if public_v4(*local.address.ip()) || public_v4(*remote.address.ip()) =>
+        {
+            SelectedRoute::PublicHostDirect
+        }
+        (Kind::Host, Kind::Host) => SelectedRoute::PrivateHostDirect,
+    };
     Ok(PathSummary {
         local_type: local.kind,
         remote_type: remote.kind,
         protocol: "udp",
-        path: if local.kind == Kind::Relay || remote.kind == Kind::Relay {
+        path: if route == SelectedRoute::TurnRelay {
             "relay"
         } else {
             "direct"
         },
+        route,
     })
 }
 
@@ -381,7 +402,10 @@ mod tests {
         DirectGrant::local_diagnostic("192.168.1.2".parse().unwrap(), 1300, true, 1000).unwrap()
     }
     fn sdp() -> String {
-        format!("v=0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:0\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:abcd\r\na=ice-pwd:abcdefghijklmnopqrstuvwx\r\na=fingerprint:sha-256 {}\r\na=sctp-port:5000\r\na=candidate:x 1 udp 123 192.168.1.2 50000 typ host\r\n",["AB";32].join(":"))
+        format!(
+            "v=0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:0\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:abcd\r\na=ice-pwd:abcdefghijklmnopqrstuvwx\r\na=fingerprint:sha-256 {}\r\na=sctp-port:5000\r\na=candidate:x 1 udp 123 192.168.1.2 50000 typ host\r\n",
+            ["AB"; 32].join(":")
+        )
     }
     #[test]
     fn rejects_scope_size_fingerprint_media_expiry_and_dangerous_addresses() {
@@ -416,6 +440,49 @@ mod tests {
         assert!(DirectGrant::local_diagnostic(g.local, 1300, false, 1000).is_err());
         assert!(data_sdp(&"x".repeat(65537), &g, 1000).is_err());
     }
+    #[test]
+    fn selected_route_reports_only_approved_candidate_types_without_endpoints() {
+        let (relay, mut config) = crate::ice_policy::tests::fixture();
+        config.mode = IceMode::DirectPreferred;
+        let g =
+            DirectGrant::new(relay, vec!["192.168.1.2".parse().unwrap()], &config, 1000).unwrap();
+        let values = candidates(
+            "a=candidate:a 1 udp 1 192.168.1.2 50000 typ host\r\n\
+             a=candidate:b 1 udp 1 8.8.8.8 50001 typ host\r\n\
+             a=candidate:c 1 udp 1 8.8.8.8 50002 typ srflx\r\n\
+             a=candidate:d 1 udp 1 8.8.8.8 49160 typ relay\r\n",
+            &g,
+            1000,
+        )
+        .unwrap();
+        let c = values.candidates();
+        for (a, b, route, label) in [
+            (
+                0,
+                0,
+                SelectedRoute::PrivateHostDirect,
+                "private_host_direct",
+            ),
+            (0, 1, SelectedRoute::PublicHostDirect, "public_host_direct"),
+            (
+                2,
+                0,
+                SelectedRoute::ServerReflexiveDirect,
+                "server_reflexive_direct",
+            ),
+            (2, 3, SelectedRoute::TurnRelay, "turn_relay"),
+            (3, 0, SelectedRoute::TurnRelay, "turn_relay"),
+        ] {
+            let pair = selected(c[a], c[b], &values, &values).unwrap();
+            assert_eq!(pair.route, route);
+            let report = serde_json::to_value(pair).unwrap();
+            assert_eq!(report["route"], label);
+            assert_eq!(report.as_object().unwrap().len(), 5);
+            assert!(!report.to_string().contains("8.8.8.8"));
+            assert!(!report.to_string().contains("192.168.1.2"));
+        }
+    }
+
     #[test]
     fn direct_is_explicit_and_old_relay_entry_remains_closed() {
         let (g, mut c) = crate::ice_policy::tests::fixture();

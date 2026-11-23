@@ -78,6 +78,7 @@ pub struct Report {
     pub gather_complete_b: bool,
     pub selected_a: Option<PathSummary>,
     pub selected_b: Option<PathSummary>,
+    pub selected_phase: Option<&'static str>,
     pub sent: u32,
     pub received: u32,
     pub acknowledged: u32,
@@ -200,6 +201,9 @@ impl Peer {
         local: &VerifiedCandidates,
         remote: &VerifiedCandidates,
     ) -> Result<PathSummary, String> {
+        if local.scope != self.grant.scope() || remote.scope != self.grant.scope() {
+            return Err("DIRECT_SELECTED_PAIR_SCOPE_MISMATCH".into());
+        }
         let sctp = self.pc.sctp().await.ok_or("DIRECT_SCTP_MISSING")?;
         let pair = sctp
             .transport()
@@ -212,7 +216,10 @@ impl Peer {
             if c.protocol.to_string() != "udp" {
                 return Err("DIRECT_SELECTED_PROTOCOL".into());
             }
-            Candidate::parse(&format!("x 1 udp 1 {} {} typ {}", c.address, c.port, c.typ))
+            Candidate::parse(&format!(
+                "x {} udp 1 {} {} typ {}",
+                c.component, c.address, c.port, c.typ
+            ))
         };
         direct_policy::selected(
             convert(pair.local())?,
@@ -239,7 +246,7 @@ async fn message(dc: &Arc<dyn DataChannel>) -> Result<Vec<u8>, String> {
     loop {
         match dc.poll().await {
             Some(DataChannelEvent::OnMessage(m)) if m.is_string && m.data.len() <= 64 => {
-                return Ok(m.data.to_vec())
+                return Ok(m.data.to_vec());
             }
             Some(
                 DataChannelEvent::OnBufferedAmountLow | DataChannelEvent::OnBufferedAmountHigh,
@@ -253,12 +260,61 @@ async fn wait_open(dc: &Arc<dyn DataChannel>) -> Result<(), String> {
         match dc.poll().await {
             Some(DataChannelEvent::OnOpen) => return Ok(()),
             Some(DataChannelEvent::OnClose | DataChannelEvent::OnError) | None => {
-                return Err("DIRECT_CHANNEL_FAILED".into())
+                return Err("DIRECT_CHANNEL_FAILED".into());
             }
             _ => (),
         }
     }
 }
+struct ScopedSdp {
+    sender: VerifiedCandidates,
+    receiver: VerifiedCandidates,
+}
+
+fn scoped_sdp(
+    sdp: &str,
+    sender: &DirectGrant,
+    receiver: &DirectGrant,
+    now: u64,
+) -> Result<ScopedSdp, String> {
+    // Each peer uses its own grant for both sets, even with distinct TURN tickets.
+    Ok(ScopedSdp {
+        sender: direct_policy::data_sdp(sdp, sender, now)?,
+        receiver: direct_policy::data_sdp(sdp, receiver, now)?,
+    })
+}
+
+async fn record_selected(
+    a: &Peer,
+    b: &Peer,
+    offer: &ScopedSdp,
+    answer: &ScopedSdp,
+    report: &mut Report,
+    phase: &'static str,
+) -> Result<(), String> {
+    // If either read now fails, don't report the previous pair as current or mix snapshots.
+    report.selected_phase = None;
+    report.selected_a = None;
+    report.selected_b = None;
+    let (a_path, b_path) = tokio::try_join!(
+        a.pair(&offer.sender, &answer.receiver),
+        b.pair(&answer.sender, &offer.receiver),
+    )?;
+    let expected = match report.case {
+        Case::Direct | Case::TurnUnavailable => Some("direct"),
+        Case::Fallback => Some("relay"),
+        Case::AllUnavailable => None,
+    };
+    let matched = expected.is_some_and(|path| a_path.path == path && b_path.path == path);
+    report.selected_a = Some(a_path);
+    report.selected_b = Some(b_path);
+    report.selected_phase = Some(phase);
+    if !matched {
+        return Err("DIRECT_UNEXPECTED_SELECTED_PATH".into());
+    }
+    Ok(())
+}
+
 async fn exercise(a: &Peer, b: &Peer, report: &mut Report) -> Result<(), String> {
     let dc =
         a.pc.create_data_channel("ice.path.probe", None)
@@ -268,10 +324,9 @@ async fn exercise(a: &Peer, b: &Peer, report: &mut Report) -> Result<(), String>
         .await
         .map_err(|_| "DIRECT_SET_OFFER")?;
     let offer = a.gathered().await?;
-    let a_candidates = direct_policy::data_sdp(&offer, &a.grant, now())?;
-    report.gathered_a = Some(Counts::from(&a_candidates));
-    b.boundary
-        .install_peer(direct_policy::data_sdp(&offer, &b.grant, now())?)?;
+    let offer_sets = scoped_sdp(&offer, &a.grant, &b.grant, now())?;
+    report.gathered_a = Some(Counts::from(&offer_sets.sender));
+    b.boundary.install_peer(offer_sets.receiver.clone())?;
     b.pc.set_remote_description(
         RTCSessionDescription::offer(offer).map_err(|_| "DIRECT_OFFER_PARSE")?,
     )
@@ -285,10 +340,9 @@ async fn exercise(a: &Peer, b: &Peer, report: &mut Report) -> Result<(), String>
     .await
     .map_err(|_| "DIRECT_SET_ANSWER")?;
     let answer = b.gathered().await?;
-    let b_candidates = direct_policy::data_sdp(&answer, &b.grant, now())?;
-    report.gathered_b = Some(Counts::from(&b_candidates));
-    a.boundary
-        .install_peer(direct_policy::data_sdp(&answer, &a.grant, now())?)?;
+    let answer_sets = scoped_sdp(&answer, &b.grant, &a.grant, now())?;
+    report.gathered_b = Some(Counts::from(&answer_sets.sender));
+    a.boundary.install_peer(answer_sets.receiver.clone())?;
     a.pc.set_remote_description(
         RTCSessionDescription::answer(answer).map_err(|_| "DIRECT_ANSWER_PARSE")?,
     )
@@ -308,8 +362,7 @@ async fn exercise(a: &Peer, b: &Peer, report: &mut Report) -> Result<(), String>
     tokio::time::timeout(Duration::from_secs(2), wait_open(&incoming))
         .await
         .map_err(|_| "DIRECT_REMOTE_OPEN_TIMEOUT")??;
-    report.selected_a = Some(a.pair(&a_candidates, &b_candidates).await?);
-    report.selected_b = Some(b.pair(&b_candidates, &a_candidates).await?);
+    record_selected(a, b, &offer_sets, &answer_sets, report, "before_traffic").await?;
     for seq in 1..=100 {
         dc.send_text(&format!("path:{seq}"))
             .await
@@ -336,25 +389,7 @@ async fn exercise(a: &Peer, b: &Peer, report: &mut Report) -> Result<(), String>
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     // Verify the path again after actual traffic; never label a stale initial pair as current.
-    report.selected_a = Some(a.pair(&a_candidates, &b_candidates).await?);
-    report.selected_b = Some(b.pair(&b_candidates, &a_candidates).await?);
-    let expected = if report.case == Case::Fallback {
-        "relay"
-    } else {
-        "direct"
-    };
-    if report
-        .selected_a
-        .as_ref()
-        .is_none_or(|p| p.path != expected)
-        || report
-            .selected_b
-            .as_ref()
-            .is_none_or(|p| p.path != expected)
-    {
-        return Err("DIRECT_UNEXPECTED_SELECTED_PATH".into());
-    }
-    Ok(())
+    record_selected(a, b, &offer_sets, &answer_sets, report, "after_traffic").await
 }
 pub async fn run(
     a: DirectGrant,
@@ -381,6 +416,7 @@ pub async fn run(
         gather_complete_b: false,
         selected_a: None,
         selected_b: None,
+        selected_phase: None,
         sent: 0,
         received: 0,
         acknowledged: 0,
@@ -429,11 +465,49 @@ pub async fn run(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn offer_and_answer_are_validated_under_each_observer_scope() {
+        let ip = "192.168.1.2".parse().unwrap();
+        let a = DirectGrant::local_diagnostic(ip, 1300, true, 1000).unwrap();
+        let b = DirectGrant::local_diagnostic(ip, 1300, true, 1000).unwrap();
+        assert_ne!(a.scope(), b.scope());
+        let sdp = |port| {
+            format!(
+                "v=0\r\na=group:BUNDLE 0\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\na=mid:0\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:abcd\r\na=ice-pwd:abcdefghijklmnopqrstuvwx\r\na=fingerprint:sha-256 {}\r\na=sctp-port:5000\r\na=candidate:x 1 udp 1 {ip} {port} typ host\r\n",
+                ["AB"; 32].join(":")
+            )
+        };
+        let offer = scoped_sdp(&sdp(50000), &a, &b, 1000).unwrap();
+        let answer = scoped_sdp(&sdp(50001), &b, &a, 1000).unwrap();
+        let a_candidate = offer.sender.candidates()[0];
+        let b_candidate = answer.sender.candidates()[0];
+        assert!(
+            direct_policy::selected(a_candidate, b_candidate, &offer.sender, &answer.receiver)
+                .is_ok()
+        );
+        assert!(
+            direct_policy::selected(b_candidate, a_candidate, &answer.sender, &offer.receiver)
+                .is_ok()
+        );
+        assert_eq!(
+            direct_policy::selected(a_candidate, b_candidate, &offer.sender, &answer.sender)
+                .err()
+                .as_deref(),
+            Some("DIRECT_SELECTED_PAIR_SCOPE_MISMATCH")
+        );
+        assert!(scoped_sdp(&sdp(50000), &a, &b, 1300).is_err());
+    }
+
     #[tokio::test]
     async fn closed_real_channel_terminates_instead_of_spinning_on_eof() {
         let (tx, _rx) = mpsc::channel(1);
         let pc = PeerConnectionBuilder::new()
             .with_udp_addrs(vec!["127.0.0.1:0".to_string()])
+            .with_setting_engine(
+                SettingEngineBuilder::new()
+                    .with_multicast_dns_mode(MulticastDnsMode::Disabled)
+                    .build(),
+            )
             .with_handler(Arc::new(Handler {
                 complete: Arc::new(AtomicBool::new(false)),
                 incoming: tx,
