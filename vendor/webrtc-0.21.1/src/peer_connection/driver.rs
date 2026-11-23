@@ -2147,6 +2147,13 @@ where
                     core.handle_read(message)?;
                 }
             }
+            drop(core);
+            // TURN ingress reaches core after the main event poll. Dispatch
+            // OnTrack before the corresponding first RTP is drained, just as
+            // for direct ingress, or the receiver queue does not yet exist.
+            for event in Self::drain_core_events(self.inner.clone()).await {
+                self.handle_rtc_event(event).await;
+            }
         }
 
         // 3.b Media, unconditionally. It shares nothing with data-channel flow control, and

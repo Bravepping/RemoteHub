@@ -11,6 +11,7 @@ use crate::{
     ice_policy::{IceConfig, RelayGrant},
     lan_wire::Key,
     public_video::{PublicVideoIcePlan, PublicVideoProof, PublicVideoScope, PublicVideoScopedIce},
+    public_video_media::ScopedVideoMedia,
 };
 use hub_identity::{
     pairing::VerifiedPeer,
@@ -577,20 +578,12 @@ impl<'a> PublicVideoWss<'a> {
     }
 }
 
-enum VideoTrack {
+pub(crate) enum VideoTrack {
     Local(Arc<dyn TrackLocal>),
     Remote(Arc<dyn TrackRemote>),
 }
 
-pub(crate) async fn read_authorizable_video_pair(
-    pc: &dyn PeerConnection,
-    role: Role,
-) -> Result<(Candidate, Candidate), &'static str> {
-    let (pair, _) = read_video_pair(pc, role).await?;
-    Ok((to_candidate(pair.local())?, to_candidate(pair.remote())?))
-}
-
-async fn read_video_pair(
+pub(crate) async fn read_video_pair(
     pc: &dyn PeerConnection,
     role: Role,
 ) -> Result<(RTCIceCandidatePair, VideoTrack), &'static str> {
@@ -813,7 +806,7 @@ pub enum ScopedWssState {
     /// Both signed descriptions applied. This is not proof of a usable path
     /// or of media, and must not be surfaced as video success.
     Established,
-    /// Host RTP transport selected an exact signed pair. No video was sent.
+    /// Host RTP transport selected an exact signed pair. Not a media result.
     HostPathVerified(SelectedRoute, Kind, Kind),
     Closed,
 }
@@ -825,7 +818,7 @@ pub enum ScopedWssEnd {
 }
 
 /// One owner for the authenticated wire and the exact ICE driver. No raw
-/// PeerConnection, unsigned SDP injection, media, or input is exposed.
+/// PeerConnection, unsigned SDP injection, or input is exposed.
 pub struct ScopedPublicVideoWss<'a> {
     wire: ScopedWire,
     ice: PublicVideoScopedIce<'a>,
@@ -884,6 +877,19 @@ impl ScopedWire {
         }
     }
 
+    async fn watch_after_negotiation(&mut self) -> Result<ScopedWssEnd, &'static str> {
+        loop {
+            self.check()?;
+            let poll = SCOPED_POLL.min(self.scope_end.saturating_duration_since(Instant::now()));
+            match self.relay.next_event(poll).await {
+                Ok(AuthenticatedRelayEvent::PeerLeft) => return Ok(ScopedWssEnd::PeerLeft),
+                Ok(_) => return Err(PROTOCOL),
+                Err(ClientError::Timeout) => {}
+                Err(error) => return Err(relay_error(error)),
+            }
+        }
+    }
+
     // Keep reading short polls while ICE gathers. Never drop a pending WSS
     // read to start a send: cancellation consumes the authenticated stream.
     // A peer cannot legitimately send another signature in this phase.
@@ -919,16 +925,42 @@ impl ScopedPublicVideoWss<'_> {
     /// Consume the single session. An explicit stop, control-handle loss,
     /// peer departure, timeout or protocol failure revokes UDP before close.
     pub async fn run(
+        self,
+        stop: watch::Receiver<bool>,
+        state: watch::Sender<ScopedWssState>,
+    ) -> Result<ScopedWssEnd, &'static str> {
+        self.run_inner(stop, state, None).await
+    }
+
+    /// Run a single bounded video-only session. Call only from native code
+    /// after local capture/viewing approval; this does not start capture.
+    pub async fn run_with_media(
+        self,
+        stop: watch::Receiver<bool>,
+        state: watch::Sender<ScopedWssState>,
+        media: ScopedVideoMedia,
+    ) -> Result<ScopedWssEnd, &'static str> {
+        if media.role() != self.wire.role {
+            return Err(PROTOCOL);
+        }
+        self.run_inner(stop, state, Some(media)).await
+    }
+
+    async fn run_inner(
         mut self,
         mut stop: watch::Receiver<bool>,
         state: watch::Sender<ScopedWssState>,
+        mut media: Option<ScopedVideoMedia>,
     ) -> Result<ScopedWssEnd, &'static str> {
         state.send_replace(ScopedWssState::Negotiating);
         let result = tokio::select! {
             biased;
             () = stop_requested(&mut stop) => Ok(ScopedWssEnd::Stopped),
-            result = self.active(&state) => result,
+            result = self.active(&state, media.as_mut()) => result,
         };
+        if let Some(media) = &media {
+            media.revoke();
+        }
         self.ice.stop();
         // Leave is best effort (the socket may already be gone). Do not
         // make it a prerequisite for closing the native driver.
@@ -943,6 +975,7 @@ impl ScopedPublicVideoWss<'_> {
     async fn active(
         &mut self,
         state: &watch::Sender<ScopedWssState>,
+        media: Option<&mut ScopedVideoMedia>,
     ) -> Result<ScopedWssEnd, &'static str> {
         let now = self.wire.check_proof()?;
         timeout_at(self.wire.proof_end, self.ice.start(now))
@@ -957,6 +990,15 @@ impl ScopedPublicVideoWss<'_> {
         }
         self.ice.check_current(self.wire.check()?)?;
         state.send_replace(ScopedWssState::Established);
+        if let Some(media) = media {
+            // WSS I/O remains pending independently of frame processing.
+            // Only terminal failure/stop cancels either side of this select.
+            return tokio::select! {
+                biased;
+                result = self.wire.watch_after_negotiation() => result,
+                result = media.pump(&mut self.ice, state) => result.map(|()| ScopedWssEnd::Stopped),
+            };
+        }
         let pair_end = Instant::now() + SCOPED_PAIR_WAIT;
         let mut path = None;
         loop {
@@ -1029,7 +1071,7 @@ struct SignedSdp {
     signature: Vec<u8>,
 }
 
-fn to_candidate(actual: &RTCIceCandidate) -> Result<Candidate, &'static str> {
+pub(crate) fn to_candidate(actual: &RTCIceCandidate) -> Result<Candidate, &'static str> {
     if actual.protocol != RTCIceProtocol::Udp || actual.component != 1 {
         return Err(PAIR_REJECTED);
     }
@@ -1057,7 +1099,7 @@ fn parse_challenge(data: &str, now: u64) -> Result<SessionChallenge, &'static st
     Ok(challenge)
 }
 
-fn wall_seconds() -> Result<u64, &'static str> {
+pub(crate) fn wall_seconds() -> Result<u64, &'static str> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|elapsed| elapsed.as_secs())

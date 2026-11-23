@@ -34,6 +34,8 @@ mod public_video_frames;
 mod public_video_ice;
 #[cfg(feature = "v2-public-video-wss")]
 pub mod public_video_lifecycle;
+#[cfg(feature = "v2-public-video-wss")]
+pub mod public_video_media;
 #[cfg(feature = "v2-public-video")]
 mod public_video_route;
 #[cfg(feature = "v2-public-video-wss")]

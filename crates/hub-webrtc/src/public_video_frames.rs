@@ -1,10 +1,14 @@
-//! Bounded RFC 6184 packetization-mode 1 input for the native video fixture.
+//! Bounded RFC 6184 packetization-mode 1 input for native video.
 //! Call only on RTP already admitted by the signed live transport gate.
 
 use rtc::rtp::packet::Packet;
 
-pub const MAX_VIDEO_AU_PACKETS: usize = 32;
-pub const MAX_VIDEO_AU_BYTES: usize = 1024 * 1024;
+// The 720p Media Foundation IDRs measured in the baseline reach about 95 KiB;
+// a 32-packet diagnostic bound rejects them. Keep independent datagram, packet
+// count and reconstructed Annex B limits (STAP-A expansion adds start codes).
+pub const MAX_VIDEO_RTP_PAYLOAD_BYTES: usize = 1188; // Matches video::Packetizer.
+pub const MAX_VIDEO_AU_PACKETS: usize = 192;
+pub const MAX_VIDEO_AU_BYTES: usize = 256 * 1024;
 const PAYLOAD_TYPE: u8 = 102;
 const RTP_HZ: u128 = 90_000;
 const START_CODE: &[u8] = &[0, 0, 0, 1];
@@ -75,7 +79,7 @@ impl PublicVideoFrameAssembler {
         {
             return Err(GAP);
         }
-        if packet.payload.len() > MAX_VIDEO_AU_BYTES {
+        if packet.payload.len() > MAX_VIDEO_RTP_PAYLOAD_BYTES {
             return Err(LIMIT);
         }
         let bootstrap = self.next_frame == 0;
@@ -303,7 +307,9 @@ fn validate_nal_body(body: &[u8]) -> Result<(), &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::video::{Packetizer, SSRC as SENDER_SSRC};
     use bytes::Bytes;
+    use hub_encode_win::h264::EncodedVideoFrame;
     use rtc::rtp::header::Header;
 
     const SSRC: u32 = 42;
@@ -432,24 +438,123 @@ mod tests {
     }
 
     #[test]
-    fn packet_budget_and_annex_b_overhead_are_bounded() {
+    fn baseline_packetizer_round_trips_a_desktop_sized_fragmented_idr() {
+        // Sized like a large 720p/AMD key AU, but synthetic structure-only
+        // bytes: no captured media, decoder, socket, or hardware in this test.
+        let mut annex_b = vec![
+            0, 0, 0, 1, 0x67, 0x42, 0x00, 0x1f, 0x80, 0, 0, 0, 1, 0x68, 0xce, 0, 0, 0, 1, 0x65,
+        ];
+        annex_b.resize(96 * 1024, 0x55);
+        let packets = Packetizer::default()
+            .packets(
+                EncodedVideoFrame {
+                    annex_b: annex_b.clone(),
+                    pts_100ns: 0,
+                    duration_100ns: 333_333,
+                    nal_types: vec![7, 8, 5],
+                    is_idr: true,
+                    encode_elapsed_ms: 0.0,
+                },
+                PAYLOAD_TYPE,
+            )
+            .unwrap();
+        assert!((33..=MAX_VIDEO_AU_PACKETS).contains(&packets.len()));
+        assert!(packets
+            .iter()
+            .all(|packet| packet.payload.len() <= MAX_VIDEO_RTP_PAYLOAD_BYTES));
+        let (last, preceding) = packets.split_last().unwrap();
+        let mut assembler = PublicVideoFrameAssembler::new(SENDER_SSRC);
+        for packet in preceding {
+            assert!(assembler.push(packet).unwrap().is_none());
+        }
+        let frame = assembler.push(last).unwrap().unwrap();
+        assert_eq!(
+            (frame.sequence, frame.timestamp_us, frame.keyframe),
+            (0, 0, true)
+        );
+        assert_eq!(frame.annex_b, annex_b);
+    }
+
+    #[test]
+    fn packet_budget_includes_the_marker_and_fails_closed_on_one_too_many() {
+        let limit = u16::try_from(MAX_VIDEO_AU_PACKETS).unwrap();
         let mut assembler = PublicVideoFrameAssembler::new(SSRC);
-        for seq in 0..MAX_VIDEO_AU_PACKETS as u16 {
+        for seq in 0..limit - 1 {
+            assert!(assembler
+                .push(&packet(seq, 0, false, &[0x09, 0x10]))
+                .unwrap()
+                .is_none());
+        }
+        assert!(assembler
+            .push(&packet(limit - 1, 0, true, FIRST))
+            .unwrap()
+            .is_some());
+
+        let mut assembler = PublicVideoFrameAssembler::new(SSRC);
+        for seq in 0..limit {
             assert!(assembler
                 .push(&packet(seq, 0, false, &[0x09, 0x10]))
                 .unwrap()
                 .is_none());
         }
         assert!(matches!(
-            assembler.push(&packet(MAX_VIDEO_AU_PACKETS as u16, 0, true, FIRST)),
+            assembler.push(&packet(limit, 0, true, FIRST)),
             Err(LIMIT)
         ));
-
-        let mut large = vec![0xab; MAX_VIDEO_AU_BYTES];
-        large[0] = 0x67;
         assert!(matches!(
-            PublicVideoFrameAssembler::new(SSRC).push(&packet(0, 0, false, &large)),
+            assembler.push(&packet(limit, 0, true, FIRST)),
+            Err(CLOSED)
+        ));
+    }
+
+    #[test]
+    fn packet_payload_and_aggregate_annex_b_limits_are_independent() {
+        let mut max_packet = vec![0xab; MAX_VIDEO_RTP_PAYLOAD_BYTES];
+        max_packet[0] = 0x67;
+        assert!(PublicVideoFrameAssembler::new(SSRC)
+            .push(&packet(0, 0, false, &max_packet))
+            .unwrap()
+            .is_none());
+        max_packet.push(0xab);
+        let mut assembler = PublicVideoFrameAssembler::new(SSRC);
+        assert!(matches!(
+            assembler.push(&packet(0, 0, false, &max_packet)),
             Err(LIMIT)
+        ));
+        assert!(matches!(
+            assembler.push(&packet(0, 0, true, FIRST)),
+            Err(CLOSED)
+        ));
+
+        // STAP-A prefixes use two length bytes, whereas Annex B needs four
+        // start-code bytes per NAL. A stream can exhaust the Annex B budget
+        // before reaching the packet-count budget, even at valid MTU.
+        let nals = (MAX_VIDEO_RTP_PAYLOAD_BYTES - 1) / 4;
+        let mut stap = vec![0x18];
+        stap.extend([0, 2, 0x09, 0x10].repeat(nals));
+        let annex_b_per_packet = nals * 6;
+        let fitting_packets = MAX_VIDEO_AU_BYTES / annex_b_per_packet;
+        assert!(fitting_packets < MAX_VIDEO_AU_PACKETS);
+        let mut assembler = PublicVideoFrameAssembler::new(SSRC);
+        for sequence in 0..u16::try_from(fitting_packets).unwrap() {
+            assert!(assembler
+                .push(&packet(sequence, 0, false, &stap))
+                .unwrap()
+                .is_none());
+        }
+        assert_eq!(
+            assembler.pending.as_ref().unwrap().annex_b.len(),
+            fitting_packets * annex_b_per_packet
+        );
+        let sequence = u16::try_from(fitting_packets).unwrap();
+        assert!(matches!(
+            assembler.push(&packet(sequence, 0, false, &stap)),
+            Err(LIMIT)
+        ));
+        assert!(assembler.pending.is_none());
+        assert!(matches!(
+            assembler.push(&packet(sequence, 0, true, FIRST)),
+            Err(CLOSED)
         ));
     }
 }

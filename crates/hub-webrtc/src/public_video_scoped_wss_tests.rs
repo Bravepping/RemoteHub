@@ -224,7 +224,7 @@ enum TestPath {
     PreferDirect { blocked: bool },
 }
 
-async fn exercise(abrupt: bool, path: TestPath) {
+async fn exercise(abrupt: bool, path: TestPath, with_media: bool) {
     let mut tls = RelayFixture::start().await;
     let relay_only = path == TestPath::RelayOnly;
     let (nat, turn) = if path == TestPath::DirectOnly {
@@ -322,6 +322,18 @@ async fn exercise(abrupt: bool, path: TestPath) {
     let (_viewer_stop, viewer_rx) = watch::channel(false);
     let (host_state_tx, mut host_state) = watch::channel(ScopedWssState::Negotiating);
     let (viewer_state_tx, mut viewer_state) = watch::channel(ScopedWssState::Negotiating);
+    let (host_media, viewer_media, mut producer, mut consumer) = if with_media {
+        let (host_media, producer) = ScopedVideoMedia::host();
+        let (viewer_media, consumer) = ScopedVideoMedia::viewer();
+        (
+            Some(host_media),
+            Some(viewer_media),
+            Some(producer),
+            Some(consumer),
+        )
+    } else {
+        (None, None, None, None)
+    };
     let control = async {
         let selected = *host_state
             .wait_for(|s| {
@@ -386,6 +398,9 @@ async fn exercise(abrupt: bool, path: TestPath) {
             assert_eq!(viewer_peer.len(), 1);
             assert_ne!(host_peer, viewer_peer);
         }
+        if let (Some(producer), Some(consumer)) = (producer.as_mut(), consumer.as_mut()) {
+            loopback_access_units(producer, consumer).await;
+        }
         if abrupt {
             tls.task.abort();
         } else {
@@ -394,8 +409,20 @@ async fn exercise(abrupt: bool, path: TestPath) {
     };
     let (host_result, viewer_result, ()) = timeout(WAIT, async {
         tokio::join!(
-            h.run(host_rx, host_state_tx),
-            v.run(viewer_rx, viewer_state_tx),
+            async {
+                if let Some(media) = host_media {
+                    h.run_with_media(host_rx, host_state_tx, media).await
+                } else {
+                    h.run(host_rx, host_state_tx).await
+                }
+            },
+            async {
+                if let Some(media) = viewer_media {
+                    v.run_with_media(viewer_rx, viewer_state_tx, media).await
+                } else {
+                    v.run(viewer_rx, viewer_state_tx).await
+                }
+            },
             control
         )
     })
@@ -412,6 +439,19 @@ async fn exercise(abrupt: bool, path: TestPath) {
     }
     assert!(matches!(&*host_state.borrow(), ScopedWssState::Closed));
     assert!(matches!(&*viewer_state.borrow(), ScopedWssState::Closed));
+    if let Some(consumer) = consumer.as_mut() {
+        assert!(
+            consumer.next_frame().await.is_err(),
+            "closed viewer cannot release frames"
+        );
+    }
+    if let Some(producer) = producer.as_mut() {
+        assert_eq!(
+            producer.send_access_unit(Vec::new()).await,
+            Err("PUBLIC_VIDEO_MEDIA_CLOSED")
+        );
+    }
+
     if let Some(turn) = &turn {
         for runtime in [&host_runtime, &viewer_runtime] {
             for relay_port in [RELAY_PORTS.0, RELAY_PORTS.1] {
@@ -468,25 +508,85 @@ async fn exercise(abrupt: bool, path: TestPath) {
 
 #[tokio::test]
 async fn scoped_loopback_wss_applies_signed_video_and_closes_both_roles() {
-    exercise(false, TestPath::DirectOnly).await;
+    exercise(false, TestPath::DirectOnly, false).await;
 }
 
 #[tokio::test]
 async fn scoped_loopback_wss_closes_both_roles_when_transport_drops() {
-    exercise(true, TestPath::DirectOnly).await;
+    exercise(true, TestPath::DirectOnly, false).await;
 }
 
 #[tokio::test]
 async fn scoped_loopback_turn_selects_relay_and_allocations_expire_after_stop() {
-    exercise(false, TestPath::RelayOnly).await;
+    exercise(false, TestPath::RelayOnly, false).await;
 }
 
 #[tokio::test]
 async fn scoped_combined_prefers_srflx_when_both_routes_are_available() {
-    exercise(false, TestPath::PreferDirect { blocked: false }).await;
+    exercise(false, TestPath::PreferDirect { blocked: false }, false).await;
 }
 
 #[tokio::test]
 async fn scoped_combined_falls_back_to_turn_when_direct_checks_are_blocked() {
-    exercise(false, TestPath::PreferDirect { blocked: true }).await;
+    exercise(false, TestPath::PreferDirect { blocked: true }, false).await;
+}
+
+async fn loopback_access_units(
+    producer: &mut crate::public_video_media::ScopedVideoSender,
+    consumer: &mut crate::public_video_media::ScopedVideoReceiver,
+) {
+    use hub_encode_win::h264::{normalize, EncodedVideoFrame, Framing};
+    const AU: &[u8] =
+        include_bytes!("../../hub-rendezvous-probe/src/bin/v2_signaling/synthetic_32x32.h264");
+    const COUNT: u64 = 64;
+    let (annex_b, _) = normalize(AU, Framing::AnnexB).unwrap();
+    timeout(Duration::from_millis(2500), async {
+        tokio::join!(
+            async {
+                let mut packetizer = crate::video::Packetizer::default();
+                for ordinal in 0..COUNT {
+                    let frame = EncodedVideoFrame {
+                        annex_b: AU.to_vec(),
+                        pts_100ns: ordinal as i64 * 250_000,
+                        duration_100ns: 250_000,
+                        nal_types: vec![7, 8, 5],
+                        is_idr: true,
+                        encode_elapsed_ms: 0.0,
+                    };
+                    let packets = packetizer.packets(frame, 102).unwrap();
+                    assert!(packets.len() >= 2);
+                    producer.send_access_unit(packets).await.unwrap();
+                    // Give the finite display queue room without throttling
+                    // to the signaling poll interval for each RTP packet.
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                }
+            },
+            async {
+                for ordinal in 0..COUNT {
+                    let got = consumer.next_frame().await.unwrap();
+                    assert_eq!(got.sequence, ordinal);
+                    assert_eq!(got.timestamp_us, ordinal * 25_000);
+                    assert!(got.keyframe);
+                    assert_eq!(got.annex_b, annex_b);
+                }
+            },
+        );
+    })
+    .await
+    .expect("continuous synthetic H.264 must not wait for WSS per packet");
+}
+
+#[tokio::test]
+async fn scoped_wss_carries_continuous_synthetic_h264_and_clears_media_on_stop() {
+    exercise(false, TestPath::DirectOnly, true).await;
+}
+
+#[tokio::test]
+async fn scoped_wss_closes_media_when_signaling_drops() {
+    exercise(true, TestPath::DirectOnly, true).await;
+}
+
+#[tokio::test]
+async fn scoped_wss_carries_continuous_synthetic_h264_through_mock_turn() {
+    exercise(false, TestPath::RelayOnly, true).await;
 }

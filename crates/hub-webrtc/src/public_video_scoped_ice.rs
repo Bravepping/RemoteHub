@@ -2,12 +2,12 @@
 //! The physical socket and TURN relayer enforce separate address checks.
 
 use crate::{
-    direct_policy::{self, PathSummary, VerifiedCandidates},
+    direct_policy::{self, Candidate, PathSummary, VerifiedCandidates},
     direct_runtime::{Boundary, DirectRuntime},
     pinned_runtime::PinnedRuntime,
     public_video::{PublicVideoIcePlan, PublicVideoProof},
     public_video_route::RouteGrant,
-    public_video_wss::{read_authorizable_video_pair, Role},
+    public_video_wss::{read_video_pair, to_candidate, Role, VideoTrack},
     relay_runtime::RelayRuntime,
 };
 use hub_identity::session::{SessionChallenge, SessionRole};
@@ -30,6 +30,7 @@ use webrtc::runtime::{
 
 use rtc::{
     ice::{mdns::MulticastDnsMode, network_type::NetworkType},
+    rtp::packet::Packet,
     rtp_transceiver::rtp_sender::{
         RTCRtpCodec, RTCRtpCodecParameters, RTCRtpCodingParameters, RTCRtpEncodingParameters,
         RtpCodecKind,
@@ -37,7 +38,11 @@ use rtc::{
 };
 use tokio::{sync::watch, time::timeout};
 use webrtc::{
-    media_stream::{track_local::static_rtp::TrackLocalStaticRTP, MediaStreamTrack},
+    media_stream::{
+        track_local::static_rtp::TrackLocalStaticRTP,
+        track_remote::{TrackRemote, TrackRemoteEvent},
+        MediaStreamTrack,
+    },
     peer_connection::{
         MediaEngine, PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler,
         RTCConfiguration, RTCIceGatheringState, RTCSessionDescription, SettingEngineBuilder,
@@ -49,6 +54,14 @@ const DRIVER: &str = "PUBLIC_VIDEO_ICE_DRIVER";
 const WAIT: &str = "PUBLIC_VIDEO_ICE_DRIVER_TIMEOUT";
 const DRIVER_WAIT: Duration = Duration::from_secs(8);
 const CLOSE_WAIT: Duration = Duration::from_secs(1);
+const PAIR_WAIT: Duration = Duration::from_millis(500);
+const MEDIA_POLL: Duration = Duration::from_millis(20);
+const VIDEO_PT: u8 = 102;
+const MAX_RTP_PAYLOAD: usize = crate::public_video_frames::MAX_VIDEO_RTP_PAYLOAD_BYTES;
+const PAIR_UNAVAILABLE: &str = "PUBLIC_VIDEO_ICE_PAIR_UNAVAILABLE";
+const PAIR_REJECTED: &str = "PUBLIC_VIDEO_ICE_PAIR_REJECTED";
+const RTP_INVALID: &str = "PUBLIC_VIDEO_RTP_INVALID";
+const RTP_IO: &str = "PUBLIC_VIDEO_RTP_UNAVAILABLE";
 
 const CLOSED: &str = "PUBLIC_VIDEO_ICE_BOUNDARY_CLOSED";
 const SETUP: &str = "PUBLIC_VIDEO_ICE_BOUNDARY_SETUP";
@@ -182,13 +195,20 @@ struct DriverStart {
     host_candidates: bool,
 }
 
-struct Gather(watch::Sender<bool>);
+struct DriverEvents {
+    gathered: watch::Sender<bool>,
+    seen_track: Arc<AtomicBool>,
+}
 #[async_trait::async_trait]
-impl PeerConnectionEventHandler for Gather {
+impl PeerConnectionEventHandler for DriverEvents {
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
         if state == RTCIceGatheringState::Complete {
-            self.0.send_replace(true);
+            self.gathered.send_replace(true);
         }
+    }
+
+    async fn on_track(&self, _: Arc<dyn TrackRemote>) {
+        self.seen_track.store(true, Ordering::Release);
     }
 }
 
@@ -203,6 +223,24 @@ impl Drop for RevokeOnCancel {
     }
 }
 
+struct CheckedTrack {
+    path: PathSummary,
+    pair: (Candidate, Candidate),
+    track: VideoTrack,
+}
+
+fn validate_rtp(packet: &Packet) -> Result<(), &'static str> {
+    if packet.header.version != 2
+        || packet.header.payload_type != VIDEO_PT
+        || packet.header.ssrc != crate::video::SSRC
+        || packet.payload.is_empty()
+        || packet.payload.len() > MAX_RTP_PAYLOAD
+    {
+        return Err(RTP_INVALID);
+    }
+    Ok(())
+}
+
 /// Owns one scoped video ICE driver. No raw peer connection, track, or
 /// trickle API is exported. Call close on normal/terminal signaling exit.
 pub struct PublicVideoScopedIce<'a> {
@@ -213,6 +251,7 @@ pub struct PublicVideoScopedIce<'a> {
     start: Option<DriverStart>,
     pc: Option<Arc<dyn PeerConnection>>,
     gathered: Option<watch::Receiver<bool>>,
+    seen_track: Arc<AtomicBool>,
     local_candidates: Option<VerifiedCandidates>,
     remote_applied: bool,
     path_verified: bool,
@@ -270,6 +309,7 @@ impl<'a> PublicVideoScopedIce<'a> {
             start: Some(start),
             pc: None,
             gathered: None,
+            seen_track: Arc::default(),
             local_candidates: None,
             remote_applied: false,
             path_verified: false,
@@ -306,6 +346,7 @@ impl<'a> PublicVideoScopedIce<'a> {
             }),
             pc: None,
             gathered: None,
+            seen_track: Arc::default(),
             local_candidates: None,
             remote_applied: false,
             path_verified: false,
@@ -362,6 +403,7 @@ impl<'a> PublicVideoScopedIce<'a> {
             }),
             pc: None,
             gathered: None,
+            seen_track: Arc::default(),
             local_candidates: None,
             remote_applied: false,
             path_verified: false,
@@ -393,7 +435,7 @@ impl<'a> PublicVideoScopedIce<'a> {
                 .register_codec(
                     RTCRtpCodecParameters {
                         rtp_codec: codec.clone(),
-                        payload_type: 102,
+                        payload_type: VIDEO_PT,
                     },
                     RtpCodecKind::Video,
                 )
@@ -414,7 +456,10 @@ impl<'a> PublicVideoScopedIce<'a> {
                 // if the caller cannot await the normal close path.
                 .with_dedicated_reactor_pool_size(1)
                 .with_runtime(runtime)
-                .with_handler(Arc::new(Gather(gather_tx)))
+                .with_handler(Arc::new(DriverEvents {
+                    gathered: gather_tx,
+                    seen_track: self.seen_track.clone(),
+                }))
                 .build()
                 .await
                 .map_err(|_| DRIVER)?;
@@ -538,24 +583,31 @@ impl<'a> PublicVideoScopedIce<'a> {
     /// Observe the actual video transport; no SDP-only success. The viewer
     /// does not expose a receiver transport until the first RTP track.
     pub async fn selected_path(&mut self, now: u64) -> Result<PathSummary, &'static str> {
+        self.checked_track(now).await.map(|checked| checked.path)
+    }
+
+    async fn checked_track(&mut self, now: u64) -> Result<CheckedTrack, &'static str> {
         self.check_current(now)?;
         let pc = self.pc.as_ref().ok_or(DRIVER)?;
-        let role = if self.proof.role() == SessionRole::Host {
-            Role::Host
-        } else {
-            Role::Viewer
+        let role = match self.proof.role() {
+            SessionRole::Host => Role::Host,
+            SessionRole::Viewer => Role::Viewer,
         };
-        let pair = timeout(
-            self.wait(Duration::from_millis(500)),
-            read_authorizable_video_pair(pc.as_ref(), role),
-        )
-        .await
-        .map_err(|_| WAIT)
-        .and_then(|r| r);
-        let (local, remote) = match pair {
-            Ok(pair) => pair,
+        let checked = timeout(self.wait(PAIR_WAIT), read_video_pair(pc.as_ref(), role))
+            .await
+            .map_err(|_| WAIT)
+            .and_then(|r| r)
+            .and_then(|(pair, track)| {
+                Ok((
+                    to_candidate(pair.local())?,
+                    to_candidate(pair.remote())?,
+                    track,
+                ))
+            });
+        let (local, remote, track) = match checked {
+            Ok(checked) => checked,
             Err(error) => {
-                if self.path_verified || error == "PUBLIC_VIDEO_ICE_PAIR_REJECTED" {
+                if self.path_verified || error == PAIR_REJECTED {
                     self.stop();
                 }
                 return Err(error);
@@ -565,13 +617,18 @@ impl<'a> PublicVideoScopedIce<'a> {
             self.check_current(now)?;
             let approved_local = self.local_candidates.as_ref().ok_or(PEER)?;
             let approved_remote = self.runtime.peers.read().map_err(|_| PEER)?;
-            direct_policy::selected(
+            let path = direct_policy::selected(
                 local,
                 remote,
                 approved_local,
                 approved_remote.as_ref().ok_or(PEER)?,
             )
-            .map_err(|_| PEER)
+            .map_err(|_| PEER)?;
+            Ok(CheckedTrack {
+                path,
+                pair: (local, remote),
+                track,
+            })
         })();
         if result.is_ok() {
             self.path_verified = true;
@@ -579,6 +636,94 @@ impl<'a> PublicVideoScopedIce<'a> {
             self.stop();
         }
         result
+    }
+
+    /// Validate the negotiated video sender and its actual signed path
+    /// before handing a packet to the driver. A canceled write revokes
+    /// the runtime since its handoff status is not known.
+    pub(crate) async fn send_rtp(&mut self, packet: Packet, now: u64) -> Result<(), &'static str> {
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        self.check_current(now)?;
+        if self.proof.role() != SessionRole::Host {
+            return Err(RTP_INVALID);
+        }
+        validate_rtp(&packet)?;
+        let VideoTrack::Local(track) = self.checked_track(now).await?.track else {
+            return Err(RTP_IO);
+        };
+        self.check_current(now)?;
+        timeout(self.wait(PAIR_WAIT), track.write_rtp(packet))
+            .await
+            .map_err(|_| RTP_IO)?
+            .map_err(|_| RTP_IO)?;
+        self.check_current(now)?;
+        guard.0 = None;
+        Ok(())
+    }
+
+    /// Receive only from the same signed live video transport before and
+    /// after dequeuing RTP. Not ready or no packet during the short poll
+    /// is nonterminal; wrong RTP/path and cancellation revoke the runtime.
+    pub(crate) async fn recv_rtp(&mut self, now: u64) -> Result<Option<Packet>, &'static str> {
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        self.check_current(now)?;
+        if self.proof.role() != SessionRole::Viewer {
+            return Err(RTP_INVALID);
+        }
+        if !self.seen_track.load(Ordering::Acquire) {
+            guard.0 = None;
+            return Ok(None);
+        }
+        let CheckedTrack {
+            pair,
+            track: VideoTrack::Remote(track),
+            ..
+        } = (match self.checked_track(now).await {
+            Err(PAIR_UNAVAILABLE) if !self.path_verified => {
+                guard.0 = None;
+                return Ok(None);
+            }
+            other => other?,
+        })
+        else {
+            return Err(RTP_IO);
+        };
+        let packet = timeout(self.wait(MEDIA_POLL), async {
+            loop {
+                match track.poll().await {
+                    Some(TrackRemoteEvent::OnRtpPacket(packet)) => return Ok(packet),
+                    Some(
+                        TrackRemoteEvent::OnError
+                        | TrackRemoteEvent::OnEnding
+                        | TrackRemoteEvent::OnEnded,
+                    )
+                    | None => return Err(RTP_IO),
+                    Some(_) => continue,
+                }
+            }
+        })
+        .await;
+        self.check_current(now)?;
+        let Ok(packet) = packet else {
+            guard.0 = None;
+            return Ok(None);
+        };
+        let packet = packet?;
+        validate_rtp(&packet)?;
+        let CheckedTrack {
+            pair: current_pair,
+            track: VideoTrack::Remote(current_track),
+            ..
+        } = self.checked_track(now).await?
+        else {
+            return Err(RTP_IO);
+        };
+        if pair != current_pair || !Arc::ptr_eq(&track, &current_track) {
+            return Err(PAIR_REJECTED);
+        }
+        self.check_current(now)?;
+        guard.0 = None;
+        Ok(Some(packet))
     }
 
     /// Revoke first and wait for the local driver to shut down. This does
@@ -853,6 +998,36 @@ mod tests {
         assert!(!runtime.allows_turn_peer(DIRECT.parse().unwrap()));
         assert!(host.challenge().is_none());
         assert_eq!(host.admit_peer_sdp(&sdp, &signature, NOW), Err(CLOSED));
+    }
+
+    #[tokio::test]
+    async fn rtp_role_or_header_failure_revokes_before_driver_access() {
+        let h = Identity::generate_ephemeral().unwrap();
+        let v = Identity::generate_ephemeral().unwrap();
+        let scope = scope(IceMode::DirectPreferred);
+        let room = Uuid::new_v4();
+        let valid = Packet {
+            header: rtc::rtp::header::Header {
+                version: 2,
+                payload_type: VIDEO_PT,
+                ssrc: crate::video::SSRC,
+                ..Default::default()
+            },
+            payload: bytes::Bytes::from_static(&[0x65, 0x88]),
+        };
+        assert_eq!(validate_rtp(&valid), Ok(()));
+        let mut invalid = valid.clone();
+        invalid.header.ssrc ^= 1;
+        assert_eq!(validate_rtp(&invalid), Err(RTP_INVALID));
+        let mut invalid = valid.clone();
+        invalid.header.payload_type += 1;
+        assert_eq!(validate_rtp(&invalid), Err(RTP_INVALID));
+        let mut host = stage(&h, &v, SessionRole::Host, room, scope);
+        assert_eq!(host.send_rtp(invalid, NOW).await, Err(RTP_INVALID));
+        assert!(host.runtime.stopped.load(Ordering::Acquire));
+        let mut viewer = stage(&v, &h, SessionRole::Viewer, room, scope);
+        assert_eq!(viewer.send_rtp(valid, NOW).await, Err(RTP_INVALID));
+        assert!(viewer.runtime.stopped.load(Ordering::Acquire));
     }
 
     #[tokio::test]
