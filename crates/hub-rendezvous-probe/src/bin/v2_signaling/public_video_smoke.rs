@@ -277,6 +277,8 @@ enum Scenario {
     UnsignedSelectedPort,
     LiveUnsignedPair,
     LiveSignedMedia,
+    LiveMediaStop,
+    LiveMediaPeerDrop,
     LiveUnavailable,
     BadLocalSdp,
     WrongTlsTrust,
@@ -384,6 +386,16 @@ async fn exchange(scenario: Scenario) {
     .unwrap();
     let (h, v) = tokio::join!(host_pending.establish(), viewer_pending.establish());
     let (mut h, mut v) = (h.unwrap(), v.unwrap());
+    if matches!(
+        scenario,
+        Scenario::LiveMediaStop | Scenario::LiveMediaPeerDrop
+    ) {
+        signed_media_lifecycle(h, v, scenario).await;
+        assert_room_released(&app).await;
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        return;
+    }
     if matches!(scenario, Scenario::LiveSignedMedia) {
         positive_signed_rtp(&mut h, &mut v).await;
         h.leave().await.unwrap();
@@ -420,7 +432,10 @@ async fn exchange(scenario: Scenario) {
             .unwrap();
     }
     match scenario {
-        Scenario::WrongTlsTrust | Scenario::LiveSignedMedia => unreachable!(),
+        Scenario::WrongTlsTrust
+        | Scenario::LiveSignedMedia
+        | Scenario::LiveMediaStop
+        | Scenario::LiveMediaPeerDrop => unreachable!(),
         Scenario::BadLocalSdp => (),
         Scenario::OtherRouteScope | Scenario::OtherPinnedDevice => {
             assert!(matches!(
@@ -603,10 +618,20 @@ fn synthetic_rtp(sequence_number: u16) -> Packet {
     }
 }
 
-async fn positive_signed_rtp(h: &mut PublicVideoWss<'_>, v: &mut PublicVideoWss<'_>) {
+struct SignedVideoPeers {
+    host: Arc<dyn PeerConnection>,
+    viewer: Arc<dyn PeerConnection>,
+    viewer_tracks: mpsc::Receiver<()>,
+    _nat: FixtureNat,
+}
+
+async fn negotiate_signed_video(
+    h: &mut PublicVideoWss<'_>,
+    v: &mut PublicVideoWss<'_>,
+) -> SignedVideoPeers {
     let nat = FixtureNat::start().await.unwrap();
     let (host, mut host_ice, _) = video_peer(Some((&nat, FixtureSide::Host))).await;
-    let (viewer, mut viewer_ice, mut viewer_tracks) =
+    let (viewer, mut viewer_ice, viewer_tracks) =
         video_peer(Some((&nat, FixtureSide::Viewer))).await;
     viewer
         .add_transceiver_from_kind(
@@ -692,13 +717,32 @@ async fn positive_signed_rtp(h: &mut PublicVideoWss<'_>, v: &mut PublicVideoWss<
     .expect("simulated NAT media DTLS failed");
 
     assert_eq!(h.check_live_video_pair(&host).await.unwrap().path, "direct");
-    h.send_checked_rtp(&host, synthetic_rtp(1)).await.unwrap();
+    SignedVideoPeers {
+        host: Arc::new(host),
+        viewer: Arc::new(viewer),
+        viewer_tracks,
+        _nat: nat,
+    }
+}
+
+async fn positive_signed_rtp(h: &mut PublicVideoWss<'_>, v: &mut PublicVideoWss<'_>) {
+    let SignedVideoPeers {
+        host,
+        viewer,
+        mut viewer_tracks,
+        _nat,
+    } = negotiate_signed_video(h, v).await;
+    h.send_checked_rtp(host.as_ref(), synthetic_rtp(1))
+        .await
+        .unwrap();
     timeout(WAIT, viewer_tracks.recv())
         .await
         .expect("viewer track startup")
         .unwrap();
-    h.send_checked_rtp(&host, synthetic_rtp(2)).await.unwrap();
-    let observed = v.recv_checked_rtp(&viewer).await.unwrap();
+    h.send_checked_rtp(host.as_ref(), synthetic_rtp(2))
+        .await
+        .unwrap();
+    let observed = v.recv_checked_rtp(viewer.as_ref()).await.unwrap();
     assert_eq!(observed.header.payload_type, 102);
     assert_eq!(observed.payload, synthetic_rtp(1).payload);
     assert!([1, 2].contains(&observed.header.sequence_number));
@@ -709,4 +753,80 @@ async fn positive_signed_rtp(h: &mut PublicVideoWss<'_>, v: &mut PublicVideoWss<
 #[tokio::test]
 async fn public_video_wss_carries_synthetic_rtp_after_live_pair_verification() {
     exchange(Scenario::LiveSignedMedia).await;
+}
+
+async fn signed_media_lifecycle(
+    mut h: PublicVideoWss<'_>,
+    mut v: PublicVideoWss<'_>,
+    scenario: Scenario,
+) {
+    use hub_webrtc::public_video_lifecycle::{supervise_video, PublicVideoEnd};
+    let SignedVideoPeers {
+        host,
+        viewer,
+        mut viewer_tracks,
+        _nat,
+    } = negotiate_signed_video(&mut h, &mut v).await;
+    if matches!(scenario, Scenario::LiveMediaPeerDrop) {
+        // Open the viewer's native track, then drop the transport without Leave.
+        // Keep the host PC alive while checking the viewer closes on the WSS event.
+        h.send_checked_rtp(host.as_ref(), synthetic_rtp(1))
+            .await
+            .unwrap();
+        timeout(WAIT, viewer_tracks.recv()).await.unwrap().unwrap();
+        let (watch, driver) = supervise_video(v, viewer.clone());
+        drop(h);
+        let (end, observed) = timeout(WAIT, async { tokio::join!(driver, watch.wait_closed()) })
+            .await
+            .unwrap();
+        assert_eq!(end.reason, PublicVideoEnd::PeerLeft);
+        assert_eq!(end.cleanup, Ok(()));
+        assert_eq!(observed.unwrap().reason, PublicVideoEnd::PeerLeft);
+        assert!(watch.recv_rtp().await.is_err());
+        assert!(viewer.create_offer(None).await.is_err());
+        host.close().await.unwrap();
+        return;
+    }
+
+    let (source, host_driver) = supervise_video(h, host.clone());
+    let (sink, viewer_driver) = supervise_video(v, viewer.clone());
+    let exercise = async {
+        source.send_rtp(synthetic_rtp(1)).await.unwrap();
+        timeout(WAIT, viewer_tracks.recv()).await.unwrap().unwrap();
+        source.send_rtp(synthetic_rtp(2)).await.unwrap();
+        let packet = sink.recv_rtp().await.unwrap();
+        assert_eq!(packet.payload, synthetic_rtp(1).payload);
+        source.stop();
+        source.stop(); // idempotent
+        assert!(source.send_rtp(synthetic_rtp(3)).await.is_err());
+        let host_end = source.wait_closed().await.unwrap();
+        let viewer_end = sink.wait_closed().await.unwrap();
+        assert!(sink.recv_rtp().await.is_err());
+        (host_end, viewer_end)
+    };
+    let (host_end, viewer_end, (seen_host, seen_viewer)) = timeout(WAIT, async {
+        tokio::join!(host_driver, viewer_driver, exercise)
+    })
+    .await
+    .expect("stopping must finish both loopback media actors");
+    for (actual, observed, expected) in [
+        (host_end, seen_host, PublicVideoEnd::Stopped),
+        (viewer_end, seen_viewer, PublicVideoEnd::PeerLeft),
+    ] {
+        assert_eq!(actual.reason, expected);
+        assert_eq!(observed.reason, expected);
+        assert_eq!(actual.cleanup, Ok(()));
+    }
+    assert!(host.create_offer(None).await.is_err());
+    assert!(viewer.create_offer(None).await.is_err());
+}
+
+#[tokio::test]
+async fn public_video_media_stop_releases_both_native_peers() {
+    exchange(Scenario::LiveMediaStop).await;
+}
+
+#[tokio::test]
+async fn public_video_media_abrupt_signal_loss_closes_live_viewer() {
+    exchange(Scenario::LiveMediaPeerDrop).await;
 }

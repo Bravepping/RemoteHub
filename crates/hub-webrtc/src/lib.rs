@@ -31,6 +31,8 @@ pub mod public_video;
 #[cfg(feature = "v2-public-video-wss")]
 mod public_video_ice;
 #[cfg(feature = "v2-public-video-wss")]
+pub mod public_video_lifecycle;
+#[cfg(feature = "v2-public-video-wss")]
 pub mod public_video_wss;
 #[cfg(all(windows, feature = "p006-relay"))]
 pub mod receiver_evidence;
