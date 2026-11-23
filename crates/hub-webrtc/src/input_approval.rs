@@ -1,6 +1,9 @@
 //! An isolated, host-owned approval state machine. No sockets, IPC, UI, or
 //! operating-system input are wired here.
-use std::time::{Duration, Instant};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 
 const MAX_APPROVAL: Duration = Duration::from_secs(60);
 
@@ -46,6 +49,10 @@ pub enum Error {
     ReleaseUnconfirmed,
 }
 
+/// One in-process native prompt. It is not an input grant or a wire value.
+#[must_use]
+pub struct PendingDecision(Arc<()>);
+
 #[derive(Clone, Copy, Debug)]
 pub struct SinkError;
 
@@ -64,6 +71,7 @@ pub struct Approval<S: SessionSink> {
     scope: Binding,
     session_until: Instant,
     permission_until: Option<Instant>,
+    pending_decision: Option<Arc<()>>,
     state: State,
     release_unconfirmed: bool,
     sink: S,
@@ -79,6 +87,7 @@ impl<S: SessionSink> Approval<S> {
             scope,
             session_until,
             permission_until: None,
+            pending_decision: None,
             state: State::ViewOnly,
             release_unconfirmed: false,
             sink,
@@ -89,11 +98,55 @@ impl<S: SessionSink> Approval<S> {
         self.state
     }
 
-    /// Call only from the host's local native consent path. Viewing consent
-    /// must not call this. A grant cannot be renewed or transferred.
+    /// Reserve one prompt for the current native device session. A prompt
+    /// can be open while capture and transport stop independently.
+    pub fn begin_local_decision(
+        &mut self,
+        current: &InputScope,
+        now: Instant,
+    ) -> Result<PendingDecision, Error> {
+        self.advance(now)?;
+        if self.scope != Binding::Device(*current) {
+            return Err(Error::WrongScope);
+        }
+        if self.state != State::ViewOnly || self.pending_decision.is_some() {
+            return Err(Error::NotAllowed);
+        }
+        let marker = Arc::new(());
+        self.pending_decision = Some(marker.clone());
+        Ok(PendingDecision(marker))
+    }
+
+    /// Complete only on the original serialized owner, after sampling the
+    /// current native session and servicing any stop/disconnect flags. Pass
+    /// false for decline or if the dialog could not complete.
+    pub fn complete_local_decision(
+        &mut self,
+        pending: PendingDecision,
+        current: &InputScope,
+        approved: bool,
+        now: Instant,
+    ) -> Result<(), Error> {
+        self.advance(now)?;
+        let marker = self.pending_decision.as_ref().ok_or(Error::NotAllowed)?;
+        if !Arc::ptr_eq(marker, &pending.0) {
+            // Never consume a different owner's outstanding prompt.
+            return Err(Error::WrongScope);
+        }
+        self.pending_decision = None;
+        if self.scope != Binding::Device(*current) {
+            self.disconnect()?;
+            return Err(Error::WrongScope);
+        }
+        self.decide_locally(approved, now)
+    }
+
+    /// Synchronous host-local decisions only. For a dialog that crosses an
+    /// await, reserve and complete a `PendingDecision` instead. Viewing
+    /// consent must not call this. A grant cannot be renewed or transferred.
     pub fn decide_locally(&mut self, approved: bool, now: Instant) -> Result<(), Error> {
         self.advance(now)?;
-        if self.state != State::ViewOnly {
+        if self.state != State::ViewOnly || self.pending_decision.is_some() {
             return Err(Error::NotAllowed);
         }
         if !approved {
@@ -179,6 +232,7 @@ impl<S: SessionSink> Approval<S> {
         let had_grant = self.state == State::Allowed;
         self.state = State::Ended(reason);
         self.permission_until = None;
+        self.pending_decision = None;
         if had_grant && self.sink.release_owned().is_err() {
             self.release_unconfirmed = true;
             return Err(Error::ReleaseUnconfirmed);
@@ -236,6 +290,103 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    #[test]
+    fn pending_native_dialog_never_grants_until_matching_local_response() {
+        let now = Instant::now();
+        let log = Rc::new(RefCell::new(Log::default()));
+        let mut gate = Approval::view_only(SCOPE, now + MAX_APPROVAL, log.clone());
+        let prompt = gate.begin_local_decision(&SCOPE, now).unwrap();
+        assert_eq!(gate.apply(&SCOPE, &5, now), Err(Error::NotAllowed));
+        assert_eq!(
+            gate.begin_local_decision(&SCOPE, now).err(),
+            Some(Error::NotAllowed)
+        );
+        assert_eq!(gate.decide_locally(true, now), Err(Error::NotAllowed));
+        gate.complete_local_decision(prompt, &SCOPE, true, now)
+            .unwrap();
+        assert_eq!(gate.apply(&SCOPE, &5, now), Ok(()));
+        assert_eq!(log.borrow().applied, [5]);
+    }
+
+    #[test]
+    fn delayed_yes_is_inert_after_stop_disconnect_or_exact_deadline() {
+        let now = Instant::now();
+        let until = now + MAX_APPROVAL;
+        for reason in [End::Revoked, End::Disconnected, End::Expired] {
+            let log = Rc::new(RefCell::new(Log::default()));
+            let mut gate = Approval::view_only(SCOPE, until, log.clone());
+            let prompt = gate.begin_local_decision(&SCOPE, now).unwrap();
+            let returned_at = match reason {
+                End::Revoked => {
+                    gate.revoke().unwrap();
+                    now
+                }
+                End::Disconnected => {
+                    gate.disconnect().unwrap();
+                    now
+                }
+                // The dialog finishing exactly on the deadline still loses.
+                End::Expired => until,
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                gate.complete_local_decision(prompt, &SCOPE, true, returned_at),
+                Err(Error::NotAllowed)
+            );
+            assert_eq!(gate.state(), State::Ended(reason));
+            assert_eq!(gate.apply(&SCOPE, &1, returned_at), Err(Error::NotAllowed));
+            assert!(log.borrow().applied.is_empty());
+            assert_eq!(log.borrow().releases, 0);
+        }
+    }
+
+    #[test]
+    fn a_closed_or_replaced_dialog_cannot_authorize_a_different_owner_or_generation() {
+        let now = Instant::now();
+        let until = now + MAX_APPROVAL;
+        let log = Rc::new(RefCell::new(Log::default()));
+        let mut old = Approval::view_only(SCOPE, until, log.clone());
+        let stale = old.begin_local_decision(&SCOPE, now).unwrap();
+        drop(old);
+
+        // Even if identical fixture session values are accidentally reused,
+        // a different gate has a different pending prompt.
+        let mut replacement = Approval::view_only(SCOPE, until, log.clone());
+        let current_prompt = replacement.begin_local_decision(&SCOPE, now).unwrap();
+        assert_eq!(
+            replacement.complete_local_decision(stale, &SCOPE, true, now),
+            Err(Error::WrongScope)
+        );
+        assert_eq!(replacement.apply(&SCOPE, &5, now), Err(Error::NotAllowed));
+        let new_scope = InputScope {
+            generation: [4; 32],
+            ..SCOPE
+        };
+        assert_eq!(
+            replacement.complete_local_decision(current_prompt, &new_scope, true, now),
+            Err(Error::WrongScope)
+        );
+        assert_eq!(replacement.state(), State::Ended(End::Disconnected));
+        assert!(log.borrow().applied.is_empty());
+    }
+
+    #[test]
+    fn native_prompt_decline_is_terminal_without_applying_input() {
+        let now = Instant::now();
+        let log = Rc::new(RefCell::new(Log::default()));
+        let mut gate = Approval::view_only(SCOPE, now + MAX_APPROVAL, log.clone());
+        let prompt = gate.begin_local_decision(&SCOPE, now).unwrap();
+        gate.complete_local_decision(prompt, &SCOPE, false, now)
+            .unwrap();
+        assert_eq!(gate.state(), State::Ended(End::Declined));
+        assert_eq!(
+            gate.begin_local_decision(&SCOPE, now).err(),
+            Some(Error::NotAllowed)
+        );
+        assert!(log.borrow().applied.is_empty());
+        assert_eq!(log.borrow().releases, 0);
     }
 
     #[test]
