@@ -29,6 +29,8 @@ mod private_wss_contract;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
 #[cfg(feature = "v2-public-video-wss")]
+mod public_video_frames;
+#[cfg(feature = "v2-public-video-wss")]
 mod public_video_ice;
 #[cfg(feature = "v2-public-video-wss")]
 pub mod public_video_lifecycle;

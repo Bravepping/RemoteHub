@@ -46,13 +46,11 @@ fn ffmpeg_fixture(args: &[&str], input: &[u8]) -> Vec<u8> {
 }
 
 pub(super) async fn decode_pattern_round_trip(
-    h: &mut PublicVideoWss<'_>,
-    v: &mut PublicVideoWss<'_>,
+    mut h: PublicVideoWss<'_>,
+    mut v: PublicVideoWss<'_>,
 ) {
-    use rtc::rtp::{
-        codec::h264::{H264Packet, H264Payloader},
-        packetizer::{Depacketizer, Payloader},
-    };
+    use hub_webrtc::public_video_lifecycle::{supervise_video, PublicVideoEnd};
+    use rtc::rtp::{codec::h264::H264Payloader, packetizer::Payloader};
 
     let expected = four_quadrants_yuv420();
     let encoded = ffmpeg_fixture(
@@ -94,61 +92,57 @@ pub(super) async fn decode_pattern_round_trip(
         .unwrap();
     // The stream must include parameter sets plus an IDR, not just dummy transport bytes.
     assert!(payloads.len() >= 2 && payloads.len() <= 8);
+    // This small all-intra fixture fits in one RTP STAP-A; each repeated
+    // key picture is independently decodable, including its SPS/PPS.
+    let mut stap = vec![0x78];
+    for payload in payloads {
+        match payload[0] & 31 {
+            24 => stap.extend_from_slice(&payload[1..]),
+            1..=23 => {
+                stap.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+                stap.extend_from_slice(&payload);
+            }
+            _ => panic!("unexpected fragmented test picture"),
+        }
+    }
+    assert!(stap.len() <= 1188);
     let SignedVideoPeers {
         host,
         viewer,
         mut viewer_tracks,
         _nat,
-    } = negotiate_signed_video(h, v).await;
-    // This verifies the wrapper's track-open boundary without depending on
-    // whether it queues the very first RTP packet before exposing the track.
-    h.send_checked_rtp(host.as_ref(), synthetic_rtp(1))
-        .await
-        .unwrap();
-    timeout(WAIT, viewer_tracks.recv()).await.unwrap().unwrap();
-    const FIRST_SEQUENCE: u16 = 2;
-    const PICTURE_TIMESTAMP: u32 = 12_000;
-    let count = payloads.len();
-    for (index, payload) in payloads.into_iter().enumerate() {
-        let seq = FIRST_SEQUENCE + index as u16;
-        h.send_checked_rtp(
-            host.as_ref(),
-            Packet {
-                header: Header {
-                    timestamp: PICTURE_TIMESTAMP,
-                    marker: index + 1 == count,
-                    ..synthetic_rtp(seq).header
-                },
-                payload,
+    } = negotiate_signed_video(&mut h, &mut v).await;
+    let (source, host_driver) = supervise_video(h, host);
+    let (sink, viewer_driver) = supervise_video(v, viewer);
+    let staged = async {
+        let mut display = sink.into_display_reader(42);
+        let picture = |seq: u16| Packet {
+            header: Header {
+                timestamp: u32::from(seq) * 3000,
+                ..synthetic_rtp(seq).header
             },
-        )
-        .await
-        .unwrap();
-    }
-
-    let mut annex_b = Vec::new();
-    let mut unpacker = H264Packet::default();
-    let mut next = FIRST_SEQUENCE;
-    // At most one bootstrap packet can be queued in front of the picture.
-    for _ in 0..=count {
-        let packet = v.recv_checked_rtp(viewer.as_ref()).await.unwrap();
-        if packet.header.sequence_number == 1 && next == FIRST_SEQUENCE {
-            continue;
-        }
-        assert_eq!(packet.header.sequence_number, next);
-        assert_eq!(packet.header.timestamp, PICTURE_TIMESTAMP);
-        assert_eq!(packet.header.payload_type, 102);
-        next += 1;
-        let final_packet = next == FIRST_SEQUENCE + count as u16;
-        assert_eq!(packet.header.marker, final_packet);
-        annex_b.extend(unpacker.depacketize(&packet.payload).unwrap());
-        if final_packet {
-            break;
-        }
-    }
-    assert_eq!(next, FIRST_SEQUENCE + count as u16);
-    host.close().await.unwrap();
-    viewer.close().await.unwrap();
+            payload: stap.clone().into(),
+        };
+        source.send_rtp(picture(1)).await.unwrap();
+        timeout(WAIT, viewer_tracks.recv()).await.unwrap().unwrap();
+        source.send_rtp(picture(2)).await.unwrap();
+        let frame = display.next_frame().await.unwrap();
+        assert_eq!(frame.sequence, 0);
+        assert_eq!(frame.timestamp_us, 0);
+        assert!(frame.keyframe);
+        display.stop();
+        assert!(display.next_frame().await.is_err());
+        frame.annex_b
+    };
+    let (host_end, viewer_end, annex_b) = timeout(WAIT, async {
+        tokio::join!(host_driver, viewer_driver, staged)
+    })
+    .await
+    .unwrap();
+    assert_eq!(viewer_end.reason, PublicVideoEnd::Stopped);
+    assert_eq!(viewer_end.cleanup, Ok(()));
+    assert_eq!(host_end.reason, PublicVideoEnd::PeerLeft);
+    assert_eq!(host_end.cleanup, Ok(()));
 
     let actual = ffmpeg_fixture(
         &[

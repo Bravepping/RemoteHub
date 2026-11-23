@@ -400,15 +400,15 @@ async fn exchange(scenario: Scenario) {
         assert!(server.await.unwrap_err().is_cancelled());
         return;
     }
-    if matches!(
-        scenario,
-        Scenario::LiveSignedMedia | Scenario::LiveDecodedPattern
-    ) {
-        if matches!(scenario, Scenario::LiveDecodedPattern) {
-            decode_pattern_round_trip(&mut h, &mut v).await;
-        } else {
-            positive_signed_rtp(&mut h, &mut v).await;
-        }
+    if matches!(scenario, Scenario::LiveDecodedPattern) {
+        decode_pattern_round_trip(h, v).await;
+        assert_room_released(&app).await;
+        server.abort();
+        assert!(server.await.unwrap_err().is_cancelled());
+        return;
+    }
+    if matches!(scenario, Scenario::LiveSignedMedia) {
+        positive_signed_rtp(&mut h, &mut v).await;
         h.leave().await.unwrap();
         assert!(matches!(
             v.next_event(WAIT).await.unwrap(),

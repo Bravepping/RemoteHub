@@ -1,6 +1,8 @@
 //! Own one negotiated loopback video connection and its signaling lifetime.
 //! This actor does not negotiate, open sockets, or grant consent.
 
+use crate::public_video_frames::PublicVideoFrameAssembler;
+pub use crate::public_video_frames::VerifiedVideoFrame;
 use crate::public_video_wss::{PublicVideoWss, PublicVideoWssEvent};
 use rtc::rtp::packet::Packet;
 use std::{future::Future, sync::Arc, time::Duration};
@@ -58,10 +60,25 @@ impl PublicVideoHandle {
         rx.await.map_err(|_| CLOSED)?
     }
 
-    fn enqueue(&self, command: Command) -> Result<(), &'static str> {
-        if *self.stop.borrow() {
+    /// Consume the receiving handle so media for one display generation
+    /// always uses the same assembler. Call after the video track opens.
+    /// The expected SSRC comes from the authenticated video description.
+    pub fn into_display_reader(self, expected_ssrc: u32) -> PublicVideoDisplayReader {
+        PublicVideoDisplayReader {
+            handle: self,
+            assembler: PublicVideoFrameAssembler::new(expected_ssrc),
+        }
+    }
+
+    fn check_running(&self) -> Result<(), &'static str> {
+        if *self.stop.borrow() || self.commands.is_closed() || self.outcome.borrow().is_some() {
             return Err(CLOSED);
         }
+        Ok(())
+    }
+
+    fn enqueue(&self, command: Command) -> Result<(), &'static str> {
+        self.check_running()?;
         self.commands
             .try_send(command)
             .map_err(|error| match error {
@@ -83,6 +100,42 @@ impl PublicVideoHandle {
             .await
             .map_err(|_| CLOSED)?;
         value.ok_or(CLOSED)
+    }
+}
+
+/// Receiver-side handoff for a display adapter. Only RTP admitted by the
+/// signaling/ICE actor can become a frame. It does not grant local consent.
+pub struct PublicVideoDisplayReader {
+    handle: PublicVideoHandle,
+    assembler: PublicVideoFrameAssembler,
+}
+
+impl PublicVideoDisplayReader {
+    pub async fn next_frame(&mut self) -> Result<VerifiedVideoFrame, &'static str> {
+        self.handle.check_running()?;
+        loop {
+            let packet = self.handle.recv_rtp().await?;
+            self.handle.check_running()?;
+            match self.assembler.push(&packet) {
+                Ok(Some(frame)) => {
+                    self.handle.check_running()?;
+                    return Ok(frame);
+                }
+                Ok(None) => (),
+                Err(error) => {
+                    self.handle.stop();
+                    return Err(error);
+                }
+            }
+        }
+    }
+
+    pub fn stop(&self) {
+        self.handle.stop();
+    }
+
+    pub async fn wait_closed(&self) -> Result<PublicVideoLifecycleOutcome, &'static str> {
+        self.handle.wait_closed().await
     }
 }
 
