@@ -454,6 +454,11 @@ impl Session {
         .map_err(|_| "SIGNAL_TIMEOUT")?
         .map_err(|_| "SIGNAL_TASK_CLOSED")?
     }
+    #[cfg(windows)]
+    pub(crate) fn input_release_unconfirmed(&self) -> bool {
+        self.control.as_ref().is_some_and(|c| !c.cleanup_complete())
+    }
+
     pub async fn stop(&self) -> Result<(), String> {
         let _stop = self.stop_lock.lock().await;
         self.cancel();

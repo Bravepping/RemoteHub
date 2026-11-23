@@ -100,6 +100,28 @@ it('describes independent default-No host input approval in the opt-in test buil
   view.unmount();
 });
 
+it('does not present a known input release failure as completed or still running', async () => {
+  const view = mount(RemoteWorkspace, { props: { lanInputQueueTest: true } });
+  await view.get('select').setValue('sender');
+  const [peer, local, consent] = view.findAll('input');
+  await peer.setValue('192.168.1.3');
+  await local.setValue('192.168.1.2');
+  await consent.setValue(true);
+  await view
+    .findAll('button')
+    .find((b) => b.text() === '确认后等待配对')!
+    .trigger('click');
+
+  mocked.reportError?.('INPUT_RELEASE_FAILED');
+  await flushPromises();
+  expect(view.get('[role="alert"]').text()).toContain(
+    '无法确认本次会话按下的键或鼠标按钮已释放',
+  );
+  expect(view.text()).toContain('资源回收：未确认');
+  expect(view.text()).not.toContain('资源回收：已完成');
+  view.unmount();
+});
+
 it('does not show keyboard approval guidance in verified video, even on the test build', async () => {
   const view = mount(RemoteWorkspace, {
     props: { lanInputQueueTest: true, v2VerifiedLanEnabled: true },

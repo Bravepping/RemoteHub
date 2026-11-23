@@ -301,6 +301,29 @@ it('requests authenticated native stop before closing the browser DataChannel', 
   expect(order).toEqual(['native-stop', 'browser-close']);
 });
 
+it('reports unconfirmed input release, closes locally and never saves a successful report', async () => {
+  let rejectStop!: (error: string) => void;
+  const nativeStop = new Promise<void>((_, reject) => {
+    rejectStop = reject;
+  });
+  const { probe, pc, dc, video, failed, update, start } = activeLan(nativeStop);
+  await start();
+  expect(probe.enableInput(true)).toBe(true);
+
+  video.srcObject = {} as MediaStream;
+  const stopping = probe.stop();
+  expect(probe.enableInput(true)).toBe(false);
+  rejectStop('INPUT_RELEASE_FAILED');
+  await stopping;
+
+  expect(failed).toHaveBeenLastCalledWith('INPUT_RELEASE_FAILED');
+  expect(update).toHaveBeenLastCalledWith('failed');
+  expect(dc.close).toHaveBeenCalled();
+  expect(pc.connectionState).toBe('closed');
+  expect(video.srcObject).toBeNull();
+  expect(invoke).not.toHaveBeenCalledWith('p004_lan_save', expect.anything());
+});
+
 it('uses only scoped video, no control DataChannel, and tolerates a verified stop during stats', async () => {
   const { probe, pc, failed, start, state, metrics } = activeLan();
   pc.localDescription.sdp =

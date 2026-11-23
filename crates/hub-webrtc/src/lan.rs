@@ -33,6 +33,38 @@ pub struct LanStatus {
     pub resources_released: bool,
     pub error: Option<String>,
 }
+impl LanStatus {
+    fn cleanup_result(&self) -> Result<(), String> {
+        if self.resources_released {
+            Ok(())
+        } else if self.error.as_deref() == Some("INPUT_RELEASE_FAILED") {
+            Err("INPUT_RELEASE_FAILED".into())
+        } else {
+            Err("LAN_CLEANUP_PENDING".into())
+        }
+    }
+
+    fn finish(&mut self, result: Result<(), String>, clean: bool, input_release_unconfirmed: bool) {
+        if let Err(error) = result {
+            if error != "CANCELLED" {
+                self.error = Some(error);
+            }
+        }
+        self.resources_released = clean && !input_release_unconfirmed;
+        if input_release_unconfirmed {
+            self.error = Some("INPUT_RELEASE_FAILED".into());
+        } else if !clean {
+            self.error = Some("LAN_CLEANUP_PENDING".into());
+        }
+        self.state = if self.error.is_some() {
+            "failed"
+        } else {
+            "stopped"
+        }
+        .into();
+    }
+}
+
 // Finish is a graceful notice, not proof of resources released or permission to
 // hide errors. Only verified LAN input gets advance notice during media drain.
 fn should_announce_finish(stats: &Stats, input_mode: bool) -> bool {
@@ -506,10 +538,7 @@ impl LanSession {
             #[cfg(feature = "v2-private-wss-lan")]
             drop(self.take_private_wss());
         }
-        if !self.stats().resources_released {
-            return Err("LAN_CLEANUP_PENDING".into());
-        }
-        Ok(())
+        self.stats().cleanup_result()
     }
     async fn finish(&self, result: Result<(), String>) {
         self.cancel();
@@ -518,33 +547,18 @@ impl LanSession {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .clone();
-        let clean = if let Some(source) = source {
-            source.stop().await.is_ok() && source.stats().resources_released
+        let (clean, input_release_unconfirmed) = if let Some(source) = source {
+            let clean = source.stop().await.is_ok() && source.stats().resources_released;
+            (clean, source.input_release_unconfirmed())
         } else {
-            true
+            (true, false)
         };
         self.key.lock().unwrap_or_else(|p| p.into_inner()).take();
         #[cfg(feature = "v2-verified-lan")]
         drop(self.take_verified());
         #[cfg(feature = "v2-private-wss-lan")]
         drop(self.take_private_wss());
-        self.update(|s| {
-            if let Err(error) = result {
-                if error != "CANCELLED" {
-                    s.error = Some(error);
-                }
-            }
-            if !clean {
-                s.error = Some("LAN_CLEANUP_PENDING".into());
-            }
-            s.resources_released = clean;
-            s.state = if s.error.is_some() {
-                "failed"
-            } else {
-                "stopped"
-            }
-            .into();
-        });
+        self.update(|s| s.finish(result, clean, input_release_unconfirmed));
     }
     async fn host_main(&self, listener: TcpListener) -> Result<(), String> {
         #[cfg(feature = "v2-private-wss-lan")]
@@ -1168,6 +1182,35 @@ mod tests {
             ),
             Err(error) if error == "LAN_VERIFIED_PEER_BINDING"
         ));
+    }
+
+    #[test]
+    fn cleanup_result_preserves_release_uncertainty_even_with_a_media_error() {
+        let mut status = LanStatus {
+            browser_control: None,
+            role: "sender".into(),
+            state: "draining".into(),
+            elapsed_ms: 0,
+            authenticated: true,
+            messages_received: 0,
+            source: None,
+            receiver_samples: vec![],
+            resources_released: false,
+            error: None,
+        };
+        status.finish(Err("MEDIA_BACKPRESSURE".into()), false, true);
+        assert!(!status.resources_released);
+        assert_eq!(status.state, "failed");
+        assert_eq!(status.error.as_deref(), Some("INPUT_RELEASE_FAILED"));
+        assert_eq!(status.cleanup_result(), Err("INPUT_RELEASE_FAILED".into()));
+
+        status.finish(Ok(()), false, false);
+        assert_eq!(status.cleanup_result(), Err("LAN_CLEANUP_PENDING".into()));
+        status.error = None;
+        status.finish(Err("CANCELLED".into()), true, false);
+        assert!(status.resources_released);
+        assert_eq!(status.state, "stopped");
+        assert_eq!(status.cleanup_result(), Ok(()));
     }
 
     #[test]

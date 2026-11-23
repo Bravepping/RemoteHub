@@ -454,7 +454,13 @@ onBeforeUnmount(() => {
         invitation
       }}</code>
     </p>
-    <p v-if="error" role="alert">{{ error }}</p>
+    <p v-if="error" role="alert">
+      <template v-if="error === 'INPUT_RELEASE_FAILED'">
+        远程键鼠控制已停止，但无法确认本次会话按下的键或鼠标按钮已释放。
+        <code>INPUT_RELEASE_FAILED</code>
+      </template>
+      <template v-else>{{ error }}</template>
+    </p>
     <p v-if="busy && role === 'receiver' && !videoOnly">
       <button
         class="outline-button"
@@ -528,11 +534,13 @@ onBeforeUnmount(() => {
     </p>
     <p>
       资源回收：{{
-        native?.resources_released
-          ? '已完成'
-          : busy
-            ? '会话进行中'
-            : '尚无本次结果'
+        error === 'INPUT_RELEASE_FAILED' || error === 'LAN_CLEANUP_PENDING'
+          ? '未确认'
+          : native?.resources_released
+            ? '已完成'
+            : busy
+              ? '会话进行中'
+              : '尚无本次结果'
       }}。未接入公网、云身份或持久信任库；每轮都要重新确认和配对。
     </p>
   </section>
