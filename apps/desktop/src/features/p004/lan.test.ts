@@ -14,7 +14,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function activeLan() {
+function activeLan(nativeStop?: Promise<void>) {
   vi.useFakeTimers();
   const order: string[] = [];
   const metrics = vi.fn<() => void>();
@@ -38,13 +38,22 @@ function activeLan() {
       Object.defineProperty(dc, 'readyState', { value: 'closed' });
     }),
   } as unknown as RTCDataChannel;
-  const browserStats = new Map([
+  const browserStats = new Map<string, Record<string, unknown>>([
     ['video', { type: 'inbound-rtp', kind: 'video', framesDecoded: 12 }],
     ['t', { type: 'transport', selectedCandidatePairId: 'p' }],
     ['p', { remoteCandidateId: 'r' }],
-    ['r', { address: '10.0.0.3', protocol: 'udp' }],
+    [
+      'r',
+      {
+        address: '10.0.0.3',
+        port: 48604,
+        candidateType: 'host',
+        protocol: 'udp',
+      },
+    ],
   ]);
   const pc = {
+    ontrack: null as ((event: RTCTrackEvent) => void) | null,
     iceGatheringState: 'complete',
     connectionState: 'connected',
     localDescription: {
@@ -88,7 +97,7 @@ function activeLan() {
           controlSession: 'control',
         };
       case 'p004_lan_signal':
-        return 'answer';
+        return 'v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 96\r\na=candidate:1 1 UDP 1 10.0.0.3 48604 typ host\r\n';
       case 'p004_lan_stats':
         return status;
       case 'p004_lan_metrics':
@@ -96,6 +105,7 @@ function activeLan() {
         return undefined;
       case 'p004_lan_stop':
         order.push('native-stop');
+        if (nativeStop) await nativeStop;
         status = { ...status, state: 'stopped', resources_released: true };
         return undefined;
       case 'p004_lan_save':
@@ -105,9 +115,13 @@ function activeLan() {
     }
   });
   const video = document.createElement('video');
+  const play = vi.fn(async () => {});
   Object.defineProperties(video, {
     videoWidth: { value: 1280 },
     paused: { value: false },
+    srcObject: { value: null, writable: true },
+    play: { value: play },
+    pause: { value: vi.fn() },
   });
   const update = vi.fn();
   const failed = vi.fn();
@@ -128,6 +142,9 @@ function activeLan() {
     probe,
     pc,
     dc,
+    video,
+    play,
+    browserStats,
     failed,
     update,
     order,
@@ -138,6 +155,140 @@ function activeLan() {
     },
   };
 }
+
+function incomingTrack() {
+  const track = { stop: vi.fn(), kind: 'video' } as unknown as MediaStreamTrack;
+  const stream = { getTracks: () => [track] } as unknown as MediaStream;
+  const event = { streams: [stream], track } as unknown as RTCTrackEvent;
+  return { event, stream };
+}
+
+const verifiedMode = {
+  verifiedPeer: true,
+  realControl: false,
+  controlSim: false,
+};
+
+it.each([false, true])(
+  'admits verified video only after both native authentication and a matching selected pair (WSS=%s)',
+  async (verifiedWss) => {
+    const { probe, pc, video, play, start, state, browserStats, failed } =
+      activeLan();
+    const remote = browserStats.get('r')!;
+    browserStats.delete('r');
+    state({ authenticated: false, state: 'negotiating' });
+    await start({ ...verifiedMode, verifiedWss });
+    const { event, stream } = incomingTrack();
+    expect(pc.ontrack).toBeTypeOf('function');
+    pc.ontrack?.(event);
+    expect(video.srcObject).toBeNull();
+    expect(play).not.toHaveBeenCalled();
+
+    browserStats.set('r', remote);
+    await vi.advanceTimersByTimeAsync(350);
+    expect(video.srcObject).toBeNull();
+    expect(play).not.toHaveBeenCalled();
+
+    browserStats.delete('r');
+    state({ authenticated: true, state: 'connected' });
+    await vi.advanceTimersByTimeAsync(350);
+    expect(video.srcObject).toBeNull();
+    expect(play).not.toHaveBeenCalled();
+    expect(failed).not.toHaveBeenCalled();
+
+    browserStats.set('r', remote);
+    await vi.advanceTimersByTimeAsync(350);
+    expect(video.srcObject).toBe(stream);
+    expect(play).toHaveBeenCalledTimes(1);
+    await probe.stop();
+  },
+);
+
+it.each([
+  { changes: { port: 48605 }, reason: 'unsigned port' },
+  { changes: { address: '10.0.0.4' }, reason: 'off-peer address' },
+  { changes: { candidateType: 'srflx' }, reason: 'non-host candidate' },
+  { changes: { protocol: 'tcp' }, reason: 'non-UDP candidate' },
+])('rejects an actual selected route mismatch: $reason', async ({ changes }) => {
+  const { pc, video, play, start, state, browserStats, failed } = activeLan();
+  state({ authenticated: false, state: 'negotiating' });
+  await start(verifiedMode);
+  const { event } = incomingTrack();
+  pc.ontrack?.(event);
+  browserStats.set('r', { ...browserStats.get('r'), ...changes });
+  state({ authenticated: true, state: 'connected' });
+  await vi.advanceTimersByTimeAsync(350);
+  expect(failed).toHaveBeenCalledTimes(1);
+  expect(video.srcObject).toBeNull();
+  expect(play).not.toHaveBeenCalled();
+  expect(pc.connectionState).toBe('closed');
+});
+
+it('clears a verified viewer before native stop resolves and ignores a queued track callback', async () => {
+  let resolve!: () => void;
+  const promise = new Promise<void>((resolveStop) => {
+    resolve = resolveStop;
+  });
+  const { probe, pc, video, play, start, order } = activeLan(promise);
+  await start(verifiedMode);
+  const ontrack = pc.ontrack!;
+  const { event, stream } = incomingTrack();
+  ontrack(event);
+  await vi.advanceTimersByTimeAsync(350);
+  expect(video.srcObject).toBe(stream);
+
+  const stopping = probe.stop();
+  expect(order).toEqual(['native-stop']);
+  expect(pc.connectionState).toBe('connected');
+  expect(video.srcObject).toBeNull();
+  ontrack(incomingTrack().event);
+  expect(video.srcObject).toBeNull();
+  expect(play).toHaveBeenCalledTimes(1);
+
+  resolve();
+  await stopping;
+  expect(video.srcObject).toBeNull();
+  expect(pc.connectionState).toBe('closed');
+});
+
+it('retires an admitted verified video when the actual selected pair disappears', async () => {
+  const { pc, video, play, start, browserStats, failed } = activeLan();
+  await start(verifiedMode);
+  const ontrack = pc.ontrack!;
+  const { event, stream } = incomingTrack();
+  ontrack(event);
+  await vi.advanceTimersByTimeAsync(350);
+  expect(video.srcObject).toBe(stream);
+
+  browserStats.delete('r');
+  await vi.advanceTimersByTimeAsync(350);
+  expect(video.srcObject).toBeNull();
+  expect(failed).toHaveBeenCalledTimes(1);
+  ontrack(incomingTrack().event);
+  expect(video.srcObject).toBeNull();
+  expect(play).toHaveBeenCalledTimes(1);
+});
+
+it('retires admitted verified video as soon as native reports authenticated finishing', async () => {
+  const { probe, pc, video, play, start, state, failed } = activeLan();
+  await start(verifiedMode);
+  const ontrack = pc.ontrack!;
+  const { event, stream } = incomingTrack();
+  ontrack(event);
+  await vi.advanceTimersByTimeAsync(350);
+  expect(video.srcObject).toBe(stream);
+
+  state({ state: 'finishing' });
+  await vi.advanceTimersByTimeAsync(350);
+  expect(video.srcObject).toBeNull();
+  expect(pc.connectionState).toBe('connected');
+  expect(failed).not.toHaveBeenCalled();
+  ontrack(incomingTrack().event);
+  await vi.advanceTimersByTimeAsync(350);
+  expect(video.srcObject).toBeNull();
+  expect(play).toHaveBeenCalledTimes(1);
+  await probe.stop();
+});
 
 it('requests authenticated native stop before closing the browser DataChannel', async () => {
   const { probe, dc, order, start } = activeLan();

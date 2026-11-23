@@ -91,6 +91,11 @@ const verifiedLanErrors: Readonly<Record<string, string>> = {
     '未能认证指定对端。请确认两端都选择“已验证设备（仅视频）”，且已互相核对指纹。',
   LAN_VERIFIED_MODE_DISABLED: '当前客户端未启用已验证设备视频模式。',
   LAN_VERIFIED_VIDEO_ONLY: '已验证设备模式只允许主屏视频，不允许键鼠输入。',
+  BROWSER_SIGNED_HOST_CANDIDATE_MISSING:
+    '对端签名应答没有提供有效的视频地址和端口，本次不会显示画面。',
+  BROWSER_SELECTED_OFF_PEER:
+    '浏览器实际选中的视频地址或端口与对端签名信息不符，会话已停止。',
+  BROWSER_PEER_UNVERIFIED: '视频链路无法继续通过核验，已清屏并停止会话。',
 };
 const privateWssErrors: Readonly<Record<string, string>> = {
   ...verifiedLanErrors,
@@ -154,9 +159,10 @@ async function start() {
       }
     },
     (e) => {
+      const errorCode = e.replace(/^Error: /, '');
       error.value = verified
-        ? Object.hasOwn(knownErrors, e)
-          ? knownErrors[e]
+        ? Object.hasOwn(knownErrors, errorCode)
+          ? knownErrors[errorCode]
           : wss
             ? '私网 WSS 视频会话未建立或已中断。请检查本机启动配置、临时配对码和两端的会话设置。没有切换到其他模式。'
             : '已验证设备视频会话未建立或已中断。请检查本机地址、临时配对码和两端的会话设置。'

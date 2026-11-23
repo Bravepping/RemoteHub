@@ -86,6 +86,51 @@ export function selectedPeer(
   return result;
 }
 
+// The native verified-mode answer is returned only after device proof and
+// SDP validation. Require the exact advertised RTP endpoint for presentation.
+function signedHostPorts(answer: string, peerIp: string): Set<number> {
+  const ports = new Set<number>();
+  for (const line of answer.split(/\r?\n/)) {
+    if (!line.startsWith('a=candidate:')) continue;
+    const fields = line.slice(12).trim().split(/\s+/);
+    if (
+      fields[1] === '1' &&
+      fields[2]?.toLowerCase() === 'udp' &&
+      fields[4] === peerIp &&
+      fields[6] === 'typ' &&
+      fields[7] === 'host' &&
+      /^\d{1,5}$/.test(fields[5])
+    ) {
+      const port = Number(fields[5]);
+      if (port > 0 && port <= 65535) ports.add(port);
+    }
+  }
+  return ports;
+}
+
+function selectedSignedHost(
+  stats: RTCStatsReport,
+  peerIp: string,
+  allowedPorts: Set<number>,
+): boolean | null {
+  const selected = new Set<string>();
+  stats.forEach((item) => {
+    if (item.type === 'transport' && item.selectedCandidatePairId)
+      selected.add(item.selectedCandidatePairId);
+  });
+  if (selected.size === 0) return null;
+  if (selected.size !== 1) return false;
+  const pair = stats.get(selected.values().next().value!);
+  const remote = pair && stats.get(pair.remoteCandidateId);
+  if (!remote) return null;
+  return (
+    (remote.address ?? remote.ip) === peerIp &&
+    remote.protocol?.toLowerCase() === 'udp' &&
+    remote.candidateType === 'host' &&
+    allowedPorts.has(remote.port)
+  );
+}
+
 export class LanProbe {
   private control?: ControlClient;
   private controlSession?: string;
@@ -106,6 +151,10 @@ export class LanProbe {
   private lastMetric = 0;
   private controlErrorDeadline?: number;
   private config?: LanConfig;
+  private allowedDisplayPorts = new Set<number>();
+  private pendingVideo?: MediaStream;
+  private displayedVideo?: MediaStream;
+  private displayRetired = false;
   constructor(
     private video: HTMLVideoElement,
     private update: (
@@ -172,14 +221,14 @@ export class LanProbe {
       );
     }
     pc.ontrack = (event) => {
-      if (this.stopped) return;
-      this.video.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-      void this.video.play().catch((error) => {
-        if (!this.stopped) {
-          this.failed(String(error));
-          void this.stop();
-        }
-      });
+      if (this.stopped || this.pc !== pc || this.displayRetired) return;
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
+      if (this.verifiedReceiver()) {
+        // No pixels are displayed solely because WebRTC emitted a track.
+        this.pendingVideo = stream;
+        return;
+      }
+      this.attachVideo(stream);
     };
     const transceiver = pc.addTransceiver('video', { direction: 'recvonly' });
     const codecs = RTCRtpReceiver.getCapabilities('video')?.codecs.filter(
@@ -221,7 +270,42 @@ export class LanProbe {
         publication?.sdp ?? lanOffer(pc.localDescription!.sdp, config.localIp),
     });
     if (this.stopped) return;
+    if (this.verifiedReceiver()) {
+      this.allowedDisplayPorts = signedHostPorts(answer, config.peerIp);
+      if (this.allowedDisplayPorts.size === 0)
+        throw new Error('BROWSER_SIGNED_HOST_CANDIDATE_MISSING');
+    }
     await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+  }
+  private verifiedReceiver() {
+    return (
+      this.config?.role === 'receiver' && this.config.verifiedPeer === true
+    );
+  }
+  private attachVideo(stream: MediaStream) {
+    if (this.stopped || this.displayRetired || this.displayedVideo === stream)
+      return;
+    this.displayedVideo = stream;
+    this.video.srcObject = stream;
+    void this.video.play().catch((error) => {
+      if (
+        this.stopped ||
+        this.displayRetired ||
+        this.video.srcObject !== stream
+      )
+        return;
+      this.failed(String(error));
+      void this.stop();
+    });
+  }
+  private retireVerifiedDisplay() {
+    if (!this.verifiedReceiver()) return;
+    this.displayRetired = true;
+    this.pendingVideo = undefined;
+    if (this.displayedVideo && this.video.srcObject === this.displayedVideo) {
+      this.video.srcObject = null;
+    }
+    this.displayedVideo = undefined;
   }
   private async receiverSnapshot(): Promise<LanReceiver> {
     const pc = this.pc!;
@@ -232,7 +316,9 @@ export class LanProbe {
       this.firstFrame,
     );
     const all = await pc.getStats();
-    const peerMatches = selectedPeer(all, this.config!.peerIp);
+    const peerMatches = this.verifiedReceiver()
+      ? selectedSignedHost(all, this.config!.peerIp, this.allowedDisplayPorts)
+      : selectedPeer(all, this.config!.peerIp);
     let decoderImplementation: string | null = null;
     all.forEach((item) => {
       if (
@@ -243,7 +329,11 @@ export class LanProbe {
         decoderImplementation = item.decoderImplementation;
     });
     if (peerMatches === false) throw new Error('BROWSER_SELECTED_OFF_PEER');
-    if ((data.framesDecoded ?? 0) > 0 && peerMatches !== true)
+    if (
+      !this.verifiedReceiver() &&
+      (data.framesDecoded ?? 0) > 0 &&
+      peerMatches !== true
+    )
       throw new Error('BROWSER_PEER_UNVERIFIED');
     if (
       this.firstFrame === null &&
@@ -270,6 +360,12 @@ export class LanProbe {
         sessionId: this.id,
       });
       if (this.stopped) return;
+      if (
+        status.error ||
+        status.resources_released ||
+        authenticatedClosing(status)
+      )
+        this.retireVerifiedDisplay();
       if (productSession && authenticatedClosing(status)) {
         this.control?.revoke();
         this.controlErrorDeadline = undefined;
@@ -295,8 +391,18 @@ export class LanProbe {
         }
         if (this.stopped) return;
         if (
+          this.verifiedReceiver() &&
+          this.displayedVideo &&
+          (!status.authenticated || receiver?.peerMatches !== true)
+        ) {
+          this.retireVerifiedDisplay();
+          throw new Error('BROWSER_PEER_UNVERIFIED');
+        }
+        if (
           receiver &&
           !status.resources_released &&
+          (!this.verifiedReceiver() ||
+            (status.authenticated && receiver.peerMatches === true)) &&
           performance.now() - this.lastMetric >= 450
         ) {
           try {
@@ -312,14 +418,26 @@ export class LanProbe {
               sessionId: this.id,
             });
             if (!authenticatedClosing(status)) throw error;
+            this.retireVerifiedDisplay();
             this.control?.revoke();
           }
           if (this.stopped) return;
           this.lastMetric = performance.now();
         }
       } else receiver = status.receiver_samples.at(-1);
+      if (
+        this.verifiedReceiver() &&
+        status.authenticated &&
+        !status.error &&
+        receiver?.peerMatches === true &&
+        this.pendingVideo
+      ) {
+        this.attachVideo(this.pendingVideo);
+      }
       const playing =
-        (receiver?.framesDecoded ?? 0) > 0 && (receiver?.videoWidth ?? 0) > 0;
+        (receiver?.framesDecoded ?? 0) > 0 &&
+        (receiver?.videoWidth ?? 0) > 0 &&
+        (!this.verifiedReceiver() || !!this.displayedVideo);
       const finishing = productSession && authenticatedClosing(status);
       if (!status.resources_released && !finishing)
         this.control?.beginBatch(
@@ -347,6 +465,7 @@ export class LanProbe {
   stop(): Promise<void> {
     if (this.stopping) return this.stopping;
     this.stopped = true;
+    this.retireVerifiedDisplay();
     this.control?.enableInput(false);
     this.control?.revoke();
     clearTimeout(this.timer);
@@ -397,7 +516,7 @@ export class LanProbe {
         (!this.pc || this.pc.connectionState === 'closed') &&
         tracks.every((t) => t.readyState === 'ended');
       this.pc = undefined;
-      this.video.srcObject = null;
+      if (!this.verifiedReceiver()) this.video.srcObject = null;
       if (this.id) {
         const status = await invoke<LanStatus>('p004_lan_stats', {
           sessionId: this.id,
@@ -428,7 +547,7 @@ export class LanProbe {
       this.pc?.getReceivers().forEach((r) => r.track.stop());
       this.pc?.close();
       this.pc = undefined;
-      this.video.srcObject = null;
+      if (!this.verifiedReceiver()) this.video.srcObject = null;
     }
   }
 }
