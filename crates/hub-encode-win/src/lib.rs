@@ -102,6 +102,11 @@ impl EncoderConfig {
 #[cfg(feature = "v2-public-video-60s-test")]
 pub const PUBLIC_VIDEO_TEST_SECONDS: u32 = 60;
 
+/// A pacing and accounting ceiling, not a session or input authorization.
+/// A sustained caller must also supply its own earlier, consented deadline.
+#[cfg(feature = "v2-public-video-sustained")]
+pub const PUBLIC_VIDEO_SUSTAINED_SECONDS: u32 = 31 * 60;
+
 #[cfg(all(feature = "v2-public-video-60s-test", any(windows, test)))]
 fn public_video_test_config(approved: bool) -> Result<(EncoderConfig, u32), EncodeError> {
     let config = EncoderConfig::default();
