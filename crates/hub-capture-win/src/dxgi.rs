@@ -198,9 +198,7 @@ impl DxgiCapture {
                 format: desc.Format.0 as u32,
             };
             let layout = PixelLayout::classify(key.format)?;
-            if !(1..=16_384).contains(&key.width) || !(1..=16_384).contains(&key.height) {
-                return Err(CaptureError::DxgiState("FRAME_GEOMETRY"));
-            }
+            layout.row_bytes(key.width, key.height)?;
             if !self
                 .staging
                 .as_ref()
@@ -226,14 +224,12 @@ impl DxgiCapture {
                 .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
                 .map_err(|e| native_error("MAP_STAGING", e))?;
             let _mapped = MappedTexture(&self.context, staging);
-            if mapped.pData.is_null() || (mapped.RowPitch as usize) < key.width as usize * 4 {
+            if mapped.pData.is_null() {
                 return Err(CaptureError::DxgiState("FRAME_GEOMETRY"));
             }
-            let size = (mapped.RowPitch as usize)
-                .checked_mul(key.height as usize)
-                .filter(|size| *size <= isize::MAX as usize)
-                .ok_or(CaptureError::InvalidArgument("mapped buffer overflow"))?;
-            // D3D11 guarantees RowPitch bytes for each row of this mapped 2D staging texture.
+            let size = layout.mapped_len(key.width, key.height, mapped.RowPitch as usize)?;
+            // Borrow the mapped surface only while mapped. The FP16 decoder
+            // accesses the real pixel bytes one row at a time, not padding.
             let data = std::slice::from_raw_parts(mapped.pData.cast::<u8>(), size);
             let bgra = layout.pack_bgra(data, key.width, key.height, mapped.RowPitch as usize)?;
             Ok(Some(CapturedFrame {
