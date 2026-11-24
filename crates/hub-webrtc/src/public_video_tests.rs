@@ -638,3 +638,7 @@ fn verified_public_video_requires_local_consent_before_queueing_and_drops_backlo
         assert_eq!(keys.applied.get(), expected);
     }
 }
+
+#[cfg(all(feature = "v2-input-approval", feature = "v2-public-video-wss"))]
+#[path = "public_video_input_transport_tests.rs"]
+mod input_transport;
