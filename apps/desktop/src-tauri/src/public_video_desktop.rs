@@ -40,6 +40,8 @@ const MAX_FRAME_BYTES: usize = 256 * 1024;
 
 pub(crate) struct DesktopVideoState {
     launch: LaunchMode,
+    #[cfg(feature = "v2-control-invitations")]
+    invitations: Mutex<crate::control_invitations::Invitations>,
     active: Mutex<Option<Arc<Session>>>,
     used: AtomicBool,
     closing: AtomicBool,
@@ -49,6 +51,8 @@ impl DesktopVideoState {
     pub(crate) fn new() -> Self {
         Self {
             launch: LaunchMode::parse(std::env::args_os().skip(1)),
+            #[cfg(feature = "v2-control-invitations")]
+            invitations: Mutex::default(),
             active: Mutex::new(None),
             used: AtomicBool::new(false),
             closing: AtomicBool::new(false),
@@ -65,6 +69,10 @@ impl DesktopVideoState {
     #[cfg(feature = "v2-public-control-desktop")]
     pub(crate) fn control_available(&self) -> bool {
         self.available() && self.launch.is_control()
+    }
+    #[cfg(feature = "v2-control-invitations")]
+    pub(crate) fn picker_available(&self) -> bool {
+        self.available() && matches!(self.launch, LaunchMode::Invitations)
     }
     pub(crate) fn profile_consumed(&self) -> bool {
         self.used.load(Ordering::Acquire)
@@ -180,6 +188,7 @@ fn host_outcome(
 
 pub(crate) struct Session {
     id: String,
+    profile_consumed: AtomicBool,
     role: Role,
     stop: watch::Sender<bool>,
     status: watch::Sender<Status>,
@@ -206,6 +215,7 @@ impl Session {
         let _ = control_launch;
         Self {
             id: uuid::Uuid::new_v4().simple().to_string(),
+            profile_consumed: AtomicBool::new(false),
             role,
             stop: watch::channel(false).0,
             status: watch::channel(Status {
@@ -307,8 +317,61 @@ fn find(window: &WebviewWindow, generation: &str) -> Result<Arc<Session>, String
     Ok(session)
 }
 
+enum ProfileSource {
+    Launch(PathBuf),
+    #[cfg(feature = "v2-control-invitations")]
+    Selected(Box<PublicVideoProfile>),
+}
+
+#[cfg(feature = "v2-control-invitations")]
 #[tauri::command]
-pub(crate) fn public_video_start(window: WebviewWindow, role: String) -> Result<String, String> {
+pub(crate) async fn select_control_invitation(
+    window: WebviewWindow,
+) -> Result<Option<crate::control_invitations::Preview>, String> {
+    crate::experiment_origin::origin(&window)?;
+    let state = window.state::<Arc<DesktopVideoState>>().inner().clone();
+    if !state.picker_available() || state.closing.load(Ordering::Acquire) {
+        return Err("PUBLIC_VIDEO_PROFILE_UNAVAILABLE".into());
+    }
+    let gate = window.state::<Arc<crate::ProbeState>>().0.clone();
+    if gate.swap(true, Ordering::AcqRel) {
+        return Err("PUBLIC_VIDEO_BUSY".into());
+    }
+    let _lease = CaptureLease(gate);
+    if state
+        .active
+        .lock()
+        .map_err(|_| "PUBLIC_VIDEO_STATE")?
+        .as_ref()
+        .is_some_and(|s| s.status.borrow().phase != Phase::Closed)
+    {
+        return Err("PUBLIC_VIDEO_BUSY".into());
+    }
+    let hwnd = window.hwnd().map_err(|_| "PUBLIC_VIDEO_NATIVE_WINDOW")?.0 as usize;
+    let selected = tauri::async_runtime::spawn_blocking(move || {
+        crate::control_invitations::choose(hwnd)?
+            .map(|path| PublicVideoProfile::load_control(&path, now()?))
+            .transpose()
+    })
+    .await
+    .map_err(|_| "PUBLIC_VIDEO_PROFILE_FILE")??;
+    crate::experiment_origin::origin(&window)?;
+    if state.closing.load(Ordering::Acquire) {
+        return Err(CANCELLED.into());
+    }
+    let mut invitations = state.invitations.lock().map_err(|_| "PUBLIC_VIDEO_STATE")?;
+    selected
+        .map(|profile| invitations.select(profile, now()?))
+        .transpose()
+        .map_err(str::to_owned)
+}
+
+#[tauri::command]
+pub(crate) fn public_video_start(
+    window: WebviewWindow,
+    role: String,
+    invitation_id: Option<String>,
+) -> Result<String, String> {
     crate::experiment_origin::origin(&window)?;
     let role = match role.as_str() {
         "host" => Role::Host,
@@ -319,11 +382,6 @@ pub(crate) fn public_video_start(window: WebviewWindow, role: String) -> Result<
     if !state.available() {
         return Err("PUBLIC_VIDEO_PROFILE_REQUIRED".into());
     }
-    let profile = state
-        .launch
-        .profile()
-        .ok_or("PUBLIC_VIDEO_PROFILE_UNAVAILABLE")?
-        .to_path_buf();
     let mut active = state.active.lock().map_err(|_| "PUBLIC_VIDEO_STATE")?;
     if state.closing.load(Ordering::Acquire) || state.used.load(Ordering::Acquire) {
         return Err("PUBLIC_VIDEO_PROFILE_UNAVAILABLE".into());
@@ -344,6 +402,25 @@ pub(crate) fn public_video_start(window: WebviewWindow, role: String) -> Result<
     {
         return Err("PUBLIC_VIDEO_BUSY".into());
     }
+    let profile = match invitation_id {
+        #[cfg(feature = "v2-control-invitations")]
+        Some(id) if state.picker_available() => {
+            let profile = state
+                .invitations
+                .lock()
+                .map_err(|_| "PUBLIC_VIDEO_STATE")?
+                .take(&id, role, now()?)?;
+            ProfileSource::Selected(Box::new(profile))
+        }
+        Some(_) => return Err("PUBLIC_VIDEO_PROFILE_UNAVAILABLE".into()),
+        None => ProfileSource::Launch(
+            state
+                .launch
+                .profile()
+                .ok_or("PUBLIC_VIDEO_PROFILE_UNAVAILABLE")?
+                .to_path_buf(),
+        ),
+    };
     let session = Arc::new(Session::new(role, state.launch.is_control()));
     let id = session.id.clone();
     *active = Some(session.clone());
@@ -367,7 +444,7 @@ pub(crate) fn public_video_status(
 ) -> Result<Status, String> {
     let session = find(&window, &generation)?;
     let mut status = session.status.borrow().clone();
-    status.profile_consumed = window.state::<Arc<DesktopVideoState>>().profile_consumed();
+    status.profile_consumed = session.profile_consumed.load(Ordering::Acquire);
     #[cfg(feature = "v2-public-control-desktop")]
     if session.control {
         status.round_seconds = session.round_seconds.get().copied();
@@ -510,7 +587,7 @@ fn now() -> Result<u64, &'static str> {
 async fn run(
     window: WebviewWindow,
     state: Arc<DesktopVideoState>,
-    path: PathBuf,
+    source: ProfileSource,
     session: Arc<Session>,
 ) -> Result<Outcome, &'static str> {
     let mut stop = session.stop.subscribe();
@@ -523,14 +600,15 @@ async fn run(
         .map_err(|_| "PUBLIC_VIDEO_VERIFY_PEER_FIRST")?;
     let control_launch = state.launch.is_control();
     let (mut profile, identity) = tauri::async_runtime::spawn_blocking(move || {
-        #[cfg(feature = "v2-public-control-desktop")]
-        let profile = if control_launch {
-            PublicVideoProfile::load_control(&path, now()?)?
-        } else {
-            PublicVideoProfile::load(&path, now()?)?
+        let profile = match source {
+            #[cfg(feature = "v2-control-invitations")]
+            ProfileSource::Selected(profile) => *profile,
+            #[cfg(feature = "v2-public-control-desktop")]
+            ProfileSource::Launch(path) if control_launch => {
+                PublicVideoProfile::load_control(&path, now()?)?
+            }
+            ProfileSource::Launch(path) => PublicVideoProfile::load(&path, now()?)?,
         };
-        #[cfg(not(feature = "v2-public-control-desktop"))]
-        let profile = PublicVideoProfile::load(&path, now()?)?;
         let identity =
             hub_identity::open_existing_default().map_err(|_| "PUBLIC_VIDEO_IDENTITY")?;
         Ok::<_, &'static str>((profile, identity))
@@ -635,11 +713,22 @@ async fn run(
             #[cfg(feature = "v2-public-control-desktop")]
             if control_launch {
                 let config = profile.take_control_config(&identity, &peer, now()?, true)?;
-                state.used.store(true, Ordering::Release);
+                if matches!(state.launch, LaunchMode::Invitations) {
+                    #[cfg(feature = "v2-control-invitations")]
+                    state
+                        .invitations
+                        .lock()
+                        .map_err(|_| "PUBLIC_VIDEO_STATE")?
+                        .consume(approval.room, approval.scope.expires_at)?;
+                } else {
+                    state.used.store(true, Ordering::Release);
+                }
+                session.profile_consumed.store(true, Ordering::Release);
                 return PublicVideoWss::connect_public_control_wss(config).await;
             }
             let config = profile.take_config(&identity, &peer, now()?, true)?;
             state.used.store(true, Ordering::Release);
+            session.profile_consumed.store(true, Ordering::Release);
             PublicVideoWss::connect_public_wss(config).await
         };
         let pending = tokio::select! {

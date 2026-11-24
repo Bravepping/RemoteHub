@@ -38,6 +38,7 @@
     "allow-p006-metrics",
     "allow-p006-stop",
     "allow-p006-save",
+    "allow-select-control-invitation",
     "allow-public-video-start",
     "allow-public-video-status",
     "allow-public-video-next-frame",

@@ -32,6 +32,14 @@ const remoteState = ref('idle');
 // this launch-mode panel alive so refresh cannot dispose an active session.
 const publicPanelMounted = ref(false);
 const publicControlLaunch = ref(false);
+const invitationPicker = ref(false);
+watch(
+  () => props.runtime?.public_invitation_picker,
+  (available) => {
+    if (available === true) invitationPicker.value = true;
+  },
+  { immediate: true },
+);
 watch(
   () => props.runtime?.public_video_available,
   (available) => {
@@ -140,6 +148,7 @@ onUnmounted(() => {
         v-if="publicPanelMounted"
         :available="runtime?.public_video_available === true"
         :control-available="publicControlLaunch"
+        :invitation-picker="invitationPicker && publicControlLaunch"
         :profile-consumed="runtime?.public_video_profile_consumed === true"
       />
       <RemoteWorkspace
@@ -169,7 +178,10 @@ onUnmounted(() => {
         @navigate="navigate"
       />
       <template v-else-if="active === 'connect'">
-        <p v-if="runtime?.p3_enabled" class="product-card">
+        <p v-if="publicPanelMounted" class="product-card">
+          请在上方公网会话面板开始或停止本轮连接。
+        </p>
+        <p v-else-if="runtime?.p3_enabled" class="product-card">
           本轮指定局域网连接使用上方会话面板。不会自动连接、重连或授予持久信任。
         </p>
         <ConnectPage v-else @navigate="navigate" />

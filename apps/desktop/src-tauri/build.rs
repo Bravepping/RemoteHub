@@ -28,6 +28,7 @@ fn main() {
             "p006_save",
             "run_signed_stream",
             "stop_signed_stream",
+            "select_control_invitation",
             "public_video_start",
             "public_video_status",
             "public_video_next_frame",

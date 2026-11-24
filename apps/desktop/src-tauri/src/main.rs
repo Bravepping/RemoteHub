@@ -25,6 +25,8 @@ mod v2_pairing;
 #[cfg(all(feature = "v2-private-wss-lan", not(feature = "p006-relay")))]
 mod v2_private_wss;
 
+#[cfg(all(feature = "v2-control-invitations", not(feature = "p006-relay")))]
+mod control_invitations;
 #[cfg(all(feature = "v2-public-control-desktop", not(feature = "p006-relay")))]
 mod public_control_desktop;
 #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
@@ -102,6 +104,8 @@ struct RuntimeInfo {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     public_control_available: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    public_invitation_picker: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     public_video_profile_consumed: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
@@ -173,6 +177,19 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
                     .available()
             }
             #[cfg(not(all(feature = "v2-public-video-desktop", not(feature = "p006-relay"))))]
+            {
+                false
+            }
+        },
+        public_invitation_picker: {
+            #[cfg(all(feature = "v2-control-invitations", not(feature = "p006-relay")))]
+            {
+                use tauri::Manager;
+                window
+                    .state::<std::sync::Arc<public_video_desktop::DesktopVideoState>>()
+                    .picker_available()
+            }
+            #[cfg(not(all(feature = "v2-control-invitations", not(feature = "p006-relay"))))]
             {
                 false
             }
@@ -322,7 +339,15 @@ fn main() {
         .setup(|app| {
             use tauri::Manager;
             if let Some(window) = app.get_webview_window("main") {
-                window.set_title(if cfg!(feature = "p005-control") {
+                #[cfg(feature = "v2-public-video-desktop")]
+                let public = app
+                    .state::<std::sync::Arc<public_video_desktop::DesktopVideoState>>()
+                    .available();
+                #[cfg(not(feature = "v2-public-video-desktop"))]
+                let public = false;
+                window.set_title(if public {
+                    "RemoteHub · 公网会话"
+                } else if cfg!(feature = "p005-control") {
                     if cfg!(feature = "p3-lan") {
                         "RemoteHub · 局域网远控"
                     } else {
@@ -361,7 +386,9 @@ fn main() {
             #[cfg(feature = "v2-public-video-desktop")]
             public_video_desktop::public_video_stop,
             #[cfg(feature = "v2-public-control-desktop")]
-            public_video_desktop::public_control_send_input
+            public_video_desktop::public_control_send_input,
+            #[cfg(feature = "v2-control-invitations")]
+            public_video_desktop::select_control_invitation
         ])
         .on_window_event(p004_lan::on_window_event);
     #[cfg(feature = "p006-relay")]

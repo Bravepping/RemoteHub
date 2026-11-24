@@ -9,13 +9,17 @@ const CONTROL_ARG: &str = "--public-control-profile";
 
 pub(crate) enum LaunchMode {
     Normal,
+    Invitations,
     PublicVideo(Option<PathBuf>),
     PublicControl(Option<PathBuf>),
 }
 
 impl LaunchMode {
     pub(crate) fn parse(args: impl IntoIterator<Item = OsString>) -> Self {
-        let mut args = args.into_iter();
+        let mut args = args.into_iter().peekable();
+        if cfg!(feature = "v2-control-invitations") && args.peek().is_none() {
+            return Self::Invitations;
+        }
         let mut result = Self::Normal;
         while let Some(arg) = args.next() {
             let control = arg == CONTROL_ARG
@@ -47,17 +51,20 @@ impl LaunchMode {
     }
 
     pub(crate) fn is_public_video(&self) -> bool {
-        matches!(self, Self::PublicVideo(_) | Self::PublicControl(_))
+        matches!(
+            self,
+            Self::PublicVideo(_) | Self::PublicControl(_) | Self::Invitations
+        )
     }
 
     pub(crate) fn is_control(&self) -> bool {
-        matches!(self, Self::PublicControl(_))
+        matches!(self, Self::PublicControl(_) | Self::Invitations)
     }
 
     pub(crate) fn profile(&self) -> Option<&Path> {
         match self {
             Self::PublicVideo(path) | Self::PublicControl(path) => path.as_deref(),
-            Self::Normal => None,
+            Self::Normal | Self::Invitations => None,
         }
     }
 
@@ -76,6 +83,20 @@ mod tests {
 
     fn parse(args: &[&str]) -> LaunchMode {
         LaunchMode::parse(args.iter().copied().map(OsString::from))
+    }
+
+    #[test]
+    fn only_the_invitation_build_opens_the_picker_by_default() {
+        let launch = parse(&[]);
+        assert_eq!(
+            launch.is_control(),
+            cfg!(feature = "v2-control-invitations")
+        );
+        assert_eq!(
+            launch.require_lan().is_err(),
+            cfg!(feature = "v2-control-invitations")
+        );
+        assert!(launch.profile().is_none());
     }
 
     #[test]

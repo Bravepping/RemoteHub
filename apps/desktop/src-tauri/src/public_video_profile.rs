@@ -305,6 +305,20 @@ impl PublicVideoProfile {
         self.immediate_batch
     }
 
+    #[cfg(feature = "v2-control-invitations")]
+    pub(crate) fn verify_invitation_time(&self, now: u64) -> Result<(), &'static str> {
+        ensure_profile_fresh(
+            self.display.scope.expires_at,
+            self.credentials
+                .as_ref()
+                .ok_or(CONSUMED)?
+                .ice_config
+                .expires_at,
+            now,
+            self.immediate_batch,
+        )
+    }
+
     pub(crate) fn expected_peer_fingerprint(&self) -> &str {
         &self.expected_peer_fingerprint
     }
@@ -625,6 +639,51 @@ mod tests {
 
     fn parse_fixture(input: &Value, now: u64) -> Result<PublicVideoProfile, &'static str> {
         PublicVideoProfile::parse(&serde_json::to_vec(input).unwrap(), now)
+    }
+
+    #[cfg(feature = "v2-control-invitations")]
+    #[test]
+    fn invitation_selection_binds_snapshot_role_time_and_single_use_room() {
+        let mut file = fixture();
+        file["purpose"] = json!("public-control");
+        file["mode"] = json!("relay_only");
+        file["relay_token"] = json!(format!("rhctl1-{}", "45".repeat(32)));
+        let profile = |doc: &Value| {
+            PublicVideoProfile::parse_with_purpose(&serde_json::to_vec(doc).unwrap(), NOW, true)
+                .unwrap()
+        };
+        let mut invitations = crate::control_invitations::Invitations::default();
+        let stale = invitations.select(profile(&file), NOW).unwrap();
+        let current = invitations.select(profile(&file), NOW).unwrap();
+        assert!(invitations.take(&stale.id, Role::Host, NOW).is_err());
+        assert!(invitations.take(&current.id, Role::Viewer, NOW).is_err());
+        assert!(invitations
+            .take(&current.id, Role::Host, NOW + FIXTURE_TURN_TTL)
+            .is_err());
+        let first = invitations
+            .take(&current.id, Role::Host, NOW)
+            .unwrap()
+            .approval();
+        assert!(invitations.take(&current.id, Role::Host, NOW).is_err());
+        invitations
+            .consume(first.room, first.scope.expires_at)
+            .unwrap();
+        assert!(invitations.select(profile(&file), NOW).is_err());
+        file["room"] = json!(Uuid::new_v4().to_string());
+        file["turn_username"] = json!(format!(
+            "{}:{}",
+            NOW + FIXTURE_TURN_TTL,
+            file["room"].as_str().unwrap()
+        ));
+        let next = invitations.select(profile(&file), NOW).unwrap();
+        assert_ne!(
+            invitations
+                .take(&next.id, Role::Host, NOW)
+                .unwrap()
+                .approval()
+                .room,
+            first.room
+        );
     }
 
     #[cfg(feature = "v2-public-control-desktop")]

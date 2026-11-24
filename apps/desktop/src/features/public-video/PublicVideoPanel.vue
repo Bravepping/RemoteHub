@@ -20,6 +20,7 @@ const props = defineProps<{
   available: boolean;
   profileConsumed?: boolean;
   controlAvailable?: boolean;
+  invitationPicker?: boolean;
 }>();
 const canvas = ref<HTMLCanvasElement>();
 const surface = ref<HTMLDivElement>();
@@ -28,6 +29,55 @@ const state = ref<PublicVideoState>('idle');
 const error = ref('');
 const endDetail = ref<PublicVideoEndDetail>();
 const consumed = ref(false);
+interface Invitation {
+  id: string;
+  role: PublicVideoRole;
+  expires_at: number;
+}
+const selected = ref<Invitation>();
+const selecting = ref(false);
+const selectionError = ref('');
+function validInvitation(value: unknown): value is Invitation {
+  if (!value || typeof value !== 'object') return false;
+  const item = value as Partial<Invitation>;
+  return (
+    Object.keys(item).sort().join(',') === 'expires_at,id,role' &&
+    typeof item.id === 'string' &&
+    /^[0-9a-f]{32}$/.test(item.id) &&
+    (item.role === 'host' || item.role === 'viewer') &&
+    typeof item.expires_at === 'number' &&
+    Number.isSafeInteger(item.expires_at) &&
+    item.expires_at > 0 &&
+    item.expires_at <= 8640000000000
+  );
+}
+async function selectInvitation() {
+  if (!props.invitationPicker || !canChoose.value) return;
+  selecting.value = true;
+  selectionError.value = '';
+  try {
+    const result: unknown = await invoke('select_control_invitation');
+    if (result === null) return;
+    if (!validInvitation(result)) throw new Error();
+    selected.value = result;
+    state.value = 'idle';
+    role.value = result.role;
+    endDetail.value = undefined;
+    roundSeconds.value = undefined;
+    error.value = '';
+  } catch (cause) {
+    selected.value = undefined;
+    role.value = undefined;
+    selectionError.value =
+      cause === 'PUBLIC_VIDEO_PROFILE_EXPIRED'
+        ? '邀请已过期或剩余时间不足，请选择新的邀请。'
+        : cause === 'PUBLIC_VIDEO_PROFILE_CONSUMED'
+          ? '这轮邀请已使用，请选择下一轮。'
+          : '无法打开这份邀请，请选择本机的有效单轮 JSON 文件。';
+  } finally {
+    selecting.value = false;
+  }
+}
 const profileUnconfirmed = ref(false);
 const roundSeconds = ref<PublicControlRoundSeconds>();
 const inputState = ref<PublicInputState>('view_only');
@@ -65,14 +115,20 @@ const endText: Record<PublicVideoEndReason, string> = {
   failed: '会话出错',
 };
 const formatSeconds = (ms: number) => (ms / 1000).toFixed(1);
-const canStart = computed(
+const canChoose = computed(
   () =>
     props.available &&
-    !consumed.value &&
-    !profileUnconfirmed.value &&
+    !selecting.value &&
     (state.value === 'idle' ||
       state.value === 'stopped' ||
       state.value === 'failed'),
+);
+const canStart = computed(
+  () =>
+    canChoose.value &&
+    (props.invitationPicker
+      ? selected.value !== undefined
+      : !consumed.value && !profileUnconfirmed.value),
 );
 const canStop = computed(
   () =>
@@ -193,7 +249,15 @@ onMounted(() => {
   document.addEventListener('visibilitychange', pauseInput);
   session = new PublicVideoSession(
     {
-      start: (role) => invoke('public_video_start', { role }),
+      start: (role) => {
+        if (!props.invitationPicker)
+          return invoke('public_video_start', { role });
+        const invitationId = selected.value?.id;
+        selected.value = undefined;
+        if (!invitationId)
+          return Promise.reject('PUBLIC_VIDEO_PROFILE_UNAVAILABLE');
+        return invoke('public_video_start', { role, invitationId });
+      },
       status: (generation) => invoke('public_video_status', { generation }),
       nextFrame: (generation) =>
         invoke('public_video_next_frame', { generation }),
@@ -215,6 +279,7 @@ onMounted(() => {
       endDetail.value = detail;
     },
     (profile) => {
+      if (props.invitationPicker) return;
       if (profile === 'consumed') consumed.value = true;
       profileUnconfirmed.value = profile === 'unconfirmed';
     },
@@ -263,7 +328,17 @@ function start() {
     <p v-else>
       使用应用启动时指定的本机配置。请先到「设备」核验对方的完整指纹。两端均须明确批准，不提供鼠标或键盘控制。
     </p>
-    <fieldset :disabled="!canStart">
+    <div v-if="invitationPicker">
+      <button type="button" :disabled="!canChoose" @click="selectInvitation">
+        {{ selecting ? '正在选择邀请…' : '打开本轮邀请' }}
+      </button>
+      <p v-if="selected">
+        本机{{ selected.role === 'host' ? '共享屏幕' : '观看屏幕' }} ·
+        邀请有效至 {{ new Date(selected.expires_at * 1000).toLocaleString() }}
+      </p>
+      <p v-if="selectionError" role="alert">{{ selectionError }}</p>
+    </div>
+    <fieldset v-else :disabled="!canStart">
       <legend>本机角色</legend>
       <label><input v-model="role" type="radio" value="host" /> 共享屏幕</label>
       <label
@@ -282,7 +357,11 @@ function start() {
       {{
         controlAvailable && state === 'sharing'
           ? '本次视频共享已启用。'
-          : statusText[state]
+          : invitationPicker && state === 'idle'
+            ? selected
+              ? '邀请已就绪，请确认后开始。'
+              : '请选择本机的单轮邀请文件。'
+            : statusText[state]
       }}
       <code v-if="error">{{ error }}</code>
       <span v-if="endDetail?.reason"> · {{ endText[endDetail.reason] }}</span>
@@ -293,7 +372,7 @@ function start() {
         · 本机观看（首帧到清屏）{{ formatSeconds(endDetail.playbackMs) }} 秒
       </span>
     </p>
-    <p v-if="consumed && !canStop && state !== 'stopping'">
+    <p v-if="!invitationPicker && consumed && !canStop && state !== 'stopping'">
       本次启动配置已使用，不能重新连接。请用下一轮未使用的配置重新启动应用。
     </p>
     <p v-else-if="profileUnconfirmed">
