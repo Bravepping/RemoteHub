@@ -294,6 +294,38 @@ pub(crate) fn public_session_window_arm_input(
     Ok(())
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DisplayAction {
+    Minimize,
+    Fullscreen,
+    Restore,
+}
+
+#[tauri::command]
+pub(crate) fn public_session_window_display(
+    window: WebviewWindow,
+    generation: String,
+    action: DisplayAction,
+) -> Result<(), String> {
+    let session = find(&window, &generation)?;
+    if session.owner == "main" {
+        return Err(MISSING.into());
+    }
+    {
+        let mut input = session.lock_window_input()?;
+        input.focus_generation = input.focus_generation.wrapping_add(1);
+        session.pause_window_input(&mut input.armed)?;
+    }
+    // This changes only the local native window, never the peer's screen.
+    match action {
+        DisplayAction::Minimize => window.minimize(),
+        DisplayAction::Fullscreen => window.set_fullscreen(true),
+        DisplayAction::Restore => window.set_fullscreen(false),
+    }
+    .map_err(|_| "PUBLIC_SESSION_WINDOW_DISPLAY_FAILED".to_owned())
+}
+
 fn pause_owner_input(window: &tauri::Window, state: &DesktopVideoState, label: &str) {
     if let Ok(Some(session)) = active_for(state, label) {
         if let Ok(mut input) = session.lock_window_input() {

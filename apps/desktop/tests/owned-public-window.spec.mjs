@@ -142,6 +142,15 @@ test('owned viewer attaches once; control center and blur pause input without en
             frame.set(bytes, 24);
             return frame.buffer;
           }
+          if (command === 'public_session_window_display') {
+            if (
+              args.generation !== generation ||
+              !['minimize', 'fullscreen', 'restore'].includes(args.action)
+            )
+              throw new Error();
+            (window.displayActions ??= []).push(args.action);
+            return;
+          }
           if (command === 'public_session_window_arm_input') {
             if (args.generation !== generation)
               throw new Error('UNEXPECTED_OWNED_GENERATION');
@@ -172,7 +181,24 @@ test('owned viewer attaches once; control center and blur pause input without en
   await expect.poll(() => input.at(-1)?.kind).toBe('key');
   await panel.getByRole('button', { name: '控制中心', exact: true }).click();
   await expect.poll(() => input.at(-1)?.kind).toBe('release_all');
-  await panel.getByRole('button', { name: '关闭控制中心' }).click();
+  const drawer = panel.getByRole('complementary', { name: '控制中心' });
+  await expect(
+    drawer.getByRole('button', { name: '关闭控制中心' }),
+  ).toBeFocused();
+  await expect(drawer.getByText('实际播放分辨率 32 × 32')).toBeVisible();
+  await drawer.getByRole('button', { name: '最小化' }).click();
+  await drawer.getByRole('button', { name: '全屏', exact: true }).click();
+  await drawer.getByRole('button', { name: '退出全屏' }).click();
+  expect(await page.evaluate(() => window.displayActions)).toEqual([
+    'minimize',
+    'fullscreen',
+    'restore',
+  ]);
+  await page.keyboard.press('Escape');
+  await expect(drawer).toHaveCount(0);
+  await expect(
+    panel.getByRole('button', { name: '控制中心', exact: true }),
+  ).toBeFocused();
   await expect(enable).toBeEnabled();
   await page.keyboard.up('a');
   const paused = input.length;

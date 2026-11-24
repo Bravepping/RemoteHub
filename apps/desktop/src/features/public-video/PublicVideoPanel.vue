@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue';
 import { CanvasVideoAdapter } from './canvasVideoAdapter';
 import {
   observerSnapshot,
@@ -154,6 +161,9 @@ let session: PublicVideoSession | undefined;
 const observed = ref<WindowState>();
 const opening = ref(false);
 const centerOpen = ref(false);
+const centerToggle = ref<HTMLButtonElement>();
+const centerClose = ref<HTMLButtonElement>();
+const displayError = ref(false);
 const measuredResolution = ref<string>();
 let unlistenPause: UnlistenFn | undefined;
 let alive = true;
@@ -207,8 +217,26 @@ async function openOwnedWindow() {
   }
 }
 function toggleCenter() {
-  if (!centerOpen.value) pauseInput();
+  if (!centerOpen.value) {
+    displayError.value = false;
+    pauseInput();
+  }
   centerOpen.value = !centerOpen.value;
+  void nextTick(() =>
+    (centerOpen.value ? centerClose.value : centerToggle.value)?.focus(),
+  );
+}
+
+async function changeDisplay(action: 'minimize' | 'fullscreen' | 'restore') {
+  const generation = props.windowOwner?.generation;
+  if (!generation || !centerOpen.value) return;
+  displayError.value = false;
+  pauseInput();
+  try {
+    await invoke('public_session_window_display', { generation, action });
+  } catch {
+    if (alive) displayError.value = true;
+  }
 }
 
 const statusText: Record<PublicVideoState, string> = {
@@ -389,6 +417,11 @@ function key(e: KeyboardEvent, down: boolean) {
 }
 
 function stopShortcut(event: KeyboardEvent) {
+  if (event.key === 'Escape' && !event.repeat && centerOpen.value) {
+    event.preventDefault();
+    toggleCenter();
+    return;
+  }
   if (event.key === 'Escape' && !event.repeat && canStop.value) {
     event.preventDefault();
     if (inputEnabled.value || releasingInput.value) pauseInput();
@@ -508,6 +541,7 @@ function start() {
       <button
         type="button"
         :aria-expanded="centerOpen"
+        ref="centerToggle"
         aria-controls="owned-control-center"
         @click="toggleCenter"
       >
@@ -666,6 +700,7 @@ function start() {
       ref="surface"
       class="public-video-surface"
       :tabindex="controlAvailable ? -1 : undefined"
+      :inert="centerOpen && windowOwner !== undefined"
       @blur="pauseInput"
       @mouseleave="pauseInput"
       @mousemove="move"
@@ -694,9 +729,20 @@ function start() {
       class="owned-control-center"
       aria-label="控制中心"
     >
-      <button type="button" @click="toggleCenter">关闭控制中心</button>
+      <button ref="centerClose" type="button" @click="toggleCenter">
+        关闭控制中心
+      </button>
       <h3>窗口与显示</h3>
-      <p>画面在远控窗口中显示。</p>
+      <div class="public-video-actions">
+        <button type="button" @click="changeDisplay('minimize')">最小化</button>
+        <button type="button" @click="changeDisplay('fullscreen')">全屏</button>
+        <button type="button" @click="changeDisplay('restore')">
+          退出全屏
+        </button>
+      </div>
+      <p v-if="displayError" role="alert">
+        未能更改本机窗口，可使用系统窗口控件。
+      </p>
       <h3>输入控制</h3>
       <p>{{ controlText }}</p>
       <p>关闭控制中心不会恢复键鼠。恢复时需明确点击「启用本次键鼠」。</p>
@@ -704,6 +750,7 @@ function start() {
       <p v-if="connectionPath">
         {{ connectionPath === 'direct' ? '直连' : 'TURN 中继' }}
       </p>
+      <p v-if="measuredResolution">实际播放分辨率 {{ measuredResolution }}</p>
       <h3>退出远控</h3>
       <button type="button" :disabled="!canStop" @click="session?.stop()">
         断开本次会话
