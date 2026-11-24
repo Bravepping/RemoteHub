@@ -217,6 +217,49 @@ pub(crate) async fn public_session_window_stop(window: WebviewWindow) -> Result<
     Ok(())
 }
 
+pub(super) fn input_visible(window: &WebviewWindow) -> bool {
+    window.is_focused().unwrap_or(false)
+        && !window.is_minimized().unwrap_or(true)
+        && window.is_visible().unwrap_or(false)
+}
+
+#[tauri::command]
+pub(crate) fn public_session_window_arm_input(
+    window: WebviewWindow,
+    generation: String,
+) -> Result<(), String> {
+    // This arms only the viewer's local keyboard forwarding, not host consent.
+    let session = find(&window, &generation)?;
+    if session.owner == "main" {
+        return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
+    }
+    let focus_generation = session.lock_window_input()?.focus_generation;
+    let visible = input_visible(&window);
+    let mut input = session.lock_window_input()?;
+    if !visible || !session.input_ready() || input.focus_generation != focus_generation {
+        return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
+    }
+    input.armed = true;
+    Ok(())
+}
+
+fn pause_owner_input(window: &tauri::Window, state: &DesktopVideoState, label: &str) {
+    if let Ok(Some(session)) = active_for(state, label) {
+        if let Ok(mut input) = session.lock_window_input() {
+            input.focus_generation = input.focus_generation.wrapping_add(1);
+            // A full channel or damaged local lock falls back to session
+            // teardown and host-side release rather than leaving input armed.
+            let _ = session.pause_window_input(&mut input.armed);
+        }
+    }
+    use tauri::Emitter;
+    let _ = window.emit_to(
+        tauri::EventTarget::webview_window(label),
+        "remotehub-session-input-pause",
+        (),
+    );
+}
+
 pub(crate) fn own_window_event(window: &tauri::Window, event: &tauri::WindowEvent) -> bool {
     let label = window.label();
     if !label.starts_with(LABEL_PREFIX) {
@@ -273,21 +316,9 @@ pub(crate) fn own_window_event(window: &tauri::Window, event: &tauri::WindowEven
             }
             clear_slot(&state, label);
         }
-        tauri::WindowEvent::Focused(false) => {
-            use tauri::Emitter;
-            let _ = window.emit_to(
-                tauri::EventTarget::webview_window(label),
-                "remotehub-session-input-pause",
-                (),
-            );
-        }
+        tauri::WindowEvent::Focused(false) => pause_owner_input(window, &state, label),
         tauri::WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
-            use tauri::Emitter;
-            let _ = window.emit_to(
-                tauri::EventTarget::webview_window(label),
-                "remotehub-session-input-pause",
-                (),
-            );
+            pause_owner_input(window, &state, label);
         }
         _ => {}
     }
@@ -321,6 +352,55 @@ pub(super) fn reservation_busy(state: &DesktopVideoState) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_visibility_loss_serializes_one_release_and_clears_local_arm() {
+        let owner = "remote-session-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let session = Session::owned(Role::Viewer, true, owner);
+        assert!(!session.lock_window_input().unwrap().armed);
+        let mut receiver = session.input_receiver.lock().unwrap().take().unwrap();
+        session.input_state.send_replace(InputState::Allowed);
+        session.status.send_if_modified(|status| {
+            status.phase = Phase::Ready;
+            true
+        });
+
+        {
+            let mut input = session.lock_window_input().unwrap();
+            input.armed = true;
+            let pressed = r#"{"kind":"key","key":"KeyA","down":true}"#;
+            session.enqueue_input(pressed.to_owned()).unwrap();
+            session.pause_window_input(&mut input.armed).unwrap();
+            session.pause_window_input(&mut input.armed).unwrap();
+            assert!(!input.armed);
+            assert_eq!(receiver.try_recv().unwrap(), pressed);
+            assert_eq!(receiver.try_recv().unwrap(), r#"{"kind":"release_all"}"#);
+            assert!(receiver.try_recv().is_err());
+        }
+        assert!(session.input_ready());
+        assert!(!*session.stop.borrow());
+    }
+
+    #[test]
+    fn full_release_channel_fails_closed_instead_of_leaving_input_armed() {
+        let session = Session::owned(Role::Viewer, true, "remote-session-synthetic");
+        session.input_state.send_replace(InputState::Allowed);
+        session.status.send_if_modified(|status| {
+            status.phase = Phase::Ready;
+            true
+        });
+        let mut input = session.lock_window_input().unwrap();
+        input.armed = true;
+        for _ in 0..session.input_events.max_capacity() {
+            session.enqueue_input("synthetic".to_owned()).unwrap();
+        }
+        assert_eq!(
+            session.pause_window_input(&mut input.armed),
+            Err("PUBLIC_CONTROL_BACKPRESSURE".to_owned())
+        );
+        assert!(!input.armed);
+        assert!(*session.stop.borrow());
+    }
 
     #[test]
     fn replaced_or_closing_label_cannot_use_or_clear_another_session_owner() {

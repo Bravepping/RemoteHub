@@ -130,6 +130,11 @@ test('owned viewer attaches once; control center and blur pause input without en
             frame.set(bytes, 24);
             return frame.buffer;
           }
+          if (command === 'public_session_window_arm_input') {
+            if (args.generation !== generation)
+              throw new Error('UNEXPECTED_OWNED_GENERATION');
+            return;
+          }
           if (command === 'public_control_send_input') {
             if (window.rejectNextOwnedInput) {
               window.rejectNextOwnedInput = false;

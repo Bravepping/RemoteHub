@@ -409,6 +409,8 @@ fn main() {
             #[cfg(feature = "v2-session-window")]
             public_video_desktop::session_window::public_session_window_attach,
             #[cfg(feature = "v2-session-window")]
+            public_video_desktop::session_window::public_session_window_arm_input,
+            #[cfg(feature = "v2-session-window")]
             public_video_desktop::session_window::public_session_window_snapshot,
             #[cfg(feature = "v2-session-window")]
             public_video_desktop::session_window::public_session_window_focus,

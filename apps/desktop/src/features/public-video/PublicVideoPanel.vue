@@ -138,6 +138,8 @@ const connectionPath = ref<'direct' | 'relay'>();
 const inputState = ref<PublicInputState>('view_only');
 const inputEnabled = ref(false);
 const releasingInput = ref(false);
+const armingInput = ref(false);
+let inputPauseGeneration = 0;
 const pressedKeys = new Set<string>();
 const pressedButtons = new Set<number>();
 let lastMove = -Infinity;
@@ -284,15 +286,48 @@ const controlText = computed(() => {
 });
 
 function pauseInput() {
+  inputPauseGeneration++;
   session?.pauseInput();
 }
 
-function toggleInput() {
+async function toggleInput() {
   if (inputEnabled.value) return pauseInput();
-  if (canEnableInput.value && session?.enableInput()) {
-    lastMove = -Infinity;
-    surface.value?.focus();
-    if (document.activeElement !== surface.value) pauseInput();
+  if (!canEnableInput.value || armingInput.value) return;
+  const generation = props.windowOwner?.generation;
+  if (generation === undefined) {
+    if (session?.enableInput()) {
+      lastMove = -Infinity;
+      surface.value?.focus();
+      if (document.activeElement !== surface.value) pauseInput();
+    }
+    return;
+  }
+
+  surface.value?.focus();
+  if (document.activeElement !== surface.value) return;
+  const pauseGeneration = inputPauseGeneration;
+  armingInput.value = true;
+  try {
+    await invoke('public_session_window_arm_input', { generation });
+    if (
+      alive &&
+      pauseGeneration === inputPauseGeneration &&
+      canEnableInput.value &&
+      document.activeElement === surface.value &&
+      session?.enableInput()
+    ) {
+      lastMove = -Infinity;
+      return;
+    }
+    // Undo a late arm without forwarding any desktop events.
+    await invoke('public_control_send_input', {
+      generation,
+      event: '{"kind":"release_all"}',
+    });
+  } catch {
+    // A denied arm never enables the local renderer forwarding.
+  } finally {
+    armingInput.value = false;
   }
 }
 

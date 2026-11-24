@@ -232,6 +232,13 @@ fn host_outcome(
     }
 }
 
+#[cfg(feature = "v2-session-window")]
+#[derive(Default)]
+struct WindowInput {
+    armed: bool,
+    focus_generation: u64,
+}
+
 pub(crate) struct Session {
     id: String,
     owner: String,
@@ -252,6 +259,8 @@ pub(crate) struct Session {
     input_events: mpsc::Sender<String>,
     #[cfg(feature = "v2-public-control-desktop")]
     input_receiver: Mutex<Option<mpsc::Receiver<String>>>,
+    #[cfg(feature = "v2-session-window")]
+    window_input: Mutex<WindowInput>,
 }
 
 impl Session {
@@ -297,6 +306,8 @@ impl Session {
             input_events,
             #[cfg(feature = "v2-public-control-desktop")]
             input_receiver: Mutex::new(Some(input_receiver)),
+            #[cfg(feature = "v2-session-window")]
+            window_input: Mutex::default(),
         }
     }
 
@@ -305,6 +316,40 @@ impl Session {
         self.round_deadline
             .borrow()
             .is_some_and(|deadline| std::time::Instant::now() >= deadline)
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    fn input_ready(&self) -> bool {
+        self.control
+            && self.role == Role::Viewer
+            && !*self.stop.borrow()
+            && !self.round_elapsed()
+            && *self.input_state.borrow() == InputState::Allowed
+            && self.status.borrow().phase == Phase::Ready
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    fn enqueue_input(&self, event: String) -> Result<(), String> {
+        self.input_events.try_send(event).map_err(|_| {
+            self.request_stop();
+            "PUBLIC_CONTROL_BACKPRESSURE".to_owned()
+        })
+    }
+
+    #[cfg(feature = "v2-session-window")]
+    fn pause_window_input(&self, armed: &mut bool) -> Result<(), String> {
+        if !std::mem::take(armed) || !self.input_ready() {
+            return Ok(());
+        }
+        self.enqueue_input(r#"{"kind":"release_all"}"#.to_owned())
+    }
+
+    #[cfg(feature = "v2-session-window")]
+    fn lock_window_input(&self) -> Result<std::sync::MutexGuard<'_, WindowInput>, String> {
+        self.window_input.lock().map_err(|_| {
+            self.request_stop();
+            "PUBLIC_CONTROL_STATE".to_owned()
+        })
     }
 
     fn request_stop(&self) {
@@ -561,13 +606,7 @@ pub(crate) fn public_control_send_input(
     event: String,
 ) -> Result<(), String> {
     let session = find(&window, &generation)?;
-    if !session.control
-        || session.role != Role::Viewer
-        || *session.stop.borrow()
-        || session.round_elapsed()
-        || *session.input_state.borrow() != InputState::Allowed
-        || session.status.borrow().phase != Phase::Ready
-    {
+    if !session.input_ready() {
         return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
     }
     use hub_webrtc::remote_input::Event;
@@ -584,19 +623,24 @@ pub(crate) fn public_control_send_input(
         return Err("PUBLIC_CONTROL_EVENT_REJECTED".into());
     }
     #[cfg(feature = "v2-session-window")]
-    if session.owner != "main"
-        && (!window.is_focused().unwrap_or(false) || window.is_minimized().unwrap_or(true))
-        && !matches!(parsed, Ok(Event::Release { .. }))
-    {
-        // This event did not leave the native window. Reporting the pause
-        // lets the viewer clear pending events and send release even if it
-        // has not yet received the separate native focus notification.
-        return Err("PUBLIC_CONTROL_WINDOW_PAUSED".into());
+    if session.owner != "main" {
+        if matches!(parsed, Ok(Event::Release { .. })) {
+            return session.pause_window_input(&mut session.lock_window_input()?.armed);
+        }
+        // Tauri may consult its UI thread, which also handles focus events;
+        // never hold the input lock while asking about native visibility.
+        let visible = session_window::input_visible(&window);
+        let mut input = session.lock_window_input()?;
+        if !input.armed || !visible {
+            session.pause_window_input(&mut input.armed)?;
+            return Err("PUBLIC_CONTROL_WINDOW_PAUSED".into());
+        }
+        if !session.input_ready() {
+            return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
+        }
+        return session.enqueue_input(event);
     }
-    session.input_events.try_send(event).map_err(|_| {
-        session.request_stop();
-        "PUBLIC_CONTROL_BACKPRESSURE".to_owned()
-    })
+    session.enqueue_input(event)
 }
 
 #[tauri::command]
