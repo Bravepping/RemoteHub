@@ -20,7 +20,7 @@ required-features = ["v2-synthetic-admission-test"]
 
 [features]
 v2-native-wss-consent-manual = []
-v2-synthetic-admission-test = ["hub-signal-v2/synthetic-admission"]
+v2-synthetic-admission-test = ["hub-signal-v2/synthetic-admission", "hub-webrtc/v2-public-fake-input-proof"]
 v2-synthetic-video = ["dep:hub-identity", "dep:hub-webrtc", "dep:rtc", "dep:async-trait", "dep:webrtc"]
 
 [dependencies]

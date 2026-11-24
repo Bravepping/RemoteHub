@@ -5,9 +5,15 @@
 
 use crate::Role;
 use uuid::Uuid;
+mod client;
+pub use client::{
+    connect_loopback_wss, ClientError, SyntheticEndpoint, SyntheticInvitation, SyntheticRelay,
+};
 
 /// This literal is not a fallback for an ordinary or public-video route.
 pub const PATH: &str = "/v2/synthetic-input-test/ws";
+/// One server readiness frame, before any peer RHF1 data. Not authorization.
+pub const PAIRED: &str = "RH-SYNTHETIC-PAIRED/1";
 
 // RHF1 compatibility: hub-webrtc/src/public_fake_input_wss_wire.rs.
 // Keep ordinary JSON signaling and cryptographic verification out of this layer.

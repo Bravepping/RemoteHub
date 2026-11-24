@@ -40,7 +40,7 @@ impl<T: AsyncRead + AsyncWrite + Send + Unpin> RelayIo for T {}
 
 /// Trust configuration provisioned independently of the relay, not obtained
 /// from the endpoint being connected to. It does not authorize a remote peer.
-pub struct LoopbackTlsTrust(Arc<ClientConfig>);
+pub struct LoopbackTlsTrust(pub(super) Arc<ClientConfig>);
 
 impl LoopbackTlsTrust {
     /// Trust exactly this DER CA for this connector, without using system
@@ -279,7 +279,7 @@ fn matches_bound_socket(
         && peer == SocketAddr::V4(relay)
 }
 
-async fn dial_bound(
+pub(super) async fn dial_bound(
     source: Ipv4Addr,
     relay: SocketAddrV4,
     bind_error: ClientError,
