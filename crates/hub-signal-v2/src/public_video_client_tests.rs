@@ -148,19 +148,21 @@ fn video_and_control_bearers_and_public_endpoint_policy_are_separate() {
     assert!(PublicControlToken::new(control).is_ok());
     assert!(PublicControlToken::new(format!("rhctl1-{}", "0".repeat(64))).is_err());
     assert!(PublicControlToken::new(format!("rhctl1-{}", "A".repeat(64))).is_err());
-    assert!(PublicControlEndpoint::new(
-        "192.168.2.3".parse().unwrap(),
-        "127.0.0.1:8443".parse().unwrap(),
-        110,
-        100,
-    )
-    .is_err());
+    assert!(
+        PublicControlEndpoint::new(
+            "192.168.2.3".parse().unwrap(),
+            "127.0.0.1:8443".parse().unwrap(),
+            110,
+            100,
+        )
+        .is_err()
+    );
 }
 
 #[cfg(feature = "public-control")]
 #[tokio::test]
 async fn control_wss_uses_only_its_exact_path_and_bearer_after_verified_tls() {
-    control_wss(false).await;
+    control_wss(PublicControlAdmission::Legacy).await;
 }
 
 #[cfg(feature = "public-control")]
@@ -172,14 +174,75 @@ async fn immediate_batch_header_is_exact_and_only_on_explicit_control_endpoint()
     assert!(PublicControlEndpoint::new(source, relay, 701, 100).is_err());
     assert!(PublicControlEndpoint::new_immediate_batch(source, relay, 1900, 100).is_ok());
     assert!(PublicControlEndpoint::new_immediate_batch(source, relay, 1901, 100).is_err());
-    control_wss(true).await;
+    control_wss(PublicControlAdmission::ImmediateV1).await;
 }
 
 #[cfg(feature = "public-control")]
-async fn control_wss(immediate_batch: bool) {
+#[test]
+fn sustained_endpoint_requires_setup_margin_and_never_extends_the_outer_lease() {
+    let source = "192.168.2.3".parse().unwrap();
+    let relay = "93.184.216.34:8443".parse().unwrap();
+    for (ttl, permitted) in [
+        (1800, false),
+        (1859, false),
+        (1860, true),
+        (2400, true),
+        (2401, false),
+    ] {
+        assert_eq!(
+            PublicControlEndpoint::new_basic_sustained(source, relay, 100 + ttl, 100).is_ok(),
+            permitted,
+        );
+    }
+    assert!(matches!(
+        PublicControlEndpoint::new_basic_sustained(LOCALHOST, relay, 2500, 100,),
+        Err(ClientError::PublicVideoEndpoint)
+    ));
+    let started = Instant::now();
+    let endpoint = PublicControlEndpoint::with_admission(
+        source,
+        relay,
+        2500,
+        100,
+        started,
+        PublicControlAdmission::BasicSustainedV1,
+    )
+    .unwrap();
+    let cutoff = started + Duration::from_secs(2400);
+    let new_admission_boundary = started + Duration::from_secs(540);
+    assert_eq!(
+        endpoint.checked_admission_at(640, new_admission_boundary),
+        Ok(cutoff)
+    );
+    assert_eq!(
+        endpoint.checked_admission_at(100, new_admission_boundary + Duration::from_millis(1)),
+        Err(ClientError::PublicVideoExpiry),
+        "rollback cannot buy more setup margin"
+    );
+    assert_eq!(
+        endpoint
+            .0
+            .checked_deadline_at(100, new_admission_boundary + Duration::from_secs(1)),
+        Ok(cutoff),
+        "the admission floor must not end an already accepted room",
+    );
+    assert_eq!(
+        endpoint.0.checked_deadline_at(100, cutoff),
+        Err(ClientError::PublicVideoExpiry)
+    );
+}
+
+#[cfg(feature = "public-control")]
+#[tokio::test]
+async fn sustained_header_uses_the_exact_product_role_room_and_tls_path() {
+    control_wss(PublicControlAdmission::BasicSustainedV1).await;
+}
+
+#[cfg(feature = "public-control")]
+async fn control_wss(admission: PublicControlAdmission) {
     let (trust, tls) = tls_fixture("127.0.0.1");
     let listener = TcpListener::bind((LOCALHOST, 0)).await.unwrap();
-    let endpoint = if immediate_batch {
+    let endpoint = if admission != PublicControlAdmission::Legacy {
         // Test fixture only; actual client constructors still refuse loopback.
         let SocketAddr::V4(address) = listener.local_addr().unwrap() else {
             unreachable!()
@@ -189,15 +252,16 @@ async fn control_wss(immediate_batch: bool) {
             PublicVideoEndpoint::with_lease(
                 LOCALHOST,
                 address,
-                now + 900,
+                now + admission.max_lease().as_secs(),
                 now,
                 Instant::now(),
-                CONTROL_BATCH_LEASE,
+                admission.max_lease(),
             )
             .unwrap(),
+            admission,
         )
     } else {
-        PublicControlEndpoint(loopback_endpoint(&listener))
+        PublicControlEndpoint(loopback_endpoint(&listener), admission)
     };
     let token_text = format!("rhctl1-{}", "a".repeat(64));
     let token = PublicControlToken::new(token_text.clone()).unwrap();
@@ -216,9 +280,9 @@ async fn control_wss(immediate_batch: bool) {
             assert_eq!(
                 request
                     .headers()
-                    .get("x-rh-public-control-batch")
+                    .get(PUBLIC_CONTROL_ADMISSION_HEADER)
                     .map(|v| v.to_str().unwrap()),
-                immediate_batch.then_some("immediate-v1")
+                admission.header_value()
             );
             Ok(response)
         })

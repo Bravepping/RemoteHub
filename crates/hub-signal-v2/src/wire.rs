@@ -12,6 +12,56 @@ pub const PUBLIC_VIDEO_PATH: &str = "/v2/public-video/ws";
 pub const PUBLIC_CONTROL_PATH: &str = "/v2/public-control/ws";
 #[cfg(feature = "public-control")]
 pub const PUBLIC_CONTROL_TOKEN_PREFIX: &str = "rhctl1-";
+#[cfg(feature = "public-control")]
+pub const PUBLIC_CONTROL_ADMISSION_HEADER: &str = "x-rh-public-control-batch";
+
+/// WSS roster partition only, never screen, input, or device authorization.
+/// The independently checked device proof must bind its own purpose.
+#[cfg(feature = "public-control")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PublicControlAdmission {
+    Legacy,
+    ImmediateV1,
+    BasicSustainedV1,
+}
+
+#[cfg(feature = "public-control")]
+impl PublicControlAdmission {
+    pub const fn header_value(self) -> Option<&'static str> {
+        match self {
+            Self::Legacy => None,
+            Self::ImmediateV1 => Some("immediate-v1"),
+            Self::BasicSustainedV1 => Some("basic-sustained-v1"),
+        }
+    }
+
+    pub fn parse_header(value: Option<&str>) -> Option<Self> {
+        match value {
+            None => Some(Self::Legacy),
+            Some("immediate-v1") => Some(Self::ImmediateV1),
+            Some("basic-sustained-v1") => Some(Self::BasicSustainedV1),
+            _ => None,
+        }
+    }
+
+    /// An outer room lease includes distribution and setup time.
+    pub const fn max_lease(self) -> Duration {
+        match self {
+            Self::Legacy => ROOM_LIFETIME,
+            Self::ImmediateV1 => Duration::from_secs(1800),
+            Self::BasicSustainedV1 => Duration::from_secs(2400),
+        }
+    }
+
+    /// Applies to a new authenticated admission only; does not shorten a
+    /// connected room or extend either peer's local media/input consent.
+    pub const fn minimum_at_admission(self) -> Duration {
+        match self {
+            Self::BasicSustainedV1 => Duration::from_secs(1860),
+            _ => Duration::ZERO,
+        }
+    }
+}
 
 #[cfg(feature = "public-control")]
 pub fn valid_public_control_token(value: &str) -> bool {

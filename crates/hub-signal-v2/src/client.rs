@@ -1,13 +1,13 @@
-#[cfg(feature = "public-control")]
-use crate::wire::PUBLIC_CONTROL_PATH;
 use crate::wire::{
-    self, ClientFrame, Flow, Role, ServerFrame, SignalKind, MAX_WIRE, PATH, PUBLIC_VIDEO_PATH,
-    ROOM_LIFETIME, VERSION,
+    self, ClientFrame, Flow, MAX_WIRE, PATH, PUBLIC_VIDEO_PATH, ROOM_LIFETIME, Role, ServerFrame,
+    SignalKind, VERSION,
 };
+#[cfg(feature = "public-control")]
+use crate::wire::{PUBLIC_CONTROL_ADMISSION_HEADER, PUBLIC_CONTROL_PATH, PublicControlAdmission};
 use futures_util::{SinkExt, StreamExt};
 use rustls::{
-    pki_types::{CertificateDer, ServerName},
     ClientConfig, RootCertStore,
+    pki_types::{CertificateDer, ServerName},
 };
 use std::{
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
@@ -17,26 +17,23 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncWrite},
     net::{TcpSocket, TcpStream},
-    time::{timeout_at, Instant},
+    time::{Instant, timeout_at},
 };
 use tokio_rustls::TlsConnector;
 use tokio_tungstenite::{
-    client_async_with_config,
+    WebSocketStream, client_async_with_config,
     tungstenite::{
-        client::IntoClientRequest,
-        http::{header, HeaderValue, StatusCode},
-        protocol::WebSocketConfig,
         Error as WsError, Message,
+        client::IntoClientRequest,
+        http::{HeaderValue, StatusCode, header},
+        protocol::WebSocketConfig,
     },
-    WebSocketStream,
 };
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_POLL_TIMEOUT: Duration = Duration::from_secs(30);
-#[cfg(feature = "public-control")]
-const CONTROL_BATCH_LEASE: Duration = Duration::from_secs(1800);
 const MAX_TRUST_ANCHOR_DER: usize = 64 * 1024;
 
 trait RelayIo: AsyncRead + AsyncWrite + Send + Unpin {}
@@ -293,7 +290,7 @@ fn public_unicast(ip: Ipv4Addr) -> bool {
 
 /// An explicitly configured route, not media or input permission.
 #[cfg(feature = "public-control")]
-pub struct PublicControlEndpoint(PublicVideoEndpoint);
+pub struct PublicControlEndpoint(PublicVideoEndpoint, PublicControlAdmission);
 
 #[cfg(feature = "public-control")]
 impl PublicControlEndpoint {
@@ -303,7 +300,8 @@ impl PublicControlEndpoint {
         expires_at: u64,
         now: u64,
     ) -> Result<Self, ClientError> {
-        PublicVideoEndpoint::new(source, relay, expires_at, now).map(Self)
+        PublicVideoEndpoint::new(source, relay, expires_at, now)
+            .map(|endpoint| Self(endpoint, PublicControlAdmission::Legacy))
     }
 
     /// Outer signaling invitation for one independently approved test-batch slot.
@@ -314,20 +312,72 @@ impl PublicControlEndpoint {
         expires_at: u64,
         now: u64,
     ) -> Result<Self, ClientError> {
-        PublicVideoEndpoint::check_addresses(source, relay)?;
-        PublicVideoEndpoint::with_lease(
+        Self::with_admission(
             source,
             relay,
             expires_at,
             now,
             Instant::now(),
-            CONTROL_BATCH_LEASE,
+            PublicControlAdmission::ImmediateV1,
         )
-        .map(Self)
+    }
+
+    /// The sustained product's independently scoped signaling room. It
+    /// begins no connection and does not authorize capture or input.
+    pub fn new_basic_sustained(
+        source: Ipv4Addr,
+        relay: SocketAddrV4,
+        expires_at: u64,
+        now: u64,
+    ) -> Result<Self, ClientError> {
+        Self::with_admission(
+            source,
+            relay,
+            expires_at,
+            now,
+            Instant::now(),
+            PublicControlAdmission::BasicSustainedV1,
+        )
+    }
+
+    fn with_admission(
+        source: Ipv4Addr,
+        relay: SocketAddrV4,
+        expires_at: u64,
+        now: u64,
+        started_at: Instant,
+        admission: PublicControlAdmission,
+    ) -> Result<Self, ClientError> {
+        PublicVideoEndpoint::check_addresses(source, relay)?;
+        let endpoint = Self(
+            PublicVideoEndpoint::with_lease(
+                source,
+                relay,
+                expires_at,
+                now,
+                started_at,
+                admission.max_lease(),
+            )?,
+            admission,
+        );
+        endpoint.checked_admission_at(now, started_at)?;
+        Ok(endpoint)
     }
 
     pub fn is_immediate_batch(&self) -> bool {
-        self.0.max_lease == CONTROL_BATCH_LEASE
+        self.1 == PublicControlAdmission::ImmediateV1
+    }
+
+    fn checked_admission_at(
+        &self,
+        now: u64,
+        monotonic_now: Instant,
+    ) -> Result<Instant, ClientError> {
+        let deadline = self.0.checked_deadline_at(now, monotonic_now)?;
+        if deadline.saturating_duration_since(monotonic_now) < self.1.minimum_at_admission() {
+            return Err(ClientError::PublicVideoExpiry);
+        }
+        Ok(deadline)
     }
 }
 
@@ -437,6 +487,26 @@ impl Route<'_> {
                 endpoint.0.checked_deadline().map(|d| d.min(fallback))
             }
             _ => Ok(fallback),
+        }
+    }
+
+    fn checked_admission(&self, fallback: Instant) -> Result<Instant, ClientError> {
+        #[cfg(feature = "public-control")]
+        if let Self::PublicControl(endpoint, _) = self {
+            return endpoint
+                .checked_admission_at(epoch_seconds()?, Instant::now())
+                .map(|deadline| deadline.min(fallback));
+        }
+        self.checked_deadline(fallback)
+    }
+
+    #[cfg(feature = "public-control")]
+    fn admission_header(&self) -> Option<HeaderValue> {
+        match self {
+            Self::PublicControl(endpoint, _) => {
+                endpoint.1.header_value().map(HeaderValue::from_static)
+            }
+            _ => None,
         }
     }
 
@@ -644,7 +714,7 @@ impl LoopbackRelay {
             .max_frame_size(Some(MAX_WIRE))
             .max_message_size(Some(MAX_WIRE));
         let started_at = Instant::now();
-        let deadline = route.checked_deadline(started_at + route.max_lease())?;
+        let deadline = route.checked_admission(started_at + route.max_lease())?;
         let handshake_deadline = deadline.min(started_at + IO_TIMEOUT);
         let socket = timeout_at(handshake_deadline, async {
             // SocketAddr makes the TCP target explicit independently of the HTTP Host.
@@ -660,7 +730,7 @@ impl LoopbackRelay {
                 }
                 None => ("ws", Box::new(tcp)),
             };
-            route.checked_deadline(deadline)?;
+            route.checked_admission(deadline)?;
             let path = route.path();
             let mut request = format!("{scheme}://{address}{path}")
                 .into_client_request()
@@ -672,12 +742,10 @@ impl LoopbackRelay {
                 .headers_mut()
                 .insert(header::AUTHORIZATION, auth_header);
             #[cfg(feature = "public-control")]
-            if matches!(&route, Route::PublicControl(endpoint, _) if endpoint.is_immediate_batch())
-            {
-                request.headers_mut().insert(
-                    "x-rh-public-control-batch",
-                    HeaderValue::from_static("immediate-v1"),
-                );
+            if let Some(admission) = route.admission_header() {
+                request
+                    .headers_mut()
+                    .insert(PUBLIC_CONTROL_ADMISSION_HEADER, admission);
             }
 
             let (socket, _) = client_async_with_config(request, stream, Some(config))

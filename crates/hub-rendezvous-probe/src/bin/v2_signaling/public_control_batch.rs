@@ -1,22 +1,24 @@
 //! Explicit public-control-only one-listener admission. Batch files contain
 //! short-lived role bearers, never identities or an input grant.
 use super::*;
+use hub_signal_v2::wire::{PUBLIC_CONTROL_ADMISSION_HEADER, PublicControlAdmission};
 use serde::Deserialize;
 use std::{collections::HashSet, io::Read};
 
 const MAX_ROOMS: usize = 8;
 const MAX_BATCH_BYTES: usize = 16 * 1024;
-pub(super) const MAX_LIFETIME: Duration = Duration::from_secs(1800);
-const BATCH_HEADER: &str = "x-rh-public-control-batch";
-const IMMEDIATE_V1: &str = "immediate-v1";
+const MAX_LIFETIME: Duration = Duration::from_secs(1800);
 const INVALID: &str = "V2_PUBLIC_CONTROL_BATCH_INVALID";
 const FILE: &str = "V2_PUBLIC_CONTROL_BATCH_FILE_REJECTED";
 
-pub(super) fn request_purpose(headers: &HeaderMap) -> Result<bool, &'static str> {
-    let mut values = headers.get_all(BATCH_HEADER).iter();
+pub(super) fn request_purpose(headers: &HeaderMap) -> Result<PublicControlAdmission, &'static str> {
+    let mut values = headers.get_all(PUBLIC_CONTROL_ADMISSION_HEADER).iter();
     match (values.next(), values.next()) {
-        (None, None) => Ok(false),
-        (Some(value), None) if value == IMMEDIATE_V1 => Ok(true),
+        (None, None) => Ok(PublicControlAdmission::Legacy),
+        (Some(value), None) => {
+            let value = value.to_str().map_err(|_| INVALID)?;
+            PublicControlAdmission::parse_header(Some(value)).ok_or(INVALID)
+        }
         _ => Err(INVALID),
     }
 }
@@ -64,14 +66,29 @@ impl Batch {
         }
         let config: Config<'_> = serde_json::from_slice(bytes).map_err(|_| INVALID)?;
         let lifetime = config.expires_at.checked_sub(wall).ok_or(INVALID)?;
-        if !(1..=MAX_LIFETIME.as_secs()).contains(&lifetime) {
+        let (admission, immediate_start, max_lifetime) =
+            match (config.version, config.rooms.as_slice()) {
+                (1, rooms) if (1..=MAX_ROOMS).contains(&rooms.len()) => {
+                    (PublicControlAdmission::Legacy, None, MAX_LIFETIME)
+                }
+                (2, rooms) if rooms.len() == MAX_ROOMS => (
+                    PublicControlAdmission::ImmediateV1,
+                    Some(rooms[0].not_before),
+                    MAX_LIFETIME,
+                ),
+                // One freshly admitted, explicitly bounded product room. Never
+                // enable the longer room or roster through a legacy config.
+                (3, [room]) => (
+                    PublicControlAdmission::BasicSustainedV1,
+                    Some(room.not_before),
+                    PublicControlAdmission::BasicSustainedV1.max_lease(),
+                ),
+                _ => return Err(INVALID),
+            };
+        let minimum = admission.minimum_at_admission().as_secs().max(1);
+        if !(minimum..=max_lifetime.as_secs()).contains(&lifetime) {
             return Err(INVALID);
         }
-        let immediate_start = match (config.version, config.rooms.as_slice()) {
-            (1, rooms) if (1..=MAX_ROOMS).contains(&rooms.len()) => None,
-            (2, rooms) if rooms.len() == MAX_ROOMS => Some(rooms[0].not_before),
-            _ => return Err(INVALID),
-        };
         let sources = PeerSources {
             host: source(config.host_ipv4)?,
             viewer: source(config.viewer_ipv4)?,
@@ -93,7 +110,7 @@ impl Batch {
                     start <= wall
                         && invitation.not_before == start
                         && invitation.expires_at == config.expires_at
-                        && (1..=MAX_LIFETIME.as_secs()).contains(&window)
+                        && (minimum..=admission.max_lease().as_secs()).contains(&window)
                 }
                 None => (1..=ROOM_LIFETIME.as_secs()).contains(&window),
             };
@@ -126,9 +143,12 @@ impl Batch {
                 expires_at: invitation.expires_at,
                 deadline: mono + Duration::from_secs(invitation.expires_at - wall),
                 not_before: Some((invitation.not_before, start)),
-                immediate_batch: immediate_start.is_some(),
+                admission,
             });
             app.active = active.clone();
+            if admission == PublicControlAdmission::BasicSustainedV1 {
+                app.exit_wake = Some(Notify::new());
+            }
             rooms.push(Arc::new(app));
         }
         Ok(Self {
@@ -146,9 +166,24 @@ impl Batch {
         if Instant::now() >= self.deadline || now()? >= self.expires_at {
             return Err(INVALID);
         }
+        let one_shot = self
+            .rooms
+            .first()
+            .filter(|app| app.exit_wake.is_some())
+            .cloned();
+        if let Some(app) = &one_shot {
+            app.approval.admission_deadline()?;
+        }
         let service = router_with_rooms(Purpose::Control, self.rooms)
             .into_make_service_with_connect_info::<SocketAddr>();
         let serving = axum_server::bind_rustls(addr, tls).serve(service);
+        if let Some(app) = &one_shot {
+            // The product roster contains exactly one one-use room. Do not
+            // keep its listener running after terminal room/handler cleanup.
+            return serve_one_shot(app, app.exit_wake.as_ref().ok_or(INVALID)?, serving)
+                .await
+                .map_err(|_| "V2_SERVER_FAILED");
+        }
         tokio::select! {
             biased;
             result = serving => result.map_err(|_| "V2_SERVER_FAILED"),
@@ -253,7 +288,7 @@ fn open_private(_: &Path) -> Result<std::fs::File, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::{json, Value};
+    use serde_json::{Value, json};
 
     const WALL: u64 = 50_000;
     const HOST: &str = "93.184.216.34";
@@ -296,7 +331,7 @@ mod tests {
         let batch = parse(&doc, WALL, start).unwrap();
         assert_eq!(batch.rooms.len(), 8);
         for app in &batch.rooms {
-            assert!(app.approval.immediate_batch);
+            assert_eq!(app.approval.admission, PublicControlAdmission::ImmediateV1);
             assert_eq!(
                 app.approval.deadline_at(WALL, start),
                 Ok(start + Duration::from_secs(1800))
@@ -323,15 +358,103 @@ mod tests {
     }
 
     #[test]
-    fn immediate_purpose_header_is_exact_and_not_repeatable() {
+    fn admission_purpose_header_is_exact_and_not_repeatable() {
         let mut headers = HeaderMap::new();
-        assert_eq!(request_purpose(&headers), Ok(false));
-        headers.insert(BATCH_HEADER, IMMEDIATE_V1.parse().unwrap());
-        assert_eq!(request_purpose(&headers), Ok(true));
-        headers.append(BATCH_HEADER, IMMEDIATE_V1.parse().unwrap());
-        assert!(request_purpose(&headers).is_err());
-        headers.insert(BATCH_HEADER, "immediate-v2".parse().unwrap());
-        assert!(request_purpose(&headers).is_err());
+        assert_eq!(
+            request_purpose(&headers),
+            Ok(PublicControlAdmission::Legacy)
+        );
+        for (value, mode) in [
+            ("immediate-v1", PublicControlAdmission::ImmediateV1),
+            (
+                "basic-sustained-v1",
+                PublicControlAdmission::BasicSustainedV1,
+            ),
+        ] {
+            headers.insert(PUBLIC_CONTROL_ADMISSION_HEADER, value.parse().unwrap());
+            assert_eq!(request_purpose(&headers), Ok(mode));
+            headers.append(PUBLIC_CONTROL_ADMISSION_HEADER, value.parse().unwrap());
+            assert!(request_purpose(&headers).is_err());
+        }
+        for ambiguous in [
+            "immediate-v2",
+            "basic-sustained-v1, immediate-v1",
+            "Basic-Sustained-V1",
+        ] {
+            headers.insert(PUBLIC_CONTROL_ADMISSION_HEADER, ambiguous.parse().unwrap());
+            assert!(request_purpose(&headers).is_err());
+        }
+    }
+
+    #[test]
+    fn sustained_roster_is_bounded_to_one_exact_product_room_and_both_clocks() {
+        let start = Instant::now();
+        let mut doc = fixture(WALL, &[0]);
+        doc["version"] = json!(3);
+        doc["expires_at"] = json!(WALL + 2400);
+        doc["rooms"][0]["expires_at"] = json!(WALL + 2400);
+        let batch = parse(&doc, WALL, start).unwrap();
+        let [app] = batch.rooms.as_slice() else {
+            panic!("only one product room")
+        };
+        assert!(app.exit_wake.is_some());
+        let a = &app.approval;
+        assert_eq!(a.admission, PublicControlAdmission::BasicSustainedV1);
+        let end = start + Duration::from_secs(2400);
+        let last_admission = start + Duration::from_secs(540);
+        assert_eq!(a.admission_deadline_at(WALL + 540, last_admission), Ok(end));
+        assert!(a.admission_deadline_at(WALL + 541, last_admission).is_err());
+        assert!(
+            a.admission_deadline_at(WALL + 539, last_admission + Duration::from_millis(1))
+                .is_err()
+        );
+        assert_eq!(
+            a.deadline_at(WALL + 541, last_admission + Duration::from_secs(1)),
+            Ok(end)
+        );
+        assert!(a.deadline_at(WALL + 2399, end).is_err());
+        assert!(a.deadline_at(WALL + 2400, start).is_err());
+
+        let role_token = doc["rooms"][0]["host_token"].as_str().unwrap();
+        let room = doc["rooms"][0]["room"].as_str().unwrap();
+        assert_eq!(
+            a.permitted_role(HOST.parse().unwrap(), role_token),
+            Some(Role::Host)
+        );
+        assert_eq!(a.permitted_role(VIEWER.parse().unwrap(), role_token), None);
+        assert!(a.same_room(room));
+        assert!(!a.same_room(&Uuid::new_v4().simple().to_string()));
+
+        for (rev, ttl, accepted) in [
+            (3, 1859, false),
+            (3, 1860, true),
+            (3, 2401, false),
+            (1, 2400, false),
+            (2, 2400, false),
+        ] {
+            let mut candidate = doc.clone();
+            candidate["version"] = json!(rev);
+            candidate["expires_at"] = json!(WALL + ttl);
+            candidate["rooms"][0]["expires_at"] = json!(WALL + ttl);
+            assert_eq!(
+                parse(&candidate, WALL, start).is_ok(),
+                accepted,
+                "{rev}/{ttl}"
+            );
+        }
+        let mut wrong = doc.clone();
+        wrong["rooms"][0]["expires_at"] = json!(WALL + 2399);
+        assert!(parse(&wrong, WALL, start).is_err(), "unbound room expiry");
+        let mut wrong = doc.clone();
+        wrong["rooms"][0]["not_before"] = json!(WALL + 1);
+        assert!(parse(&wrong, WALL, start).is_err(), "future start");
+        let mut wrong = doc.clone();
+        let additional = fixture(WALL, &[0])["rooms"][0].clone();
+        wrong["rooms"].as_array_mut().unwrap().push(additional);
+        assert!(
+            parse(&wrong, WALL, start).is_err(),
+            "no multi-room version 3"
+        );
     }
 
     #[test]
@@ -351,18 +474,26 @@ mod tests {
             first.deadline_at(WALL, start),
             Ok(start + Duration::from_secs(600))
         );
-        assert!(first
-            .deadline_at(WALL + 600, start + Duration::from_secs(599))
-            .is_err());
-        assert!(first
-            .deadline_at(WALL + 599, start + Duration::from_secs(600))
-            .is_err());
-        assert!(later
-            .deadline_at(WALL + 449, start + Duration::from_secs(450))
-            .is_err());
-        assert!(later
-            .deadline_at(WALL + 450, start + Duration::from_secs(449))
-            .is_err());
+        assert!(
+            first
+                .deadline_at(WALL + 600, start + Duration::from_secs(599))
+                .is_err()
+        );
+        assert!(
+            first
+                .deadline_at(WALL + 599, start + Duration::from_secs(600))
+                .is_err()
+        );
+        assert!(
+            later
+                .deadline_at(WALL + 449, start + Duration::from_secs(450))
+                .is_err()
+        );
+        assert!(
+            later
+                .deadline_at(WALL + 450, start + Duration::from_secs(449))
+                .is_err()
+        );
         assert_eq!(
             later.deadline_at(WALL + 450, start + Duration::from_secs(450)),
             Ok(start + Duration::from_secs(1050))
@@ -457,7 +588,7 @@ mod tests {
     fn private_batch_open_rejects_relative_symlink_and_shared_files() {
         use std::{
             fs,
-            os::unix::fs::{symlink, DirBuilderExt, PermissionsExt},
+            os::unix::fs::{DirBuilderExt, PermissionsExt, symlink},
         };
         let dir = std::path::PathBuf::from("/tmp").join(format!("rh-batch-{}", Uuid::new_v4()));
         fs::DirBuilder::new().mode(0o700).create(&dir).unwrap();

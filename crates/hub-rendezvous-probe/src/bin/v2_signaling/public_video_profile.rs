@@ -2,10 +2,10 @@
 //! A bearer authorizes its role's relay slot, not a device or media permission.
 
 use super::{
-    header, signal_wire, token_matches, wire, ClientFrame, ConnectInfo, Flow, HeaderMap,
-    IntoResponse, IpAddr, Ipv4Addr, Message, PathBuf, Peer, PeerSources, Response, Role, Router,
-    ServerFrame, SignalKind, SocketAddr, SocketPeer, State, StatusCode, WebSocket,
-    WebSocketUpgrade, MAX_CONNECTIONS, MAX_WIRE, ROOM_LIFETIME, VERSION,
+    ClientFrame, ConnectInfo, Flow, HeaderMap, IntoResponse, IpAddr, Ipv4Addr, MAX_CONNECTIONS,
+    MAX_WIRE, Message, PathBuf, Peer, PeerSources, ROOM_LIFETIME, Response, Role, Router,
+    ServerFrame, SignalKind, SocketAddr, SocketPeer, State, StatusCode, VERSION, WebSocket,
+    WebSocketUpgrade, header, signal_wire, token_matches, wire,
 };
 #[cfg(feature = "v2-public-control")]
 use axum::extract::OriginalUri;
@@ -15,8 +15,8 @@ use hub_signal_v2::wire::PUBLIC_VIDEO_PATH;
 use std::{
     path::Path,
     sync::{
-        atomic::{AtomicUsize, Ordering},
         Arc, Mutex,
+        atomic::{AtomicUsize, Ordering},
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -24,7 +24,7 @@ use std::{
 use tokio::sync::Notify;
 use tokio::{
     sync::mpsc,
-    time::{sleep_until, timeout_at, Instant},
+    time::{Instant, sleep_until, timeout_at},
 };
 use uuid::Uuid;
 use zeroize::Zeroizing;
@@ -106,7 +106,7 @@ pub(super) struct PublicVideoApproval {
     #[cfg(feature = "v2-public-control")]
     not_before: Option<(u64, Instant)>,
     #[cfg(feature = "v2-public-control")]
-    immediate_batch: bool,
+    admission: signal_wire::PublicControlAdmission,
 }
 
 impl PublicVideoApproval {
@@ -131,7 +131,7 @@ impl PublicVideoApproval {
             #[cfg(feature = "v2-public-control")]
             not_before: None,
             #[cfg(feature = "v2-public-control")]
-            immediate_batch: false,
+            admission: signal_wire::PublicControlAdmission::Legacy,
         })
     }
 
@@ -190,14 +190,27 @@ impl PublicVideoApproval {
             return Err(EXPIRED);
         }
         #[cfg(feature = "v2-public-control")]
-        if self.immediate_batch {
+        if self.admission != signal_wire::PublicControlAdmission::Legacy {
             let ttl = Duration::from_secs(self.expires_at.saturating_sub(wall));
-            if ttl.is_zero() || ttl > batch::MAX_LIFETIME {
+            if ttl.is_zero() || ttl > self.admission.max_lease() {
                 return Err(EXPIRED);
             }
             return Ok(self.deadline.min(mono + ttl));
         }
         Ok(self.deadline.min(mono + remaining(self.expires_at, wall)?))
+    }
+
+    fn admission_deadline(&self) -> Result<Instant, &'static str> {
+        self.admission_deadline_at(now()?, Instant::now())
+    }
+
+    fn admission_deadline_at(&self, wall: u64, mono: Instant) -> Result<Instant, &'static str> {
+        let deadline = self.deadline_at(wall, mono)?;
+        #[cfg(feature = "v2-public-control")]
+        if deadline.saturating_duration_since(mono) < self.admission.minimum_at_admission() {
+            return Err(EXPIRED);
+        }
+        Ok(deadline)
     }
 
     fn has_source(&self, observed_ip: IpAddr) -> bool {
@@ -476,8 +489,8 @@ async fn upgrade(
     ws: WebSocketUpgrade,
 ) -> Response {
     #[cfg(feature = "v2-public-control")]
-    let immediate_batch = match batch::request_purpose(&headers) {
-        Ok(immediate) => immediate,
+    let requested_admission = match batch::request_purpose(&headers) {
+        Ok(admission) => admission,
         Err(_) => return StatusCode::FORBIDDEN.into_response(),
     };
     #[cfg(feature = "v2-public-control")]
@@ -496,10 +509,10 @@ async fn upgrade(
     let eligible = || {
         admission.rooms.iter().filter(|app| {
             #[cfg(feature = "v2-public-control")]
-            if app.approval.immediate_batch != immediate_batch {
+            if app.approval.admission != requested_admission {
                 return false;
             }
-            app.approval.deadline().is_ok() && app.approval.has_source(observed_ip)
+            app.approval.admission_deadline().is_ok() && app.approval.has_source(observed_ip)
         })
     };
     if eligible().next().is_none() {
@@ -843,18 +856,21 @@ mod tests {
         });
         let (wrong_tx, _wrong_rx) = mpsc::channel(2);
         let unexpected = Uuid::new_v4();
-        assert!(app
-            .join(
+        assert!(
+            app.join(
                 &unexpected.simple().to_string(),
                 Role::Host,
                 unexpected,
                 wrong_tx
             )
-            .is_err());
+            .is_err()
+        );
         app.leave(unexpected);
-        assert!(tokio::time::timeout(Duration::from_millis(20), &mut serve)
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut serve)
+                .await
+                .is_err()
+        );
 
         let host_slot = app.reserve().unwrap();
         let viewer_slot = app.reserve().unwrap();
@@ -881,9 +897,11 @@ mod tests {
             signal_wire::decode::<ServerFrame>(&left),
             Ok(ServerFrame::PeerLeft {})
         ));
-        assert!(tokio::time::timeout(Duration::from_millis(20), &mut serve)
-            .await
-            .is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut serve)
+                .await
+                .is_err()
+        );
         drop(viewer_slot);
         tokio::time::timeout(Duration::from_secs(2), serve)
             .await
@@ -941,9 +959,8 @@ mod tests {
         use super::super::tls_smoke::{make_ca, start_tls_router};
         use rustls::{ClientConfig, RootCertStore};
         use tokio_tungstenite::{
-            client_async_tls_with_config,
-            tungstenite::{client::IntoClientRequest, Error as WsError},
-            Connector,
+            Connector, client_async_tls_with_config,
+            tungstenite::{Error as WsError, client::IntoClientRequest},
         };
         let raw_host = "a".repeat(64);
         let raw_viewer = "b".repeat(64);
@@ -960,10 +977,11 @@ mod tests {
                 .with_no_client_auth(),
         );
 
-        for (purpose, immediate, good, viewer, wrong, wrong_path) in [
+        use signal_wire::{PUBLIC_CONTROL_ADMISSION_HEADER, PublicControlAdmission as Mode};
+        for (purpose, mode, good, viewer, wrong, wrong_path) in [
             (
                 Purpose::Video,
-                false,
+                Mode::Legacy,
                 &raw_host,
                 &raw_viewer,
                 &control_host,
@@ -971,7 +989,7 @@ mod tests {
             ),
             (
                 Purpose::Control,
-                false,
+                Mode::Legacy,
                 &control_host,
                 &control_viewer,
                 &raw_host,
@@ -979,7 +997,15 @@ mod tests {
             ),
             (
                 Purpose::Control,
-                true,
+                Mode::ImmediateV1,
+                &control_host,
+                &control_viewer,
+                &raw_host,
+                Purpose::Video.path(),
+            ),
+            (
+                Purpose::Control,
+                Mode::BasicSustainedV1,
                 &control_host,
                 &control_viewer,
                 &raw_host,
@@ -1000,44 +1026,50 @@ mod tests {
                 now,
             )
             .unwrap();
-            approval.immediate_batch = immediate;
+            approval.admission = mode;
+            if mode == Mode::BasicSustainedV1 {
+                // Test-only loopback policy. Production version-3 files still
+                // require independent public source and strict room bounds.
+                approval.expires_at = now + 2400;
+                approval.deadline = Instant::now() + Duration::from_secs(2400);
+            }
             assert_eq!(
                 approval.permitted_role(Ipv4Addr::LOCALHOST.into(), wrong),
                 None
             );
             let (addr, server) =
                 start_tls_router(&ca, "127.0.0.1", public_video_router(approval)).await;
-            for (path, token, marker, expected) in [
-                (
-                    wrong_path,
-                    good.as_str(),
-                    immediate,
-                    Some(StatusCode::NOT_FOUND),
-                ),
+            let mut requests = vec![
+                (wrong_path, good.as_str(), mode, Some(StatusCode::NOT_FOUND)),
                 (
                     purpose.path(),
                     wrong.as_str(),
-                    immediate,
+                    mode,
                     Some(StatusCode::UNAUTHORIZED),
                 ),
-                (
-                    purpose.path(),
-                    good.as_str(),
-                    !immediate,
-                    Some(StatusCode::FORBIDDEN),
-                ),
-                (purpose.path(), good.as_str(), immediate, None),
-            ] {
+            ];
+            for other in [Mode::Legacy, Mode::ImmediateV1, Mode::BasicSustainedV1] {
+                if other != mode {
+                    requests.push((
+                        purpose.path(),
+                        good.as_str(),
+                        other,
+                        Some(StatusCode::FORBIDDEN),
+                    ));
+                }
+            }
+            requests.push((purpose.path(), good.as_str(), mode, None));
+            for (path, token, marker, expected) in requests {
                 let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
                 let mut request = format!("wss://{addr}{path}").into_client_request().unwrap();
                 request.headers_mut().insert(
                     header::AUTHORIZATION,
                     format!("Bearer {token}").parse().unwrap(),
                 );
-                if marker {
+                if let Some(marker) = marker.header_value() {
                     request
                         .headers_mut()
-                        .insert("x-rh-public-control-batch", "immediate-v1".parse().unwrap());
+                        .insert(PUBLIC_CONTROL_ADMISSION_HEADER, marker.parse().unwrap());
                 }
                 let result = tokio::time::timeout(
                     Duration::from_secs(3),
