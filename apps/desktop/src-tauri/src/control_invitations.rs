@@ -1,3 +1,6 @@
+mod archive;
+pub(super) use archive::load;
+
 use crate::public_video_profile::PublicVideoProfile;
 use hub_webrtc::public_video_wss::Role;
 use serde::Serialize;
@@ -19,8 +22,8 @@ pub(crate) fn choose(owner: usize) -> Result<Option<PathBuf>, &'static str> {
     let mut dialog = OPENFILENAMEW {
         lStructSize: size_of::<OPENFILENAMEW>() as u32,
         hwndOwner: HWND(owner as *mut _),
-        lpstrTitle: w!("选择本机的 RemoteHub 单轮邀请"),
-        lpstrFilter: w!("RemoteHub 邀请 (*.json)\0*.json\0"),
+        lpstrTitle: w!("打开本机的角色 ZIP 或单轮 JSON"),
+        lpstrFilter: w!("RemoteHub 邀请 (*.zip;*.json)\0*.zip;*.json\0"),
         lpstrFile: PWSTR(path.as_mut_ptr()),
         nMaxFile: path.len() as u32,
         Flags: OFN_FILEMUSTEXIST
@@ -48,38 +51,49 @@ pub(crate) fn choose(owner: usize) -> Result<Option<PathBuf>, &'static str> {
 #[derive(Serialize)]
 pub(crate) struct Preview {
     pub(crate) id: String,
+    round: Option<u8>,
     role: &'static str,
     expires_at: u64,
 }
 
 #[derive(Default)]
 pub(crate) struct Invitations {
-    selected: Option<(String, PublicVideoProfile)>,
+    selected: HashMap<String, PublicVideoProfile>,
     consumed: HashMap<Uuid, u64>,
 }
 
 impl Invitations {
     pub(crate) fn select(
         &mut self,
-        profile: PublicVideoProfile,
+        rounds: archive::Rounds,
         now: u64,
-    ) -> Result<Preview, &'static str> {
-        profile.verify_invitation_time(now)?;
-        let approval = profile.approval();
+    ) -> Result<Vec<Preview>, &'static str> {
         self.consumed.retain(|_, expires| *expires > now);
-        if self.consumed.contains_key(&approval.room) {
+        let mut candidates = HashMap::new();
+        let mut previews = Vec::new();
+        for (round, profile) in rounds {
+            let approval = profile.approval();
+            if self.consumed.contains_key(&approval.room) {
+                continue;
+            }
+            profile.verify_invitation_time(now)?;
+            let id = Uuid::new_v4().simple().to_string();
+            candidates.insert(id.clone(), profile);
+            previews.push(Preview {
+                id,
+                round,
+                role: match approval.role {
+                    Role::Host => "host",
+                    Role::Viewer => "viewer",
+                },
+                expires_at: approval.scope.expires_at,
+            });
+        }
+        if previews.is_empty() {
             return Err("PUBLIC_VIDEO_PROFILE_CONSUMED");
         }
-        let id = Uuid::new_v4().simple().to_string();
-        self.selected = Some((id.clone(), profile));
-        Ok(Preview {
-            id,
-            role: match approval.role {
-                Role::Host => "host",
-                Role::Viewer => "viewer",
-            },
-            expires_at: approval.scope.expires_at,
-        })
+        self.selected = candidates;
+        Ok(previews)
     }
 
     pub(crate) fn take(
@@ -88,15 +102,14 @@ impl Invitations {
         role: Role,
         now: u64,
     ) -> Result<PublicVideoProfile, &'static str> {
-        let selected = self
+        let profile = self
             .selected
-            .as_ref()
-            .filter(|(current, profile)| current == id && profile.approval().role == role)
+            .get(id)
+            .filter(|p| p.approval().role == role)
             .ok_or("PUBLIC_VIDEO_PROFILE_UNAVAILABLE")?;
-        selected.1.verify_invitation_time(now)?;
+        profile.verify_invitation_time(now)?;
         self.selected
-            .take()
-            .map(|(_, profile)| profile)
+            .remove(id)
             .ok_or("PUBLIC_VIDEO_PROFILE_UNAVAILABLE")
     }
 

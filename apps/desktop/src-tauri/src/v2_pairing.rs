@@ -19,9 +19,9 @@ pub(crate) fn bundle_prefill(window: &WebviewWindow) -> Option<PairingCard> {
     let public = identity.public()?;
     let dir = std::env::current_exe().ok()?;
     let path = dir.parent()?.join("remotehub-peer-prefill.json");
-    let file = crate::public_video_profile::open_local_regular(&path).ok()?;
-    let mut bytes = Vec::new();
     const MAX_BYTES: usize = 512;
+    let file = crate::public_video_profile::open_local_regular(&path, MAX_BYTES as u64).ok()?;
+    let mut bytes = Vec::new();
     file.take((MAX_BYTES + 1) as u64)
         .read_to_end(&mut bytes)
         .ok()?;

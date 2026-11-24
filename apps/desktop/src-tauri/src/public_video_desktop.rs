@@ -327,7 +327,7 @@ enum ProfileSource {
 #[tauri::command]
 pub(crate) async fn select_control_invitation(
     window: WebviewWindow,
-) -> Result<Option<crate::control_invitations::Preview>, String> {
+) -> Result<Option<Vec<crate::control_invitations::Preview>>, String> {
     crate::experiment_origin::origin(&window)?;
     let state = window.state::<Arc<DesktopVideoState>>().inner().clone();
     if !state.picker_available() || state.closing.load(Ordering::Acquire) {
@@ -350,7 +350,7 @@ pub(crate) async fn select_control_invitation(
     let hwnd = window.hwnd().map_err(|_| "PUBLIC_VIDEO_NATIVE_WINDOW")?.0 as usize;
     let selected = tauri::async_runtime::spawn_blocking(move || {
         crate::control_invitations::choose(hwnd)?
-            .map(|path| PublicVideoProfile::load_control(&path, now()?))
+            .map(|path| crate::control_invitations::load(&path, now()?))
             .transpose()
     })
     .await

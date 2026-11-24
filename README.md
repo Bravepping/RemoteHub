@@ -47,9 +47,9 @@
 
 ## Windows 上快速编译
 
-**公网邀请版**使用 `pnpm build` 和 `cargo build --locked --profile probe -p remotehub-desktop --bin remotehub-desktop --features v2-control-invitations,custom-protocol` 构建。双击程序，到「设备」核验对端完整指纹，再点「打开本轮邀请」，选择分配给本机的单轮 JSON。界面显示共享或观看角色及到期时间，点击「开始本次会话」后仍须原生批准。结束后可在同一窗口选择下一轮。原有 `--public-control-profile` 启动脚本仍使用固定邀请。
+**公网邀请版**使用 `pnpm build` 和 `cargo build --locked --profile probe -p remotehub-desktop --bin remotehub-desktop --features v2-control-invitations,custom-protocol` 构建。双击程序，到「设备」核验对端完整指纹，点击「打开邀请 ZIP 或 JSON」。共享端选自己的 `host-test-rounds.zip`，观看端选自己的 `viewer-test-rounds.zip`；此前分发的两轮便携角色包也可直接打开。在「可用轮次」里两端选择相同编号，再点击「开始本次会话」。结束后可在同一窗口选下一轮，画面和键鼠仍按轮授权。单轮 JSON 与原有 `--public-control-profile` 启动脚本继续可用。
 
-本机离线回归覆盖取消选择、过期提示、角色与选择标识绑定、已用房间拒绝及同窗口换轮。Windows 文件选择器只把角色、到期时间和本次选择标识交给界面。Windows 上邀请版原生测试 35 项、既有公网版启动模式回归 5 项、前端单元测试 278 项及 Edge 浏览器测试 23 项通过。文件选择器的人工操作及邀请版双机验收待进行。
+本机离线回归覆盖取消选择、过期提示、角色与选择标识绑定、已用房间拒绝及同窗口换轮。ZIP 中的单轮配置只在内存中读取。列表显示打开包时本机可用的轮次，过滤本进程已用的房间和剩余时间不足的邀请。旧版分时开放的邀请包可在新轮次开放后重新打开。界面仅接收轮次、角色、到期时间和本次选择标识。Windows 上支持角色 ZIP 的邀请版原生测试 37 项、既有公网版启动模式回归 5 项、前端单元测试 278 项及 Edge 浏览器测试 23 项通过。文件选择器的人工操作及邀请版双机验收待进行。
 
 在已安装项目锁定的 Rust 1.100.0、MSVC/Windows SDK、Node 24、pnpm 11.25.0 和 WebView2 的 Windows PC：
 

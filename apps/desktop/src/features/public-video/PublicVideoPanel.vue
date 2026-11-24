@@ -33,15 +33,45 @@ interface Invitation {
   id: string;
   role: PublicVideoRole;
   expires_at: number;
+  round: number | null;
 }
-const selected = ref<Invitation>();
+const invitations = ref<Invitation[]>([]);
+const selectedId = ref('');
+const nowSeconds = ref(Math.floor(Date.now() / 1000));
+// The public control client requires at least 60 seconds on its TURN lease at start.
+const availableRounds = computed(() =>
+  invitations.value.filter((item) => item.expires_at - nowSeconds.value >= 60),
+);
+const selected = computed(() =>
+  availableRounds.value.find((item) => item.id === selectedId.value),
+);
+let expiryTimer: ReturnType<typeof setInterval> | undefined;
+watch(invitations, (list) => {
+  clearInterval(expiryTimer);
+  nowSeconds.value = Math.floor(Date.now() / 1000);
+  if (list.length)
+    expiryTimer = setInterval(() => {
+      nowSeconds.value = Math.floor(Date.now() / 1000);
+      if (!availableRounds.value.length) clearInterval(expiryTimer);
+    }, 1000);
+});
+const archiveOpen = ref(false);
+function chooseRound(id: string) {
+  selectedId.value = id;
+  role.value = selected.value?.role;
+}
 const selecting = ref(false);
 const selectionError = ref('');
 function validInvitation(value: unknown): value is Invitation {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<Invitation>;
   return (
-    Object.keys(item).sort().join(',') === 'expires_at,id,role' &&
+    Object.keys(item).sort().join(',') === 'expires_at,id,role,round' &&
+    (item.round === null ||
+      (typeof item.round === 'number' &&
+        Number.isInteger(item.round) &&
+        item.round >= 1 &&
+        item.round <= 8)) &&
     typeof item.id === 'string' &&
     /^[0-9a-f]{32}$/.test(item.id) &&
     (item.role === 'host' || item.role === 'viewer') &&
@@ -58,22 +88,38 @@ async function selectInvitation() {
   try {
     const result: unknown = await invoke('select_control_invitation');
     if (result === null) return;
-    if (!validInvitation(result)) throw new Error();
-    selected.value = result;
+    if (
+      !Array.isArray(result) ||
+      !result.length ||
+      result.length > 8 ||
+      !result.every(validInvitation) ||
+      new Set(result.map((item) => item.id)).size !== result.length ||
+      new Set(result.map((item) => item.round)).size !== result.length ||
+      result.some(
+        (item) =>
+          item.role !== result[0].role ||
+          (item.round === null && result.length !== 1),
+      )
+    )
+      throw new Error();
+    nowSeconds.value = Math.floor(Date.now() / 1000);
+    invitations.value = result;
+    archiveOpen.value = result[0].round !== null;
+    chooseRound(archiveOpen.value ? '' : result[0].id);
     state.value = 'idle';
-    role.value = result.role;
     endDetail.value = undefined;
     roundSeconds.value = undefined;
     error.value = '';
   } catch (cause) {
-    selected.value = undefined;
-    role.value = undefined;
+    invitations.value = [];
+    archiveOpen.value = false;
+    chooseRound('');
     selectionError.value =
       cause === 'PUBLIC_VIDEO_PROFILE_EXPIRED'
-        ? '邀请已过期或剩余时间不足，请选择新的邀请。'
+        ? '邀请已过期、尚未开放或剩余时间不足，请核对本轮有效时间。'
         : cause === 'PUBLIC_VIDEO_PROFILE_CONSUMED'
-          ? '这轮邀请已使用，请选择下一轮。'
-          : '无法打开这份邀请，请选择本机的有效单轮 JSON 文件。';
+          ? '本机已使用这些轮次，请打开新的邀请。'
+          : '无法打开这份邀请，请选择本机的共享端或观看端 ZIP，也可选择单轮 JSON。';
   } finally {
     selecting.value = false;
   }
@@ -253,7 +299,10 @@ onMounted(() => {
         if (!props.invitationPicker)
           return invoke('public_video_start', { role });
         const invitationId = selected.value?.id;
-        selected.value = undefined;
+        invitations.value = invitations.value.filter(
+          (item) => item.id !== invitationId,
+        );
+        selectedId.value = '';
         if (!invitationId)
           return Promise.reject('PUBLIC_VIDEO_PROFILE_UNAVAILABLE');
         return invoke('public_video_start', { role, invitationId });
@@ -298,6 +347,7 @@ onMounted(() => {
   );
 });
 onBeforeUnmount(() => {
+  clearInterval(expiryTimer);
   window.removeEventListener('keydown', stopShortcut);
   window.removeEventListener('blur', pauseInput);
   document.removeEventListener('visibilitychange', pauseInput);
@@ -330,8 +380,27 @@ function start() {
     </p>
     <div v-if="invitationPicker">
       <button type="button" :disabled="!canChoose" @click="selectInvitation">
-        {{ selecting ? '正在选择邀请…' : '打开本轮邀请' }}
+        {{ selecting ? '正在选择邀请…' : '打开邀请 ZIP 或 JSON' }}
       </button>
+      <fieldset
+        v-if="archiveOpen && availableRounds.length"
+        :disabled="!canChoose"
+      >
+        <legend>
+          本机{{ availableRounds[0].role === 'host' ? '共享屏幕' : '观看屏幕' }}
+          · 可用轮次
+        </legend>
+        <label v-for="item in availableRounds" :key="item.id">
+          <input
+            type="radio"
+            name="invitation-round"
+            :checked="selectedId === item.id"
+            @change="chooseRound(item.id)"
+          />
+          第 {{ item.round }} 轮
+        </label>
+      </fieldset>
+      <p v-else-if="archiveOpen && canChoose">本包当前没有可用轮次。</p>
       <p v-if="selected">
         本机{{ selected.role === 'host' ? '共享屏幕' : '观看屏幕' }} ·
         邀请有效至 {{ new Date(selected.expires_at * 1000).toLocaleString() }}
@@ -360,7 +429,9 @@ function start() {
           : invitationPicker && state === 'idle'
             ? selected
               ? '邀请已就绪，请确认后开始。'
-              : '请选择本机的单轮邀请文件。'
+              : archiveOpen
+                ? '请从可用轮次中选择本次邀请。'
+                : '请选择本机的角色包或单轮邀请。'
             : statusText[state]
       }}
       <code v-if="error">{{ error }}</code>

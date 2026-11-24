@@ -30,17 +30,21 @@ test('previews each locally selected invitation and starts only its own round', 
                 case 2:
                   throw 'PUBLIC_VIDEO_PROFILE_EXPIRED';
                 case 3:
-                  return {
-                    id: 'a'.repeat(32),
-                    role: 'host',
-                    expires_at: 1900000000,
-                  };
+                  return [
+                    {
+                      id: 'a'.repeat(32),
+                      role: 'host',
+                      round: null,
+                      expires_at: 1900000000,
+                    },
+                  ];
                 default:
-                  return {
-                    id: 'b'.repeat(32),
+                  return [1, 2].map((round) => ({
+                    id: (round === 1 ? 'b' : 'd').repeat(32),
                     role: 'viewer',
+                    round,
                     expires_at: 1900000001,
-                  };
+                  }));
               }
             case 'public_video_start':
               starts.push(args);
@@ -58,7 +62,7 @@ test('previews each locally selected invitation and starts only its own round', 
   });
   await page.goto('/');
   const panel = page.getByRole('region', { name: '公网远控测试' });
-  const open = panel.getByRole('button', { name: '打开本轮邀请' });
+  const open = panel.getByRole('button', { name: '打开邀请 ZIP 或 JSON' });
   const start = panel.getByRole('button', { name: '开始本次会话' });
   const starts = () =>
     page.evaluate(
@@ -79,10 +83,18 @@ test('previews each locally selected invitation and starts only its own round', 
   await expect(start).toBeDisabled();
   await open.click();
   await expect(panel).toContainText('本机观看屏幕');
+  await expect(start).toBeDisabled();
+  await panel.getByLabel('第 2 轮').check();
+  await start.click();
+  await expect(panel.getByRole('status')).toContainText('本次会话已停止');
+  await expect(panel.getByLabel('第 2 轮')).toHaveCount(0);
+  await expect(start).toBeDisabled();
+  await panel.getByLabel('第 1 轮').check();
   await start.click();
   await expect(panel.getByRole('status')).toContainText('本次会话已停止');
   expect(await starts()).toEqual([
     { role: 'host', invitationId: 'a'.repeat(32) },
+    { role: 'viewer', invitationId: 'd'.repeat(32) },
     { role: 'viewer', invitationId: 'b'.repeat(32) },
   ]);
 });

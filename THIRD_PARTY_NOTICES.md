@@ -4,6 +4,7 @@
 
 | 直接依赖 | 来源 | 声明许可 |
 |---|---|---|
+| zip（Windows 客户端读取角色邀请包） | https://github.com/zip-rs/zip2 | MIT |
 | Tauri / Tauri Build / API / CLI | https://github.com/tauri-apps/tauri | MIT OR Apache-2.0 |
 | windows-rs | https://github.com/microsoft/windows-rs | MIT OR Apache-2.0 |
 | serde / serde_json | https://github.com/serde-rs | MIT OR Apache-2.0 |

@@ -27,7 +27,7 @@ use std::{
 use uuid::Uuid;
 use zeroize::Zeroizing;
 
-const MAX_FILE: usize = 32 * 1024;
+pub(crate) const MAX_FILE: usize = 32 * 1024;
 const MAX_CA_DER: usize = 16 * 1024;
 const MAX_TTL: u64 = 600;
 const MAX_IMMEDIATE_BATCH_TTL: u64 = 1800;
@@ -128,7 +128,7 @@ impl PublicVideoProfile {
     }
 
     fn load_with_purpose(path: &Path, now: u64, control: bool) -> Result<Self, &'static str> {
-        let file = open_local_regular(path)?;
+        let file = open_local_regular(path, MAX_FILE as u64)?;
         let mut bytes = Zeroizing::new(Vec::with_capacity(MAX_FILE + 1));
         file.take((MAX_FILE + 1) as u64)
             .read_to_end(&mut bytes)
@@ -141,7 +141,11 @@ impl PublicVideoProfile {
         Self::parse_with_purpose(bytes, now, false)
     }
 
-    fn parse_with_purpose(bytes: &[u8], now: u64, control: bool) -> Result<Self, &'static str> {
+    pub(super) fn parse_with_purpose(
+        bytes: &[u8],
+        now: u64,
+        control: bool,
+    ) -> Result<Self, &'static str> {
         if bytes.is_empty() || bytes.len() > MAX_FILE {
             return Err(SIZE);
         }
@@ -499,7 +503,7 @@ fn parse_pairing_key(text: &str) -> Result<[u8; 16], &'static str> {
 }
 
 #[cfg(windows)]
-pub(crate) fn open_local_regular(path: &Path) -> Result<File, &'static str> {
+pub(crate) fn open_local_regular(path: &Path, max_size: u64) -> Result<File, &'static str> {
     use std::{
         os::windows::fs::{MetadataExt, OpenOptionsExt},
         path::{Component, Prefix},
@@ -560,7 +564,7 @@ pub(crate) fn open_local_regular(path: &Path) -> Result<File, &'static str> {
     if !metadata.is_file() || metadata.file_attributes() & REPARSE_POINT != 0 {
         return Err(FILE);
     }
-    if metadata.len() > MAX_FILE as u64 {
+    if metadata.len() > max_size {
         return Err(SIZE);
     }
     Ok(file)
@@ -595,7 +599,7 @@ fn normal_path_name(name: &str) -> bool {
 }
 
 #[cfg(not(windows))]
-fn open_local_regular(_: &Path) -> Result<File, &'static str> {
+fn open_local_regular(_: &Path, _: u64) -> Result<File, &'static str> {
     // This module belongs to the Windows-only feature. Unit parser fixtures
     // also run on Linux without introducing a portable profile file opener.
     Err(FILE)
@@ -643,6 +647,116 @@ mod tests {
 
     #[cfg(feature = "v2-control-invitations")]
     #[test]
+    fn role_zip_lists_sorted_fresh_rounds_and_remembers_consumption() {
+        use crate::control_invitations::{load, Invitations};
+        use std::io::{Cursor, Write};
+        use zip::{write::SimpleFileOptions, CompressionMethod, ZipWriter};
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        for role in [Role::Host, Role::Viewer] {
+            let mut archive = ZipWriter::new(Cursor::new(Vec::new()));
+            let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+            for number in (1..=8).rev() {
+                let mut doc = fixture();
+                let room = Uuid::new_v4();
+                let expires = if number == 1 {
+                    now
+                } else {
+                    now + FIXTURE_TURN_TTL
+                };
+                doc["version"] = json!(2);
+                doc["room"] = json!(room.to_string());
+                doc["role"] = json!(if role == Role::Host { "host" } else { "viewer" });
+                doc["purpose"] = json!("public-control");
+                doc["mode"] = json!("relay_only");
+                doc["relay_token"] = json!(format!("rhctl1-{}", "45".repeat(32)));
+                doc["expires_at"] = json!(expires);
+                doc["turn_expires_at"] = json!(expires);
+                doc["turn_username"] = json!(format!("{expires}:{room}"));
+                archive
+                    .start_file(format!("round-{number:02}.json"), opts)
+                    .unwrap();
+                archive
+                    .write_all(&serde_json::to_vec(&doc).unwrap())
+                    .unwrap();
+            }
+            // The portable packs also contain client binaries; nothing is unpacked.
+            archive.start_file("remotehub-desktop.exe", opts).unwrap();
+            archive.write_all(b"fixture").unwrap();
+            let path = std::env::temp_dir().join(format!("邀请-{}.ZIP", Uuid::new_v4()));
+            std::fs::write(&path, archive.finish().unwrap().into_inner()).unwrap();
+            let rounds = load(&path, now).unwrap();
+            let reopened = load(&path, now).unwrap();
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(
+                rounds.iter().map(|(n, _)| n.unwrap()).collect::<Vec<_>>(),
+                (2..=8).collect::<Vec<_>>()
+            );
+            let mut invites = Invitations::default();
+            let previews = invites.select(rounds, now).unwrap();
+            let used = invites.take(&previews[4].id, role, now).unwrap().approval();
+            invites.consume(used.room, used.scope.expires_at).unwrap();
+            assert!(invites.take(&previews[4].id, role, now).is_err());
+            assert!(invites.take(&previews[0].id, role, now).is_ok());
+            let list = invites.select(reopened, now).unwrap();
+            let value = serde_json::to_value(&list).unwrap();
+            assert_eq!(list.len(), 6);
+            assert!(!value
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|item| item["round"] == 6));
+            assert!(value
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item.as_object().unwrap().len() == 4));
+        }
+    }
+
+    #[cfg(feature = "v2-control-invitations")]
+    #[test]
+    fn invalid_zip_does_not_replace_the_selected_batch() {
+        use crate::control_invitations::{load, Invitations};
+        use std::io::{Cursor, Write};
+        let mut doc = fixture();
+        doc["purpose"] = json!("public-control");
+        doc["mode"] = json!("relay_only");
+        doc["relay_token"] = json!(format!("rhctl1-{}", "45".repeat(32)));
+        let host = serde_json::to_vec(&doc).unwrap();
+        let mut invitations = Invitations::default();
+        let profile = PublicVideoProfile::parse_with_purpose(&host, NOW, true).unwrap();
+        let good = invitations.select(vec![(None, profile)], NOW).unwrap();
+        let room = Uuid::new_v4();
+        doc["role"] = json!("viewer");
+        doc["room"] = json!(room.to_string());
+        doc["turn_username"] = json!(format!("{}:{room}", NOW + FIXTURE_TURN_TTL));
+        for (name, bytes) in [
+            ("round-02.json", serde_json::to_vec(&doc).unwrap()),
+            ("round-02.json", host.clone()),
+            ("nested/round-02.json", host.clone()),
+            ("round-02.json", vec![0; MAX_FILE + 1]),
+        ] {
+            let buf = Cursor::new(Vec::new());
+            let mut zip = zip::ZipWriter::new(buf);
+            for (name, data) in [("round-01.json", &host), (name, &bytes)] {
+                zip.start_file(name, zip::write::SimpleFileOptions::default())
+                    .unwrap();
+                zip.write_all(data).unwrap();
+            }
+            let path = std::env::temp_dir().join(format!("{}.zip", Uuid::new_v4()));
+            std::fs::write(&path, zip.finish().unwrap().into_inner()).unwrap();
+            let result = load(&path, NOW);
+            std::fs::remove_file(path).unwrap();
+            assert_eq!(result.err(), Some("PUBLIC_INVITATION_ARCHIVE_INVALID"));
+        }
+        assert!(invitations.take(&good[0].id, Role::Host, NOW).is_ok());
+    }
+
+    #[cfg(feature = "v2-control-invitations")]
+    #[test]
     fn invitation_selection_binds_snapshot_role_time_and_single_use_room() {
         let mut file = fixture();
         file["purpose"] = json!("public-control");
@@ -653,8 +767,14 @@ mod tests {
                 .unwrap()
         };
         let mut invitations = crate::control_invitations::Invitations::default();
-        let stale = invitations.select(profile(&file), NOW).unwrap();
-        let current = invitations.select(profile(&file), NOW).unwrap();
+        let stale = invitations
+            .select(vec![(None, profile(&file))], NOW)
+            .unwrap()
+            .remove(0);
+        let current = invitations
+            .select(vec![(None, profile(&file))], NOW)
+            .unwrap()
+            .remove(0);
         assert!(invitations.take(&stale.id, Role::Host, NOW).is_err());
         assert!(invitations.take(&current.id, Role::Viewer, NOW).is_err());
         assert!(invitations
@@ -668,14 +788,19 @@ mod tests {
         invitations
             .consume(first.room, first.scope.expires_at)
             .unwrap();
-        assert!(invitations.select(profile(&file), NOW).is_err());
+        assert!(invitations
+            .select(vec![(None, profile(&file))], NOW)
+            .is_err());
         file["room"] = json!(Uuid::new_v4().to_string());
         file["turn_username"] = json!(format!(
             "{}:{}",
             NOW + FIXTURE_TURN_TTL,
             file["room"].as_str().unwrap()
         ));
-        let next = invitations.select(profile(&file), NOW).unwrap();
+        let next = invitations
+            .select(vec![(None, profile(&file))], NOW)
+            .unwrap()
+            .remove(0);
         assert_ne!(
             invitations
                 .take(&next.id, Role::Host, NOW)
