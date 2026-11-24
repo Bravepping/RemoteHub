@@ -7,7 +7,7 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 turn=remotehub-turn-g6.service
 turn_config=/etc/remotehub-turn-g6/turnserver.conf
 turn_override_dir="/run/systemd/system/$turn.d"
-turn_override="$turn_override_dir/90-remotehub-batch-runtime.conf"
+turn_override="$turn_override_dir/99-remotehub-batch-runtime.conf"
 [[ $EUID == 0 && $root =~ ^/root/[A-Za-z0-9._/-]+$ ]] || die 'Run as root from a private test directory under /root.'
 cd -- "$root"
 [[ $(stat -c '%u:%a' .) == 0:700 ]] || die 'Test directory must be owned by root with mode 700.'
