@@ -1438,6 +1438,131 @@ mod tests {
         assert!(!owner.runtime.active());
     }
 
+    #[cfg(feature = "v2-public-control-sustained")]
+    #[tokio::test]
+    async fn sustained_signed_direct_production_plan_uses_scope_not_media_limit() {
+        use crate::public_video::{
+            PublicControlProof, SUSTAINED_CONTROL_MEDIA_BOUND_SECONDS,
+            SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
+        };
+        let host = Identity::generate_ephemeral().unwrap();
+        let viewer = Identity::generate_ephemeral().unwrap();
+        let room = Uuid::new_v4();
+        let scope = PublicVideoScope {
+            expires_at: NOW + SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
+            ..scope(IceMode::DirectPreferred)
+        };
+        let pin = |local: &Identity, peer: &Identity| {
+            local
+                .verify_peer(
+                    &PairingCandidate::parse(&peer.pairing_code()).unwrap(),
+                    &peer.public().fingerprint,
+                )
+                .unwrap()
+        };
+        let make = |ttl: u64| {
+            let expires_at = NOW + ttl;
+            let relay = RelayGrant::new(
+                RelayTarget {
+                    local: "192.168.1.2".parse().unwrap(),
+                    turn: scope.turn,
+                    relay: *scope.turn.ip(),
+                    port_min: scope.relay_ports.0,
+                    port_max: scope.relay_ports.1,
+                },
+                &room.to_string(),
+                expires_at,
+                true,
+            )
+            .unwrap();
+            let config = IceConfig {
+                mode: scope.mode,
+                expires_at,
+                session_id: room.to_string(),
+                ice_servers: vec![IceServer {
+                    urls: vec![format!("turn:{TURN}?transport=udp")],
+                    username: format!("{expires_at}:{room}"),
+                    credential: "AAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+                }],
+            };
+            (relay, config)
+        };
+        let host_pin = pin(&host, &viewer);
+        let viewer_pin = pin(&viewer, &host);
+        assert!(PublicControlProof::prepare_immediate_batch(
+            &host, &host_pin, SessionRole::Host, room, [1; 32], scope, NOW,
+        )
+        .is_err());
+        assert!(PublicControlProof::prepare_sustained(
+            &host, &host_pin, SessionRole::Host, room, [1; 32],
+            PublicVideoScope { expires_at: scope.expires_at + 1, ..scope }, NOW,
+        )
+        .is_err());
+        fn stage<'a>(
+            proof: PublicVideoProof<'a>,
+            (grant, config): (RelayGrant, IceConfig),
+            expires_at: u64,
+        ) -> PublicVideoScopedIce<'a> {
+            let plan = proof.prepare_ice(grant, config, NOW).unwrap();
+            let RouteGrant::Direct(direct) = &plan.grant else {
+                panic!("direct plan");
+            };
+            assert!(Boundary::new(direct, expires_at).is_err());
+            PublicVideoScopedIce::new(proof, plan, NOW).unwrap()
+        }
+        let host_proof = PublicControlProof::prepare_sustained(
+            &host, &host_pin, SessionRole::Host, room, [1; 32], scope, NOW,
+        )
+        .unwrap()
+        .into_inner();
+        let viewer_proof = PublicControlProof::prepare_sustained(
+            &viewer, &viewer_pin, SessionRole::Viewer, room, [1; 32], scope, NOW,
+        )
+        .unwrap()
+        .into_inner();
+        let mut host_ice = stage(
+            host_proof,
+            make(SUSTAINED_CONTROL_SCOPE_TTL_SECONDS),
+            scope.expires_at,
+        );
+        let mut viewer_ice = stage(
+            viewer_proof,
+            make(SUSTAINED_CONTROL_SCOPE_TTL_SECONDS),
+            scope.expires_at,
+        );
+        let fingerprint = ["AB"; 32].join(":");
+        let sdp = format!(
+            "v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\n\
+             a=fingerprint:sha-256 {fingerprint}\r\na=group:BUNDLE 0 1\r\n\
+             m=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=mid:0\r\n\
+             a=ice-ufrag:abcd\r\na=ice-pwd:abcdefghijklmnopqrstuv\r\na=setup:actpass\r\n\
+             a=recvonly\r\na=rtcp-mux\r\na=rtpmap:102 H264/90000\r\n\
+             a=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\n\
+             a=candidate:s 1 udp 1 1.1.1.1 50002 typ srflx raddr 0.0.0.0 rport 0\r\n\
+             a=end-of-candidates\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\n\
+             c=IN IP4 0.0.0.0\r\na=mid:1\r\na=ice-ufrag:abcd\r\n\
+             a=ice-pwd:abcdefghijklmnopqrstuv\r\na=setup:actpass\r\na=sendrecv\r\n\
+             a=sctp-port:5000\r\na=max-message-size:65536\r\n",
+        );
+        let signature = viewer_ice
+            .seal_local_sdp(host_ice.challenge().unwrap(), &sdp, NOW)
+            .unwrap();
+        assert_eq!(host_ice.admit_peer_sdp(&sdp, &signature, NOW), Ok(sdp.as_str()));
+
+        let RouteRuntime::Direct(direct) = &host_ice.runtime.physical else {
+            panic!("direct runtime");
+        };
+        let round = direct.boundary.round_deadline.as_ref().unwrap();
+        let media_end = Instant::now() + Duration::from_secs(SUSTAINED_CONTROL_MEDIA_BOUND_SECONDS);
+        assert!(direct.boundary.deadline() > media_end);
+        round.set(media_end).unwrap();
+        assert_eq!(host_ice.runtime.effective_deadline(), media_end);
+        assert!(round.set(media_end + Duration::from_secs(1)).is_err());
+
+        let (grant, config) = make(SUSTAINED_CONTROL_SCOPE_TTL_SECONDS + 1);
+        assert!(crate::direct_policy::DirectGrant::new_control_sustained(grant, &config, NOW).is_err());
+    }
+
     fn offer(candidate: &str) -> String {
         format!(
             "v=0\r\no=- 1 2 IN IP4 0.0.0.0\r\ns=-\r\nt=0 0\r\nm=video 9 UDP/TLS/RTP/SAVPF 102\r\nc=IN IP4 0.0.0.0\r\na=rtcp-mux\r\na=recvonly\r\na=fingerprint:sha-256 {}\r\na=rtpmap:102 H264/90000\r\na=fmtp:102 packetization-mode=1;profile-level-id=42001f\r\na=candidate:{candidate}\r\n",

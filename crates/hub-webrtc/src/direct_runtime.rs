@@ -47,28 +47,42 @@ impl Boundary {
         if !grant.current(now) {
             return Err("DIRECT_BOUNDARY_EXPIRED".into());
         }
-        Self::build(
+        Self::build_bounded(
             grant.local(),
             grant.server().map(Into::into),
             Duration::from_secs(grant.expires_at() - now),
             grant.scope(),
+            Duration::from_secs(grant.boundary_ttl_ceiling()),
         )
     }
+    #[cfg(test)]
     fn build(
         local: Ipv4Addr,
         server: Option<SocketAddr>,
         ttl: Duration,
         scope: uuid::Uuid,
     ) -> Result<Arc<Self>, String> {
-        if ttl.is_zero() || ttl > Duration::from_secs(1800) {
+        Self::build_bounded(local, server, ttl, scope, Duration::from_secs(1800))
+    }
+    fn build_bounded(
+        local: Ipv4Addr,
+        server: Option<SocketAddr>,
+        ttl: Duration,
+        scope: uuid::Uuid,
+        ceiling: Duration,
+    ) -> Result<Arc<Self>, String> {
+        if ttl.is_zero() || ttl > ceiling {
             return Err("DIRECT_BOUNDARY_TTL".into());
         }
+        let deadline = Instant::now()
+            .checked_add(ttl)
+            .ok_or("DIRECT_BOUNDARY_TTL")?;
         Ok(Arc::new(Self {
             local,
             scope,
             server,
             peers: RwLock::new(None),
-            deadline: Instant::now() + ttl,
+            deadline,
             round_deadline: None,
             stopped: AtomicBool::new(false),
             drop_direct: false,
@@ -331,6 +345,23 @@ impl AsyncUdpSocket for Socket {
 mod tests {
     use super::*;
     use crate::direct_policy::{Candidate, Kind};
+
+    #[test]
+    fn direct_boundary_rejects_zero_and_unrepresentable_duration() {
+        let local = Ipv4Addr::LOCALHOST;
+        let scope = uuid::Uuid::new_v4();
+        for ttl in [Duration::ZERO, Duration::from_secs(1801)] {
+            assert_eq!(
+                Boundary::build(local, None, ttl, scope).unwrap_err(),
+                "DIRECT_BOUNDARY_TTL"
+            );
+        }
+        assert_eq!(
+            Boundary::build_bounded(local, None, Duration::MAX, scope, Duration::MAX)
+                .unwrap_err(),
+            "DIRECT_BOUNDARY_TTL"
+        );
+    }
     #[tokio::test]
     async fn exact_udp_peer_atomic_install_revoke_and_faults() {
         let peer = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();

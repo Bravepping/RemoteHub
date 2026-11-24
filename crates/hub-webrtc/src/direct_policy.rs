@@ -11,8 +11,27 @@ pub struct DirectGrant {
     local: Ipv4Addr,
     private_peers: Vec<Ipv4Addr>,
     expires_at: u64,
-    max_ttl: u64,
+    lease: DirectLease,
     scope: uuid::Uuid,
+}
+#[derive(Clone, Copy)]
+enum DirectLease {
+    Standard,
+    #[cfg(feature = "v2-public-control")]
+    Batch,
+    #[cfg(feature = "v2-public-control-sustained")]
+    Sustained,
+}
+impl DirectLease {
+    fn max_seconds(self) -> u64 {
+        match self {
+            Self::Standard => 600,
+            #[cfg(feature = "v2-public-control")]
+            Self::Batch => 1800,
+            #[cfg(feature = "v2-public-control-sustained")]
+            Self::Sustained => crate::public_video::SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
+        }
+    }
 }
 impl DirectGrant {
     /// Business callers must authenticate the session and obtain both native approvals first.
@@ -23,7 +42,7 @@ impl DirectGrant {
         config: &IceConfig,
         now: u64,
     ) -> Result<Self, String> {
-        Self::new_with_ttl(relay, private_peers, config, now, 600)
+        Self::new_with_lease(relay, private_peers, config, now, DirectLease::Standard)
     }
 
     #[cfg(feature = "v2-public-control")]
@@ -35,7 +54,7 @@ impl DirectGrant {
         if config.expires_at != relay.expires_at() {
             return Err("DIRECT_CONFIG_EXPIRY_MISMATCH".into());
         }
-        Self::new_with_ttl(relay, Vec::new(), config, now, 1800)
+        Self::new_with_lease(relay, Vec::new(), config, now, DirectLease::Batch)
     }
 
     #[cfg(feature = "v2-public-control-sustained")]
@@ -47,22 +66,17 @@ impl DirectGrant {
         if config.expires_at != relay.expires_at() {
             return Err("DIRECT_CONFIG_EXPIRY_MISMATCH".into());
         }
-        Self::new_with_ttl(
-            relay,
-            Vec::new(),
-            config,
-            now,
-            crate::public_video::SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
-        )
+        Self::new_with_lease(relay, Vec::new(), config, now, DirectLease::Sustained)
     }
 
-    fn new_with_ttl(
+    fn new_with_lease(
         relay: RelayGrant,
         private_peers: Vec<Ipv4Addr>,
         config: &IceConfig,
         now: u64,
-        max_ttl: u64,
+        lease: DirectLease,
     ) -> Result<Self, String> {
+        let max_ttl = lease.max_seconds();
         config.validate_mode_with_max(&relay, now, IceMode::DirectPreferred, max_ttl)?;
         if !relay.is_current(now)
             || private_peers.len() > 2
@@ -82,7 +96,7 @@ impl DirectGrant {
             local,
             private_peers,
             expires_at,
-            max_ttl,
+            lease,
             scope,
         })
     }
@@ -102,7 +116,7 @@ impl DirectGrant {
             local,
             private_peers: vec![local],
             expires_at,
-            max_ttl: 600,
+            lease: DirectLease::Standard,
             scope: uuid::Uuid::new_v4(),
         })
     }
@@ -114,7 +128,7 @@ impl DirectGrant {
             local: Ipv4Addr::LOCALHOST,
             private_peers: vec![Ipv4Addr::LOCALHOST],
             expires_at: now + 120,
-            max_ttl: 600,
+            lease: DirectLease::Standard,
             scope: uuid::Uuid::new_v4(),
         }
     }
@@ -157,6 +171,10 @@ impl DirectGrant {
             || self.private_peers.contains(&ip)
             || (self.relay.is_some() && public_v4(ip))
     }
+    /// An authenticated grant chooses its own boundary ceiling, never the caller.
+    pub(crate) fn boundary_ttl_ceiling(&self) -> u64 {
+        self.lease.max_seconds()
+    }
     pub fn expires_at(&self) -> u64 {
         self.expires_at
     }
@@ -197,7 +215,7 @@ impl DirectGrant {
                     grant,
                     now,
                     IceMode::DirectPreferred,
-                    self.max_ttl,
+                    self.lease.max_seconds(),
                 )?;
                 if config.expires_at != self.expires_at {
                     return Err("DIRECT_CONFIG_EXPIRY_MISMATCH".into());
