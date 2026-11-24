@@ -389,6 +389,55 @@ mod tests {
     }
 
     #[test]
+    fn next_batch_room_with_same_viewer_requires_fresh_consent_and_rejects_old_bytes() {
+        let (mut old, previous_sink) = owner();
+        approve(&mut old);
+        enqueue(&mut old, 1, true).unwrap();
+        assert_eq!(old.dispatch_next(&SCOPE, Control::Continue), Ok(Some(1)));
+        enqueue(&mut old, 2, false).unwrap();
+        assert_eq!(
+            old.advance(Control::TransportLost),
+            Ok(State::Ended(End::Disconnected))
+        );
+        assert_eq!(old.dispatch_next(&SCOPE, Control::Continue), Ok(None));
+        assert_eq!(previous_sink.borrow().attempts, 1);
+        assert_eq!(previous_sink.borrow().released, 1);
+
+        let scope = InputScope {
+            room: [4; 16],
+            generation: [5; 32],
+            ..SCOPE
+        };
+        let sink = Rc::new(RefCell::new(Fake::default()));
+        let mut next = Owner::view_only(
+            scope,
+            Instant::now() + Duration::from_secs(60),
+            sink.clone(),
+        )
+        .unwrap();
+        let next_prompt = next.begin_local_decision(&scope, Control::Continue).unwrap();
+        // An identical sequence number in the new round cannot inherit the
+        // previous approval, even with the same verified viewer.
+        let previous = v1(1, true);
+        assert_eq!(
+            next.enqueue_v1(&scope, &previous, true, Control::Continue),
+            Err(Error::NotAllowed)
+        );
+        assert_eq!(next.dispatch_next(&scope, Control::Continue), Ok(None));
+        next.complete_local_decision(next_prompt, &scope, true, Control::Continue)
+            .unwrap();
+        // Model bytes carried over to the current channel: the inner room
+        // binding must still reject them after fresh local consent.
+        assert_eq!(
+            next.enqueue_v1(&scope, &previous, true, Control::Continue),
+            Err(Error::Protocol)
+        );
+        assert_eq!(next.state(), State::Ended(End::Revoked));
+        assert_eq!(next.dispatch_next(&scope, Control::Continue), Ok(None));
+        assert_eq!(sink.borrow().attempts, 0);
+    }
+
+    #[test]
     fn replay_or_overflow_never_acks_and_ends_grant() {
         let (mut replay, fake) = owner();
         approve(&mut replay);
