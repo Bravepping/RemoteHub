@@ -8,6 +8,7 @@ use crate::{
     public_fake_input::{
         Error as ProofError, FakeInputProof, FakeInputProofScope, FakeInputTestMode,
     },
+    public_fake_input_profile::{check_pair, Error as ProfileError, SyntheticProfile},
     public_fake_input_sdp_fixture::sanitize,
     public_fake_input_wss_fixture::FixtureWss,
     public_fake_input_wss_wire::{self as wire, Context as WireContext, Frame, Kind},
@@ -373,6 +374,7 @@ enum Case {
     StopBeforeConsent,
     TamperedOffer,
     DisconnectWhilePressed,
+    MismatchedGeneration,
 }
 
 #[cfg(feature = "v2-public-fake-input-loopback-check")]
@@ -411,6 +413,12 @@ async fn wss_loss_after_ack_releases_press_and_prevents_queued_dispatch() {
     exercise(Case::DisconnectWhilePressed).await;
 }
 
+#[cfg(test)]
+#[tokio::test]
+async fn mismatched_profiles_stop_before_wss_frames_or_turn_allocation() {
+    exercise(Case::MismatchedGeneration).await;
+}
+
 async fn close_rtc(host: &Peer, viewer: &Peer, turn: &FixtureTurn) {
     host.runtime.revoke();
     viewer.runtime.revoke();
@@ -434,6 +442,8 @@ async fn close_rtc(host: &Peer, viewer: &Peer, turn: &FixtureTurn) {
 
 async fn exercise(case: Case) {
     tokio::time::timeout(WAIT, async {
+        // Obtain the real fixture CA and ports. WSS handshakes and both
+        // loopback binds happen now, but no diagnostic frames or ICE yet.
         let mut wss = FixtureWss::start().await.unwrap();
         let turn = FixtureTurn::start(20).await.unwrap();
         turn.block_direct(true);
@@ -457,6 +467,66 @@ async fn exercise(case: Case) {
             },
         };
         let mode = FakeInputTestMode::Enabled;
+        let mut viewer_scope = scope;
+        if case == Case::MismatchedGeneration {
+            viewer_scope.generation[0] ^= 1;
+        }
+        let host_fp = host_id.public().fingerprint;
+        let viewer_fp = viewer_id.public().fingerprint;
+        let host_profile = SyntheticProfile {
+            role: SessionRole::Host,
+            mode,
+            scope,
+            local_fingerprint: &host_fp,
+            peer_fingerprint: &viewer_fp,
+        }
+        .validate(SessionRole::Host, &host_id, &host_pin, wall())
+        .unwrap();
+        let viewer_profile = SyntheticProfile {
+            role: SessionRole::Viewer,
+            mode,
+            scope: viewer_scope,
+            local_fingerprint: &viewer_fp,
+            peer_fingerprint: &host_fp,
+        }
+        .validate(SessionRole::Viewer, &viewer_id, &viewer_pin, wall())
+        .unwrap();
+        let preflight = check_pair(&host_profile, &viewer_profile, wall());
+        if case == Case::MismatchedGeneration {
+            assert_eq!(preflight, Err(ProfileError::PairMismatch));
+            let idle = Duration::from_millis(80);
+            let (host, viewer) = tokio::join!(
+                tokio::time::timeout(idle, wss.host.recv()),
+                tokio::time::timeout(idle, wss.viewer.recv()),
+            );
+            assert!(host.is_err() && viewer.is_err());
+            let stats = turn.stats();
+            assert_eq!(stats.allocations_created, 0);
+            assert_eq!(stats.active, 0);
+            assert_eq!(stats.permissions_created, 0);
+            assert_eq!(stats.forwarded_packets, 0);
+            wss.close().await.unwrap();
+            let turn_addr = turn.server();
+            drop(turn);
+            // Drop aborts the test actor; wait for the UDP listener to be
+            // reclaimed rather than assuming abort has run synchronously.
+            tokio::time::timeout(Duration::from_secs(1), async {
+                loop {
+                    match UdpSocket::bind(turn_addr) {
+                        Ok(_) => break,
+                        Err(error) if error.kind() == io::ErrorKind::AddrInUse => {
+                            tokio::time::sleep(Duration::from_millis(5)).await;
+                        }
+                        Err(error) => panic!("could not verify fixture UDP teardown: {error}"),
+                    }
+                }
+            })
+            .await
+            .expect("fixture UDP listener should be released");
+            return;
+        }
+        preflight.unwrap();
+
         let mut host_proof =
             FakeInputProof::prepare(&host_id, &host_pin, SessionRole::Host, scope, mode, wall())
                 .unwrap();
@@ -464,7 +534,7 @@ async fn exercise(case: Case) {
             &viewer_id,
             &viewer_pin,
             SessionRole::Viewer,
-            scope,
+            viewer_scope,
             mode,
             wall(),
         )
