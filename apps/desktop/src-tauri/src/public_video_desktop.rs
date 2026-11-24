@@ -1,9 +1,9 @@
 //! Opt-in native-only public viewing. The webview can choose a role, pull one
 //! admitted AU, or stop; it cannot supply endpoints, keys, captures or input.
 #[cfg(feature = "v2-public-control-desktop")]
-use crate::public_control_desktop::{self, InputState};
+use crate::public_control_desktop::{self, InputState, Timing as ControlTiming};
 use crate::{
-    public_video_capture::{self, CaptureEnd, CaptureOutcome},
+    public_video_capture::{self, CaptureEnd, CaptureOutcome, CaptureTiming},
     public_video_launch::LaunchMode,
     public_video_profile::PublicVideoProfile,
 };
@@ -107,6 +107,9 @@ pub(crate) struct Status {
     #[cfg(feature = "v2-public-control-desktop")]
     #[serde(skip_serializing_if = "Option::is_none")]
     input_state: Option<InputState>,
+    #[cfg(feature = "v2-public-control-desktop")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    round_seconds: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     end_reason: Option<EndReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -140,6 +143,8 @@ impl Status {
             profile_consumed: false,
             #[cfg(feature = "v2-public-control-desktop")]
             input_state: None,
+            #[cfg(feature = "v2-public-control-desktop")]
+            round_seconds: None,
             end_reason: Some(reason),
             elapsed_ms,
         }
@@ -184,6 +189,10 @@ pub(crate) struct Session {
     #[cfg(feature = "v2-public-control-desktop")]
     input_state: watch::Sender<InputState>,
     #[cfg(feature = "v2-public-control-desktop")]
+    round_deadline: watch::Sender<Option<std::time::Instant>>,
+    #[cfg(feature = "v2-public-control-desktop")]
+    round_seconds: std::sync::OnceLock<u16>,
+    #[cfg(feature = "v2-public-control-desktop")]
     input_events: mpsc::Sender<String>,
     #[cfg(feature = "v2-public-control-desktop")]
     input_receiver: Mutex<Option<mpsc::Receiver<String>>>,
@@ -205,6 +214,8 @@ impl Session {
                 profile_consumed: false,
                 #[cfg(feature = "v2-public-control-desktop")]
                 input_state: None,
+                #[cfg(feature = "v2-public-control-desktop")]
+                round_seconds: None,
                 end_reason: None,
                 elapsed_ms: None,
             })
@@ -215,10 +226,21 @@ impl Session {
             #[cfg(feature = "v2-public-control-desktop")]
             input_state: watch::channel(InputState::ViewOnly).0,
             #[cfg(feature = "v2-public-control-desktop")]
+            round_deadline: watch::channel(None).0,
+            #[cfg(feature = "v2-public-control-desktop")]
+            round_seconds: std::sync::OnceLock::new(),
+            #[cfg(feature = "v2-public-control-desktop")]
             input_events,
             #[cfg(feature = "v2-public-control-desktop")]
             input_receiver: Mutex::new(Some(input_receiver)),
         }
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    fn round_elapsed(&self) -> bool {
+        self.round_deadline
+            .borrow()
+            .is_some_and(|deadline| std::time::Instant::now() >= deadline)
     }
 
     fn request_stop(&self) {
@@ -348,6 +370,7 @@ pub(crate) fn public_video_status(
     status.profile_consumed = window.state::<Arc<DesktopVideoState>>().profile_consumed();
     #[cfg(feature = "v2-public-control-desktop")]
     if session.control {
+        status.round_seconds = session.round_seconds.get().copied();
         status.input_state = Some(if status.phase == Phase::Closed {
             InputState::Closed
         } else {
@@ -368,6 +391,7 @@ pub(crate) fn public_control_send_input(
     if !session.control
         || session.role != Role::Viewer
         || *session.stop.borrow()
+        || session.round_elapsed()
         || *session.input_state.borrow() != InputState::Allowed
         || session.status.borrow().phase != Phase::Ready
     {
@@ -422,6 +446,10 @@ pub(crate) async fn public_video_next_frame(
     if session.status.borrow().phase != Phase::Ready {
         return Ok(Response::new(Vec::<u8>::new()));
     }
+    #[cfg(feature = "v2-public-control-desktop")]
+    if session.round_elapsed() {
+        return Ok(Response::new(Vec::<u8>::new()));
+    }
     let mut guard = session
         .receiver
         .try_lock()
@@ -443,6 +471,10 @@ pub(crate) async fn public_video_next_frame(
         Ok(Ok(frame)) => {
             let bytes = frame_bytes(frame)?;
             if *stop.borrow() {
+                return Ok(Response::new(Vec::<u8>::new()));
+            }
+            #[cfg(feature = "v2-public-control-desktop")]
+            if session.round_elapsed() {
                 return Ok(Response::new(Vec::<u8>::new()));
             }
             Ok(Response::new(bytes))
@@ -515,6 +547,21 @@ async fn run(
     if *stop.borrow() {
         return Err(CANCELLED);
     }
+    #[cfg(feature = "v2-public-control-desktop")]
+    let input_timing = if control_launch && profile.is_control_batch() {
+        ControlTiming::Batch
+    } else {
+        ControlTiming::Legacy
+    };
+    let approved_window = public_video_capture::CAPTURE_WINDOW;
+    #[cfg(feature = "v2-public-control-desktop")]
+    let approved_window = if control_launch {
+        let window = input_timing.window();
+        let _ = session.round_seconds.set(window.as_secs() as u16);
+        window
+    } else {
+        approved_window
+    };
     let hwnd = window.hwnd().map_err(|_| "PUBLIC_VIDEO_NATIVE_WINDOW")?.0 as usize;
     let action = if session.role == Role::Host {
         "共享这台电脑的主屏，不含声音"
@@ -528,7 +575,7 @@ async fn run(
     };
     let message = format!(
         "本次仅{action}，共享最多 {} 秒。只允许中继。{input_notice}点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
-        public_video_capture::CAPTURE_WINDOW.as_secs(),
+        approved_window.as_secs(),
         approval.scope.wss, approval.scope.turn, peer.fingerprint(),
     );
     let title = if control_launch {
@@ -619,6 +666,7 @@ async fn run(
                         hwnd,
                         fingerprint,
                         first_video,
+                        input_timing,
                         owner.input_state.clone(),
                     )
                     .await
@@ -633,6 +681,7 @@ async fn run(
                         transport,
                         input_stop,
                         input_receiver,
+                        input_timing,
                         owner.input_state.clone(),
                     )
                     .await
@@ -651,17 +700,37 @@ async fn run(
             };
             let phase = phase_tx.subscribe();
             let actor_stop = stop.clone();
+            let capture_timing = CaptureTiming::VideoOnly(public_video_capture::CAPTURE_WINDOW);
+            #[cfg(feature = "v2-public-control-desktop")]
+            let capture_timing = if control_launch && matches!(input_timing, ControlTiming::Batch) {
+                CaptureTiming::Control(session.round_deadline.subscribe())
+            } else {
+                capture_timing
+            };
             let run_actor = async {
                 #[cfg(feature = "v2-public-control-desktop")]
                 if control_launch {
+                    if matches!(input_timing, ControlTiming::Batch) {
+                        return actor
+                            .run_with_media_and_control_batch(
+                                actor_stop,
+                                phase_tx,
+                                media,
+                                session.round_deadline.clone(),
+                                run_input,
+                            )
+                            .await;
+                    }
                     return actor
                         .run_with_media_and_control(actor_stop, phase_tx, media, run_input)
                         .await;
                 }
                 actor.run_with_media(actor_stop, phase_tx, media).await
             };
-            let (actor_result, capture_result) =
-                tokio::join!(run_actor, public_video_capture::run(sender, stop, phase));
+            let (actor_result, capture_result) = tokio::join!(
+                run_actor,
+                public_video_capture::run(sender, stop, phase, capture_timing)
+            );
             let locally_stopped = *session.stop.borrow();
             Ok(host_outcome(actor_result, capture_result, locally_stopped))
         } else {
@@ -670,6 +739,17 @@ async fn run(
             let actor = async {
                 #[cfg(feature = "v2-public-control-desktop")]
                 if control_launch {
+                    if matches!(input_timing, ControlTiming::Batch) {
+                        return actor
+                            .run_with_media_and_control_batch(
+                                stop,
+                                phase_tx,
+                                media,
+                                session.round_deadline.clone(),
+                                run_input,
+                            )
+                            .await;
+                    }
                     return actor
                         .run_with_media_and_control(stop, phase_tx, media, run_input)
                         .await;

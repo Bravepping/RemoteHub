@@ -107,6 +107,7 @@ impl FixtureRuntime {
                 },
                 endpoint: turn.endpoint.into(),
                 deadline: Instant::now() + WAIT,
+                round_deadline: None,
                 stopped: Arc::new(AtomicBool::new(false)),
             },
             peer: Mutex::new(None),

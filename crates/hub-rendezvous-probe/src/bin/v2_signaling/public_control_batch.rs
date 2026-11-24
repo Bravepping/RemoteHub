@@ -6,9 +6,20 @@ use std::{collections::HashSet, io::Read};
 
 const MAX_ROOMS: usize = 8;
 const MAX_BATCH_BYTES: usize = 16 * 1024;
-const MAX_LIFETIME: Duration = Duration::from_secs(1800);
+pub(super) const MAX_LIFETIME: Duration = Duration::from_secs(1800);
+const BATCH_HEADER: &str = "x-rh-public-control-batch";
+const IMMEDIATE_V1: &str = "immediate-v1";
 const INVALID: &str = "V2_PUBLIC_CONTROL_BATCH_INVALID";
 const FILE: &str = "V2_PUBLIC_CONTROL_BATCH_FILE_REJECTED";
+
+pub(super) fn request_purpose(headers: &HeaderMap) -> Result<bool, &'static str> {
+    let mut values = headers.get_all(BATCH_HEADER).iter();
+    match (values.next(), values.next()) {
+        (None, None) => Ok(false),
+        (Some(value), None) if value == IMMEDIATE_V1 => Ok(true),
+        _ => Err(INVALID),
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,12 +64,14 @@ impl Batch {
         }
         let config: Config<'_> = serde_json::from_slice(bytes).map_err(|_| INVALID)?;
         let lifetime = config.expires_at.checked_sub(wall).ok_or(INVALID)?;
-        if config.version != 1
-            || !(1..=MAX_ROOMS).contains(&config.rooms.len())
-            || !(1..=MAX_LIFETIME.as_secs()).contains(&lifetime)
-        {
+        if !(1..=MAX_LIFETIME.as_secs()).contains(&lifetime) {
             return Err(INVALID);
         }
+        let immediate_start = match (config.version, config.rooms.as_slice()) {
+            (1, rooms) if (1..=MAX_ROOMS).contains(&rooms.len()) => None,
+            (2, rooms) if rooms.len() == MAX_ROOMS => Some(rooms[0].not_before),
+            _ => return Err(INVALID),
+        };
         let sources = PeerSources {
             host: source(config.host_ipv4)?,
             viewer: source(config.viewer_ipv4)?,
@@ -75,10 +88,19 @@ impl Batch {
                 .expires_at
                 .checked_sub(invitation.not_before)
                 .ok_or(INVALID)?;
+            let valid_window = match immediate_start {
+                Some(start) => {
+                    start <= wall
+                        && invitation.not_before == start
+                        && invitation.expires_at == config.expires_at
+                        && (1..=MAX_LIFETIME.as_secs()).contains(&window)
+                }
+                None => (1..=ROOM_LIFETIME.as_secs()).contains(&window),
+            };
             if id.get_version() != Some(uuid::Version::Random)
                 || id.get_variant() != uuid::Variant::RFC4122
                 || id.simple().to_string() != invitation.room
-                || !(1..=ROOM_LIFETIME.as_secs()).contains(&window)
+                || !valid_window
                 || invitation.expires_at <= wall
                 || invitation.expires_at > config.expires_at
                 || !ids.insert(id)
@@ -104,6 +126,7 @@ impl Batch {
                 expires_at: invitation.expires_at,
                 deadline: mono + Duration::from_secs(invitation.expires_at - wall),
                 not_before: Some((invitation.not_before, start)),
+                immediate_batch: immediate_start.is_some(),
             });
             app.active = active.clone();
             rooms.push(Arc::new(app));
@@ -260,6 +283,55 @@ mod tests {
 
     fn parse(value: &Value, wall: u64, mono: Instant) -> Result<Batch, &'static str> {
         Batch::parse(&serde_json::to_vec(value).unwrap(), wall, mono)
+    }
+
+    #[test]
+    fn v2_makes_exactly_eight_independent_rooms_immediately_available() {
+        let start = Instant::now();
+        let mut doc = fixture(WALL, &[0; 8]);
+        doc["version"] = json!(2);
+        for room in doc["rooms"].as_array_mut().unwrap() {
+            room["expires_at"] = json!(WALL + 1800);
+        }
+        let batch = parse(&doc, WALL, start).unwrap();
+        assert_eq!(batch.rooms.len(), 8);
+        for app in &batch.rooms {
+            assert!(app.approval.immediate_batch);
+            assert_eq!(
+                app.approval.deadline_at(WALL, start),
+                Ok(start + Duration::from_secs(1800))
+            );
+            assert!(app.approval.deadline_at(WALL - 1, start).is_err());
+            assert!(app.approval.deadline_at(WALL + 1800, start).is_err());
+        }
+        let mut wrong = doc.clone();
+        wrong["version"] = json!(1);
+        assert!(parse(&wrong, WALL, start).is_err());
+        let mut wrong = doc.clone();
+        wrong["rooms"].as_array_mut().unwrap().pop();
+        assert!(parse(&wrong, WALL, start).is_err());
+        for (field, value) in [
+            ("expires_at", json!(WALL + 1799)),
+            ("not_before", json!(WALL + 1)),
+            ("not_before", json!(WALL - 1)),
+            ("host_token", doc["rooms"][1]["viewer_token"].clone()),
+        ] {
+            let mut wrong = doc.clone();
+            wrong["rooms"][0][field] = value;
+            assert!(parse(&wrong, WALL, start).is_err(), "{field}");
+        }
+    }
+
+    #[test]
+    fn immediate_purpose_header_is_exact_and_not_repeatable() {
+        let mut headers = HeaderMap::new();
+        assert_eq!(request_purpose(&headers), Ok(false));
+        headers.insert(BATCH_HEADER, IMMEDIATE_V1.parse().unwrap());
+        assert_eq!(request_purpose(&headers), Ok(true));
+        headers.append(BATCH_HEADER, IMMEDIATE_V1.parse().unwrap());
+        assert!(request_purpose(&headers).is_err());
+        headers.insert(BATCH_HEADER, "immediate-v2".parse().unwrap());
+        assert!(request_purpose(&headers).is_err());
     }
 
     #[test]

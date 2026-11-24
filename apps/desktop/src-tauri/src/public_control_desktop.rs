@@ -25,7 +25,36 @@ use windows::{
     },
 };
 
-const LIVE_WINDOW: Duration = Duration::from_secs(15);
+pub(crate) const LEGACY_CONTROL_WINDOW: Duration = Duration::from_secs(15);
+const BATCH_CONTROL_WINDOW: Duration = crate::public_video_capture::CONTROL_WINDOW;
+const BAD_DEADLINE: &str = "PUBLIC_CONTROL_ROUND_DEADLINE";
+
+#[derive(Clone, Copy)]
+pub(crate) enum Timing {
+    Legacy,
+    Batch,
+}
+
+impl Timing {
+    pub(crate) fn window(self) -> Duration {
+        match self {
+            Self::Legacy => LEGACY_CONTROL_WINDOW,
+            Self::Batch => BATCH_CONTROL_WINDOW,
+        }
+    }
+
+    fn cutoff(self, transport_deadline: Instant, now: Instant) -> Result<Instant, &'static str> {
+        match self {
+            Self::Legacy => Ok(transport_deadline.min(now + self.window())),
+            // The connection actor supplies the one-shot round cutoff;
+            // opening or answering the second prompt never moves it.
+            Self::Batch if transport_deadline.saturating_duration_since(now) <= self.window() => {
+                Ok(transport_deadline)
+            }
+            Self::Batch => Err(BAD_DEADLINE),
+        }
+    }
+}
 const LOCAL_POLL: Duration = Duration::from_millis(15);
 const ACK_WAIT: Duration = Duration::from_secs(1);
 const VERSION: u8 = 1;
@@ -170,6 +199,7 @@ fn result(outcome: Flow<()>) -> Result<(), &'static str> {
 fn approval_dialog(
     hwnd: usize,
     fingerprint: String,
+    timing: Timing,
 ) -> Result<oneshot::Receiver<bool>, &'static str> {
     if hwnd == 0
         || fingerprint.len() != 64
@@ -182,7 +212,8 @@ fn approval_dialog(
     let (decision, answer) = oneshot::channel();
     tauri::async_runtime::spawn_blocking(move || {
         let message = format!(
-            "此窗口单独批准对方在本台 Windows 操作键鼠，最长 15 秒。不批准则只观看。\n\n已核验对方指纹：\n{fingerprint}\n\n允许后可点「停止」或关窗；也可按 Ctrl+Alt+F12 立即撤销。超时后本次回答失效。\n\n是否允许本次操作？"
+            "此窗口单独批准对方在本台 Windows 操作键鼠，只持续到本轮结束（整轮最长 {} 秒）。不批准则只观看。\n\n已核验对方指纹：\n{fingerprint}\n\n允许后可点「停止」或关窗；也可按 Ctrl+Alt+F12 立即撤销。超时后本次回答失效。\n\n是否允许本次操作？",
+            timing.window().as_secs(),
         );
         let accepted = unsafe {
             MessageBoxW(
@@ -225,6 +256,7 @@ pub(crate) async fn run_host(
     hwnd: usize,
     peer_fingerprint: String,
     mut first_video: watch::Receiver<bool>,
+    timing: Timing,
     status: watch::Sender<InputState>,
 ) -> Result<(), &'static str> {
     status.send_replace(InputState::ViewOnly);
@@ -233,7 +265,7 @@ pub(crate) async fn run_host(
             return Err(ROLE);
         }
         let scope = transport.scope();
-        let until = transport.deadline().min(Instant::now() + LIVE_WINDOW);
+        let until = timing.cutoff(transport.deadline(), Instant::now())?;
         if local_halt(&stop, until, true).is_some() {
             return Ok(());
         }
@@ -258,7 +290,7 @@ pub(crate) async fn run_host(
                 .begin_local_decision(&scope, Control::Continue)
                 .map_err(|error| error.code())?;
             status.send_replace(InputState::Pending);
-            let mut answer = approval_dialog(hwnd, peer_fingerprint)?;
+            let mut answer = approval_dialog(hwnd, peer_fingerprint, timing)?;
             let approved = loop {
                 require_current(&stop, until, true)?;
                 match answer.try_recv() {
@@ -463,15 +495,18 @@ pub(crate) async fn run_viewer(
     mut transport: PublicControlTransport,
     mut stop: watch::Receiver<bool>,
     mut events: mpsc::Receiver<String>,
+    timing: Timing,
     status: watch::Sender<InputState>,
 ) -> Result<(), &'static str> {
     status.send_replace(InputState::ViewOnly);
-    let outcome = if transport.role() == SessionRole::Viewer {
-        let until = transport.deadline().min(Instant::now() + LIVE_WINDOW);
+    let outcome = async {
+        if transport.role() != SessionRole::Viewer {
+            return Err(ROLE.into());
+        }
+        let until = timing.cutoff(transport.deadline(), Instant::now())?;
         viewer_turns(&mut transport, &mut stop, &mut events, &status, until).await
-    } else {
-        Err(ROLE.into())
-    };
+    }
+    .await;
     // No "last send" after stop. Closing the verified channel is the fallback
     // that makes the host release. Voluntary pause may send release_all
     // normally while the grant still exists.
@@ -482,6 +517,26 @@ pub(crate) async fn run_viewer(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn batch_input_uses_the_same_deadline_even_after_a_late_prompt() {
+        let now = Instant::now();
+        let until = now + Duration::from_secs(60);
+        assert_eq!(Timing::Batch.cutoff(until, now), Ok(until));
+        assert_eq!(
+            Timing::Batch.cutoff(until, now + Duration::from_secs(44)),
+            Ok(until)
+        );
+        assert_eq!(
+            Timing::Batch.cutoff(until + Duration::from_secs(1), now),
+            Err(BAD_DEADLINE)
+        );
+        assert_eq!(Timing::Batch.cutoff(until, until), Ok(until));
+        assert_eq!(
+            Timing::Legacy.cutoff(until, now),
+            Ok(now + Duration::from_secs(15))
+        );
+    }
 
     #[test]
     fn only_fresh_explicit_grant_permits_an_unchanged_v1_event() {

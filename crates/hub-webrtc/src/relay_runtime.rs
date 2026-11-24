@@ -7,7 +7,7 @@ use std::{
     pin::Pin,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
     task::{Context, Poll},
     time::{Duration, Instant},
@@ -21,6 +21,7 @@ pub struct RelayRuntime {
     pub(crate) base: PinnedRuntime,
     pub(crate) endpoint: SocketAddr,
     pub(crate) deadline: Instant,
+    pub(crate) round_deadline: Option<Arc<OnceLock<Instant>>>,
     pub(crate) stopped: Arc<AtomicBool>,
 }
 impl Runtime for RelayRuntime {
@@ -39,6 +40,7 @@ impl Runtime for RelayRuntime {
             inner: self.base.wrap_udp_socket(s)?,
             endpoint: self.endpoint,
             deadline: self.deadline,
+            round_deadline: self.round_deadline.clone(),
             stopped: self.stopped.clone(),
             counters: self.base.counters.clone(),
         }))
@@ -84,12 +86,19 @@ struct RelaySocket {
     inner: Arc<dyn AsyncUdpSocket>,
     endpoint: SocketAddr,
     deadline: Instant,
+    round_deadline: Option<Arc<OnceLock<Instant>>>,
     stopped: Arc<AtomicBool>,
     counters: Arc<SocketCounters>,
 }
 impl RelaySocket {
     fn active(&self) -> io::Result<()> {
-        if self.stopped.load(Ordering::Acquire) || Instant::now() >= self.deadline {
+        let deadline = self
+            .round_deadline
+            .as_ref()
+            .and_then(|d| d.get())
+            .copied()
+            .map_or(self.deadline, |d| self.deadline.min(d));
+        if self.stopped.load(Ordering::Acquire) || Instant::now() >= deadline {
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 "RELAY_LEASE_EXPIRED",
@@ -151,6 +160,41 @@ mod tests {
     use super::*;
     use std::net::IpAddr;
     #[tokio::test]
+    async fn tightening_the_outer_socket_invalidates_queued_access_without_actor_stop() {
+        let target = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let endpoint = target.local_addr().unwrap();
+        let deadline = Arc::new(OnceLock::new());
+        let local = endpoint.ip();
+        let runtime = RelayRuntime {
+            base: PinnedRuntime {
+                inner: webrtc::runtime::default_runtime().unwrap(),
+                local,
+                peer: local,
+                counters: Arc::default(),
+            },
+            endpoint,
+            deadline: Instant::now() + Duration::from_secs(90),
+            round_deadline: Some(deadline.clone()),
+            stopped: Arc::default(),
+        };
+        let raw = std::net::UdpSocket::bind((local, 0)).unwrap();
+        raw.set_nonblocking(true).unwrap();
+        let socket = runtime.wrap_udp_socket(raw).unwrap();
+        assert!(socket.send_to(b"before", endpoint).await.is_ok());
+        deadline.set(Instant::now()).unwrap();
+        assert!(!runtime.stopped.load(Ordering::Acquire));
+        assert_eq!(
+            socket.send_to(b"after", endpoint).await.unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+        let mut buffer = [0; 32];
+        assert_eq!(
+            socket.recv_from(&mut buffer).await.unwrap_err().kind(),
+            io::ErrorKind::PermissionDenied
+        );
+    }
+
+    #[tokio::test]
     async fn real_local_udp_enforces_server_port_and_revocation() {
         let server = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
         let wrong = tokio::net::UdpSocket::bind("127.0.0.1:0").await.unwrap();
@@ -167,6 +211,7 @@ mod tests {
             },
             endpoint,
             deadline: Instant::now() + Duration::from_secs(5),
+            round_deadline: None,
             stopped: stopped.clone(),
         };
         let raw = std::net::UdpSocket::bind((local, 0)).unwrap();
@@ -215,6 +260,7 @@ mod tests {
             base: runtime.base,
             endpoint,
             deadline: Instant::now() - Duration::from_millis(1),
+            round_deadline: None,
             stopped: Arc::new(AtomicBool::new(false)),
         };
         let raw = std::net::UdpSocket::bind((local, 0)).unwrap();

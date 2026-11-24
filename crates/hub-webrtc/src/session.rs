@@ -685,6 +685,7 @@ impl Session {
                     + Duration::from_secs(
                         r.config.expires_at.saturating_sub(hub_probe_wire::now()),
                     ),
+                round_deadline: None,
                 stopped: self.relay_stopped.clone(),
             }));
         }

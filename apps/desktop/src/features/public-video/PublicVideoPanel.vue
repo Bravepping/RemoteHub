@@ -9,6 +9,7 @@ import {
 } from './publicControlEvent';
 import {
   PublicVideoSession,
+  type PublicControlRoundSeconds,
   type PublicVideoEndDetail,
   type PublicVideoEndReason,
   type PublicVideoRole,
@@ -28,6 +29,7 @@ const error = ref('');
 const endDetail = ref<PublicVideoEndDetail>();
 const consumed = ref(false);
 const profileUnconfirmed = ref(false);
+const roundSeconds = ref<PublicControlRoundSeconds>();
 const inputState = ref<PublicInputState>('view_only');
 const inputEnabled = ref(false);
 const releasingInput = ref(false);
@@ -227,6 +229,9 @@ onMounted(() => {
         pressedButtons.clear();
       }
     },
+    (seconds) => {
+      roundSeconds.value = seconds;
+    },
   );
 });
 onBeforeUnmount(() => {
@@ -237,8 +242,10 @@ onBeforeUnmount(() => {
 });
 
 function start() {
-  if (role.value && canStart.value)
+  if (role.value && canStart.value) {
+    roundSeconds.value = undefined;
     session?.start(role.value, props.controlAvailable === true);
+  }
 }
 </script>
 
@@ -249,8 +256,11 @@ function start() {
   >
     <h2>{{ controlAvailable ? '公网远控测试' : '公网仅视频会话' }}</h2>
     <p v-if="controlAvailable">
-      双方须先核验完整指纹并批准视频。键鼠需共享端另行原生批准，默认拒绝；最多
-      15 秒，不提供滚轮或无人值守控制。
+      双方须先核验完整指纹并批准视频。键鼠需共享端另行原生批准，只在本轮剩余时间内有效，默认拒绝。不提供滚轮或无人值守控制。
+      <span v-if="roundSeconds !== undefined"
+        >本轮会话最多 {{ roundSeconds }} 秒。</span
+      >
+      <span v-else>本轮为短时会话，时限以原生配置为准。</span>
     </p>
     <p v-else>
       使用应用启动时指定的本机配置。请先到「设备」核验对方的完整指纹。两端均须明确批准，不提供鼠标或键盘控制。
@@ -286,7 +296,7 @@ function start() {
       </span>
     </p>
     <p v-if="consumed && !canStop && state !== 'stopping'">
-      本次启动配置已使用，不能重新连接。请为下一次会话准备新的配置并重新启动应用。
+      本次启动配置已使用，不能重新连接。请用下一轮未使用的配置重新启动应用。
     </p>
     <p v-else-if="profileUnconfirmed">
       无法确认本次启动配置是否仍可用。不会使用旧配置重连。

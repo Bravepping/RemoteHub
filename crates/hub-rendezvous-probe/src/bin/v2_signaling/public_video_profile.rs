@@ -105,6 +105,8 @@ pub(super) struct PublicVideoApproval {
     deadline: Instant,
     #[cfg(feature = "v2-public-control")]
     not_before: Option<(u64, Instant)>,
+    #[cfg(feature = "v2-public-control")]
+    immediate_batch: bool,
 }
 
 impl PublicVideoApproval {
@@ -128,6 +130,8 @@ impl PublicVideoApproval {
             deadline: Instant::now() + remaining(expires_at, now)?,
             #[cfg(feature = "v2-public-control")]
             not_before: None,
+            #[cfg(feature = "v2-public-control")]
+            immediate_batch: false,
         })
     }
 
@@ -184,6 +188,14 @@ impl PublicVideoApproval {
             .is_some_and(|(begin_wall, begin_mono)| wall < begin_wall || mono < begin_mono)
         {
             return Err(EXPIRED);
+        }
+        #[cfg(feature = "v2-public-control")]
+        if self.immediate_batch {
+            let ttl = Duration::from_secs(self.expires_at.saturating_sub(wall));
+            if ttl.is_zero() || ttl > batch::MAX_LIFETIME {
+                return Err(EXPIRED);
+            }
+            return Ok(self.deadline.min(mono + ttl));
         }
         Ok(self.deadline.min(mono + remaining(self.expires_at, wall)?))
     }
@@ -464,6 +476,11 @@ async fn upgrade(
     ws: WebSocketUpgrade,
 ) -> Response {
     #[cfg(feature = "v2-public-control")]
+    let immediate_batch = match batch::request_purpose(&headers) {
+        Ok(immediate) => immediate,
+        Err(_) => return StatusCode::FORBIDDEN.into_response(),
+    };
+    #[cfg(feature = "v2-public-control")]
     if matches!(admission.purpose, Purpose::Control)
         && uri.path_and_query().map(|target| target.as_str()) != Some(admission.purpose.path())
     {
@@ -477,10 +494,13 @@ async fn upgrade(
         _ => return StatusCode::FORBIDDEN.into_response(),
     };
     let eligible = || {
-        admission
-            .rooms
-            .iter()
-            .filter(|app| app.approval.deadline().is_ok() && app.approval.has_source(observed_ip))
+        admission.rooms.iter().filter(|app| {
+            #[cfg(feature = "v2-public-control")]
+            if app.approval.immediate_batch != immediate_batch {
+                return false;
+            }
+            app.approval.deadline().is_ok() && app.approval.has_source(observed_ip)
+        })
     };
     if eligible().next().is_none() {
         return StatusCode::FORBIDDEN.into_response();
@@ -940,9 +960,10 @@ mod tests {
                 .with_no_client_auth(),
         );
 
-        for (purpose, good, viewer, wrong, wrong_path) in [
+        for (purpose, immediate, good, viewer, wrong, wrong_path) in [
             (
                 Purpose::Video,
+                false,
                 &raw_host,
                 &raw_viewer,
                 &control_host,
@@ -950,6 +971,15 @@ mod tests {
             ),
             (
                 Purpose::Control,
+                false,
+                &control_host,
+                &control_viewer,
+                &raw_host,
+                Purpose::Video.path(),
+            ),
+            (
+                Purpose::Control,
+                true,
                 &control_host,
                 &control_viewer,
                 &raw_host,
@@ -957,7 +987,7 @@ mod tests {
             ),
         ] {
             let now = now().unwrap();
-            let approval = PublicVideoApproval::new(
+            let mut approval = PublicVideoApproval::new(
                 purpose,
                 Uuid::new_v4(),
                 PeerSources {
@@ -970,20 +1000,33 @@ mod tests {
                 now,
             )
             .unwrap();
+            approval.immediate_batch = immediate;
             assert_eq!(
                 approval.permitted_role(Ipv4Addr::LOCALHOST.into(), wrong),
                 None
             );
             let (addr, server) =
                 start_tls_router(&ca, "127.0.0.1", public_video_router(approval)).await;
-            for (path, token, expected) in [
-                (wrong_path, good.as_str(), Some(StatusCode::NOT_FOUND)),
+            for (path, token, marker, expected) in [
+                (
+                    wrong_path,
+                    good.as_str(),
+                    immediate,
+                    Some(StatusCode::NOT_FOUND),
+                ),
                 (
                     purpose.path(),
                     wrong.as_str(),
+                    immediate,
                     Some(StatusCode::UNAUTHORIZED),
                 ),
-                (purpose.path(), good.as_str(), None),
+                (
+                    purpose.path(),
+                    good.as_str(),
+                    !immediate,
+                    Some(StatusCode::FORBIDDEN),
+                ),
+                (purpose.path(), good.as_str(), immediate, None),
             ] {
                 let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
                 let mut request = format!("wss://{addr}{path}").into_client_request().unwrap();
@@ -991,6 +1034,11 @@ mod tests {
                     header::AUTHORIZATION,
                     format!("Bearer {token}").parse().unwrap(),
                 );
+                if marker {
+                    request
+                        .headers_mut()
+                        .insert("x-rh-public-control-batch", "immediate-v1".parse().unwrap());
+                }
                 let result = tokio::time::timeout(
                     Duration::from_secs(3),
                     client_async_tls_with_config(

@@ -35,6 +35,8 @@ use zeroize::Zeroizing;
 
 const IO_TIMEOUT: Duration = Duration::from_secs(3);
 const MAX_POLL_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(feature = "public-control")]
+const CONTROL_BATCH_LEASE: Duration = Duration::from_secs(1800);
 const MAX_TRUST_ANCHOR_DER: usize = 64 * 1024;
 
 trait RelayIo: AsyncRead + AsyncWrite + Send + Unpin {}
@@ -198,6 +200,7 @@ pub struct PublicVideoEndpoint {
     relay: SocketAddrV4,
     expires_at: u64,
     deadline: Instant,
+    max_lease: Duration,
 }
 
 impl PublicVideoEndpoint {
@@ -207,13 +210,18 @@ impl PublicVideoEndpoint {
         expires_at: u64,
         now: u64,
     ) -> Result<Self, ClientError> {
+        Self::check_addresses(source, relay)?;
+        Self::with_clock(source, relay, expires_at, now, Instant::now())
+    }
+
+    fn check_addresses(source: Ipv4Addr, relay: SocketAddrV4) -> Result<(), ClientError> {
         if !(source.is_private() || public_unicast(source))
             || !public_unicast(*relay.ip())
             || relay.port() < 1024
         {
             return Err(ClientError::PublicVideoEndpoint);
         }
-        Self::with_clock(source, relay, expires_at, now, Instant::now())
+        Ok(())
     }
 
     fn with_clock(
@@ -223,12 +231,24 @@ impl PublicVideoEndpoint {
         now: u64,
         started_at: Instant,
     ) -> Result<Self, ClientError> {
-        let ttl = approval_remaining(expires_at, now)?;
+        Self::with_lease(source, relay, expires_at, now, started_at, ROOM_LIFETIME)
+    }
+
+    fn with_lease(
+        source: Ipv4Addr,
+        relay: SocketAddrV4,
+        expires_at: u64,
+        now: u64,
+        started_at: Instant,
+        max_lease: Duration,
+    ) -> Result<Self, ClientError> {
+        let ttl = approval_remaining(expires_at, now, max_lease)?;
         Ok(Self {
             source,
             relay,
             expires_at,
             deadline: started_at + ttl,
+            max_lease,
         })
     }
 
@@ -249,7 +269,7 @@ impl PublicVideoEndpoint {
         now: u64,
         monotonic_now: Instant,
     ) -> Result<Instant, ClientError> {
-        let remaining = approval_remaining(self.expires_at, now)?;
+        let remaining = approval_remaining(self.expires_at, now, self.max_lease)?;
         if monotonic_now >= self.deadline {
             return Err(ClientError::PublicVideoExpiry);
         }
@@ -285,6 +305,30 @@ impl PublicControlEndpoint {
     ) -> Result<Self, ClientError> {
         PublicVideoEndpoint::new(source, relay, expires_at, now).map(Self)
     }
+
+    /// Outer signaling invitation for one independently approved test-batch slot.
+    /// This is not the shorter media/input activity deadline.
+    pub fn new_immediate_batch(
+        source: Ipv4Addr,
+        relay: SocketAddrV4,
+        expires_at: u64,
+        now: u64,
+    ) -> Result<Self, ClientError> {
+        PublicVideoEndpoint::check_addresses(source, relay)?;
+        PublicVideoEndpoint::with_lease(
+            source,
+            relay,
+            expires_at,
+            now,
+            Instant::now(),
+            CONTROL_BATCH_LEASE,
+        )
+        .map(Self)
+    }
+
+    pub fn is_immediate_batch(&self) -> bool {
+        self.0.max_lease == CONTROL_BATCH_LEASE
+    }
 }
 
 fn epoch_seconds() -> Result<u64, ClientError> {
@@ -294,9 +338,13 @@ fn epoch_seconds() -> Result<u64, ClientError> {
         .map_err(|_| ClientError::PublicVideoExpiry)
 }
 
-fn approval_remaining(expires_at: u64, now: u64) -> Result<Duration, ClientError> {
+fn approval_remaining(
+    expires_at: u64,
+    now: u64,
+    max_lease: Duration,
+) -> Result<Duration, ClientError> {
     let remaining = Duration::from_secs(expires_at.saturating_sub(now));
-    if remaining.is_zero() || remaining > ROOM_LIFETIME {
+    if remaining.is_zero() || remaining > max_lease {
         return Err(ClientError::PublicVideoExpiry);
     }
     Ok(remaining)
@@ -370,6 +418,14 @@ impl Route<'_> {
             #[cfg(feature = "public-control")]
             Self::PublicControl(..) => PUBLIC_CONTROL_PATH,
             _ => PATH,
+        }
+    }
+
+    fn max_lease(&self) -> Duration {
+        match self {
+            #[cfg(feature = "public-control")]
+            Self::PublicControl(endpoint, _) => endpoint.0.max_lease,
+            _ => ROOM_LIFETIME,
         }
     }
 
@@ -588,7 +644,7 @@ impl LoopbackRelay {
             .max_frame_size(Some(MAX_WIRE))
             .max_message_size(Some(MAX_WIRE));
         let started_at = Instant::now();
-        let deadline = route.checked_deadline(started_at + ROOM_LIFETIME)?;
+        let deadline = route.checked_deadline(started_at + route.max_lease())?;
         let handshake_deadline = deadline.min(started_at + IO_TIMEOUT);
         let socket = timeout_at(handshake_deadline, async {
             // SocketAddr makes the TCP target explicit independently of the HTTP Host.
@@ -615,6 +671,15 @@ impl LoopbackRelay {
             request
                 .headers_mut()
                 .insert(header::AUTHORIZATION, auth_header);
+            #[cfg(feature = "public-control")]
+            if matches!(&route, Route::PublicControl(endpoint, _) if endpoint.is_immediate_batch())
+            {
+                request.headers_mut().insert(
+                    "x-rh-public-control-batch",
+                    HeaderValue::from_static("immediate-v1"),
+                );
+            }
+
             let (socket, _) = client_async_with_config(request, stream, Some(config))
                 .await
                 .map_err(|error| match error {

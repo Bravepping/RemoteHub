@@ -30,6 +30,7 @@ use zeroize::Zeroizing;
 const MAX_FILE: usize = 32 * 1024;
 const MAX_CA_DER: usize = 16 * 1024;
 const MAX_TTL: u64 = 600;
+const MAX_IMMEDIATE_BATCH_TTL: u64 = 1800;
 #[cfg(not(feature = "v2-public-video-60s-test"))]
 const MIN_TURN_TTL: u64 = 60;
 // The extended build must have enough already-approved lease time for
@@ -58,6 +59,7 @@ pub(crate) struct PublicVideoProfile {
     expected_peer_fingerprint: String,
     ca_der: Vec<u8>,
     credentials: Option<SessionInputs>,
+    immediate_batch: bool,
 }
 
 enum Invitation {
@@ -151,6 +153,7 @@ impl PublicVideoProfile {
         let ca_sha256 = parse_hex::<32>(&input.ca_sha256)?;
         let fingerprint = parse_hex::<32>(&input.expected_peer_fingerprint)?;
         let pair_bytes = Zeroizing::new(parse_pairing_key(&input.pairing_key.0)?);
+        let immediate_batch = control && input.version == 2;
         let purpose_ok = if control {
             cfg!(feature = "v2-public-control-desktop")
                 && input.purpose.as_deref() == Some("public-control")
@@ -158,8 +161,12 @@ impl PublicVideoProfile {
         } else {
             input.purpose.is_none()
         };
-        if input.version != 1
+        if (input.version != 1 && !immediate_batch)
             || !purpose_ok
+            || (immediate_batch
+                && (cfg!(feature = "v2-public-video-60s-test")
+                    || room.get_version() != Some(uuid::Version::Random)
+                    || room.get_variant() != uuid::Variant::RFC4122))
             || !matches!(input.mode, IceMode::DirectPreferred | IceMode::RelayOnly)
             || wire_nonce == room
             || *session_nonce == [0; 32]
@@ -181,7 +188,12 @@ impl PublicVideoProfile {
         {
             return Err(INVALID);
         }
-        ensure_fresh(input.expires_at, input.turn_expires_at, now)?;
+        ensure_profile_fresh(
+            input.expires_at,
+            input.turn_expires_at,
+            now,
+            immediate_batch,
+        )?;
 
         let ca_der = STANDARD.decode(input.ca_der_base64).map_err(|_| PIN)?;
         if ca_der.is_empty()
@@ -221,12 +233,17 @@ impl PublicVideoProfile {
             {
                 let token = PublicControlToken::new(input.relay_token.into_string())
                     .map_err(|_| INVALID)?;
-                Invitation::Control(PublicControlWssInvitation::new(
-                    room,
-                    input.role,
-                    input.expires_at,
-                    token,
-                )?)
+                let invitation = if immediate_batch {
+                    PublicControlWssInvitation::new_immediate_batch(
+                        room,
+                        input.role,
+                        input.expires_at,
+                        token,
+                    )?
+                } else {
+                    PublicControlWssInvitation::new(room, input.role, input.expires_at, token)?
+                };
+                Invitation::Control(invitation)
             }
             #[cfg(not(feature = "v2-public-control-desktop"))]
             {
@@ -268,6 +285,7 @@ impl PublicVideoProfile {
             },
             expected_peer_fingerprint: input.expected_peer_fingerprint,
             ca_der,
+            immediate_batch,
             credentials: Some(SessionInputs {
                 invitation,
                 pairing_key,
@@ -280,6 +298,11 @@ impl PublicVideoProfile {
 
     pub(crate) fn approval(&self) -> PublicVideoProfileApproval {
         self.display
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    pub(crate) fn is_control_batch(&self) -> bool {
+        self.immediate_batch
     }
 
     pub(crate) fn expected_peer_fingerprint(&self) -> &str {
@@ -377,10 +400,11 @@ impl PublicVideoProfile {
         }
         let approval = self.display;
         let credentials = self.credentials.as_ref().ok_or(CONSUMED)?;
-        ensure_fresh(
+        ensure_profile_fresh(
             approval.scope.expires_at,
             credentials.ice_config.expires_at,
             now,
+            self.immediate_batch,
         )?;
         let grant = RelayGrant::new(
             RelayTarget {
@@ -397,6 +421,23 @@ impl PublicVideoProfile {
         .map_err(|_| INVALID)?;
         Ok((self.credentials.take().ok_or(CONSUMED)?, grant))
     }
+}
+
+fn ensure_profile_fresh(
+    scope_expires: u64,
+    turn_expires: u64,
+    now: u64,
+    immediate_batch: bool,
+) -> Result<(), &'static str> {
+    if !immediate_batch {
+        return ensure_fresh(scope_expires, turn_expires, now);
+    }
+    if turn_expires != scope_expires
+        || !(MIN_TURN_TTL..=MAX_IMMEDIATE_BATCH_TTL).contains(&scope_expires.saturating_sub(now))
+    {
+        return Err(EXPIRED);
+    }
+    Ok(())
 }
 
 fn ensure_fresh(scope_expires: u64, turn_expires: u64, now: u64) -> Result<(), &'static str> {
@@ -607,6 +648,47 @@ mod tests {
             true
         )
         .is_err());
+    }
+
+    #[cfg(all(
+        feature = "v2-public-control-desktop",
+        not(feature = "v2-public-video-60s-test")
+    ))]
+    #[test]
+    fn immediate_batch_profile_is_control_only_and_uses_one_shared_deadline() {
+        let mut control = fixture();
+        control["purpose"] = json!("public-control");
+        control["mode"] = json!("relay_only");
+        control["relay_token"] = json!(format!("rhctl1-{}", "45".repeat(32)));
+        let parse = |doc: &Value, now| {
+            PublicVideoProfile::parse_with_purpose(&serde_json::to_vec(doc).unwrap(), now, true)
+        };
+        assert!(!parse(&control, NOW).unwrap().is_control_batch());
+        // The immediate transport invitation independently rechecks real
+        // wall time; do not pass the synthetic 1970 fixture clock to it.
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let expiry = now + MAX_IMMEDIATE_BATCH_TTL;
+        control["expires_at"] = json!(expiry);
+        control["turn_expires_at"] = json!(expiry);
+        control["turn_username"] = json!(format!("{expiry}:{ROOM}"));
+        assert!(parse(&control, now).is_err()); // v1 cannot widen its own lease
+        control["version"] = json!(2);
+        assert!(parse(&control, now).unwrap().is_control_batch());
+        assert!(parse_fixture(&control, now).is_err());
+        for (key, value) in [
+            ("mode", json!("direct_preferred")),
+            ("purpose", json!("public-video")),
+            ("relay_token", json!("45".repeat(32))),
+            ("expires_at", json!(expiry + 1)),
+            ("turn_expires_at", json!(expiry - 1)),
+        ] {
+            let mut wrong = control.clone();
+            wrong[key] = value;
+            assert!(parse(&wrong, now).is_err(), "{key}");
+        }
     }
 
     #[test]

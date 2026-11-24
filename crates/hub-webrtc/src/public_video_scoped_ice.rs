@@ -112,8 +112,20 @@ impl fmt::Debug for ScopedRuntime {
 }
 
 impl ScopedRuntime {
+    fn effective_deadline(&self) -> Instant {
+        match &self.physical {
+            RouteRuntime::Relay(relay) => relay
+                .round_deadline
+                .as_ref()
+                .and_then(|d| d.get())
+                .copied()
+                .map_or(self.deadline, |d| self.deadline.min(d)),
+            RouteRuntime::Direct(_) => self.deadline,
+        }
+    }
+
     fn active(&self) -> bool {
-        !self.stopped.load(Ordering::Acquire) && Instant::now() < self.deadline
+        !self.stopped.load(Ordering::Acquire) && Instant::now() < self.effective_deadline()
     }
 
     fn stop(&self) {
@@ -332,6 +344,10 @@ impl<'a> PublicVideoScopedIce<'a> {
         };
         let inner = webrtc::runtime::default_runtime().ok_or(SETUP)?;
         let stopped = Arc::new(AtomicBool::new(false));
+        #[cfg(feature = "v2-public-control")]
+        let round_deadline = proof.is_immediate_control_batch().then(Arc::default);
+        #[cfg(not(feature = "v2-public-control"))]
+        let round_deadline = None;
         let physical = match &plan.grant {
             RouteGrant::Direct(grant) => RouteRuntime::Direct(DirectRuntime {
                 inner,
@@ -346,6 +362,7 @@ impl<'a> PublicVideoScopedIce<'a> {
                 },
                 endpoint: grant.target().turn.into(),
                 deadline,
+                round_deadline,
                 stopped: stopped.clone(),
             }),
         };
@@ -435,6 +452,10 @@ impl<'a> PublicVideoScopedIce<'a> {
         }
         let deadline = Instant::now() + Duration::from_secs(120);
         let stopped = Arc::new(AtomicBool::new(false));
+        #[cfg(feature = "v2-public-control")]
+        let round_deadline = proof.is_immediate_control_batch().then(Arc::default);
+        #[cfg(not(feature = "v2-public-control"))]
+        let round_deadline = None;
         Ok(Self {
             proof,
             runtime: Arc::new(ScopedRuntime {
@@ -447,6 +468,7 @@ impl<'a> PublicVideoScopedIce<'a> {
                     },
                     endpoint: endpoint.into(),
                     deadline,
+                    round_deadline,
                     stopped: stopped.clone(),
                 }),
                 peers: RwLock::new(None),
@@ -620,7 +642,7 @@ impl<'a> PublicVideoScopedIce<'a> {
         let gathered = self.gathered.as_mut().ok_or(DRIVER)?;
         let wait = self
             .runtime
-            .deadline
+            .effective_deadline()
             .saturating_duration_since(Instant::now())
             .min(DRIVER_WAIT);
         let sdp = timeout(wait, async {
@@ -828,6 +850,11 @@ impl<'a> PublicVideoScopedIce<'a> {
         Ok(Some(packet))
     }
 
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn is_immediate_control_batch(&self) -> bool {
+        self.proof.is_immediate_control_batch()
+    }
+
     /// Poll for the one reliable device-bound control channel. A video-only
     /// owner cannot create or claim it. The returned transport does not grant
     /// consent; its lifetime shares the revocable video/ICE boundary.
@@ -933,7 +960,7 @@ impl<'a> PublicVideoScopedIce<'a> {
 
     fn wait(&self, limit: Duration) -> Duration {
         self.runtime
-            .deadline
+            .effective_deadline()
             .saturating_duration_since(Instant::now())
             .min(limit)
     }
@@ -1068,7 +1095,18 @@ impl PublicControlTransport {
     }
 
     pub fn deadline(&self) -> Instant {
-        self.runtime.deadline
+        self.runtime.effective_deadline()
+    }
+
+    pub(crate) fn begin_immediate_batch_round(&self) -> Result<Instant, &'static str> {
+        self.current()?;
+        let RouteRuntime::Relay(relay) = &self.runtime.physical else {
+            return Err(CONTROL_INVALID);
+        };
+        let round = relay.round_deadline.as_ref().ok_or(CONTROL_INVALID)?;
+        let until = (Instant::now() + Duration::from_secs(60)).min(self.runtime.deadline);
+        round.set(until).map_err(|_| CONTROL_INVALID)?;
+        Ok(until)
     }
 
     fn current(&self) -> Result<(), &'static str> {

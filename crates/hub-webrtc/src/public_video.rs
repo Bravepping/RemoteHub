@@ -30,6 +30,8 @@ enum Purpose {
     Video,
     #[cfg(feature = "v2-public-control")]
     Control,
+    #[cfg(feature = "v2-public-control")]
+    ControlBatch,
 }
 
 impl Purpose {
@@ -38,17 +40,20 @@ impl Purpose {
             Self::Video => b"RemoteHub.V2.public-video-only.sdp.v1\0",
             #[cfg(feature = "v2-public-control")]
             Self::Control => b"RemoteHub.V2.public-control-turn.sdp.v1\0",
+            #[cfg(feature = "v2-public-control")]
+            Self::ControlBatch => b"RemoteHub.V2.public-control-turn.immediate-batch.sdp.v1\0",
         }
     }
 
     fn check(self, scope: PublicVideoScope, now: u64) -> Result<u8, &'static str> {
-        let mode = scope.checked_mode(now)?;
         match self {
             #[cfg(feature = "v2-public-control")]
             Self::Control if scope.mode != IceMode::RelayOnly => {
                 Err("PUBLIC_CONTROL_TURN_REQUIRED")
             }
-            _ => Ok(mode),
+            #[cfg(feature = "v2-public-control")]
+            Self::ControlBatch => scope.checked_control_batch(now),
+            _ => scope.checked_mode(now),
         }
     }
 }
@@ -67,6 +72,18 @@ pub struct PublicVideoScope {
 
 impl PublicVideoScope {
     pub(crate) fn checked_mode(self, now: u64) -> Result<u8, &'static str> {
+        self.checked_mode_with_max(now, MAX_SCOPE_TTL)
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn checked_control_batch(self, now: u64) -> Result<u8, &'static str> {
+        if self.mode != IceMode::RelayOnly {
+            return Err("PUBLIC_CONTROL_TURN_REQUIRED");
+        }
+        self.checked_mode_with_max(now, 1800)
+    }
+
+    fn checked_mode_with_max(self, now: u64, max_ttl: u64) -> Result<u8, &'static str> {
         let mode = match self.mode {
             IceMode::DirectPreferred => 1,
             IceMode::RelayOnly => 2,
@@ -83,7 +100,7 @@ impl PublicVideoScope {
         {
             return Err(INVALID_SCOPE);
         }
-        if !(1..=MAX_SCOPE_TTL).contains(&self.expires_at.saturating_sub(now)) {
+        if !(1..=max_ttl).contains(&self.expires_at.saturating_sub(now)) {
             return Err(EXPIRED);
         }
         Ok(mode)
@@ -179,7 +196,7 @@ impl<'a> PublicVideoProof<'a> {
             local,
             purpose,
             #[cfg(feature = "v2-public-control")]
-            control_scope: matches!(purpose, Purpose::Control).then(|| {
+            control_scope: matches!(purpose, Purpose::Control | Purpose::ControlBatch).then(|| {
                 crate::input_approval::InputScope {
                     room: *room.as_bytes(),
                     generation: session_nonce,
@@ -209,6 +226,11 @@ impl<'a> PublicVideoProof<'a> {
         self.control_scope
     }
 
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn is_immediate_control_batch(&self) -> bool {
+        matches!(self.purpose, Purpose::ControlBatch)
+    }
+
     #[cfg(feature = "v2-public-video-wss")]
     fn validate_exact_sdp(
         &self,
@@ -219,7 +241,10 @@ impl<'a> PublicVideoProof<'a> {
         match self.purpose {
             Purpose::Video => crate::public_video_ice::validate(sdp, self.scope, answer, now),
             #[cfg(feature = "v2-public-control")]
-            Purpose::Control => crate::public_control_sdp::validate(sdp, self.scope, answer, now),
+            Purpose::Control | Purpose::ControlBatch => {
+                self.purpose.check(self.scope, now)?;
+                crate::public_control_sdp::validate(sdp, self.scope, answer, now)
+            }
         }
     }
 
@@ -231,6 +256,12 @@ impl<'a> PublicVideoProof<'a> {
         config: IceConfig,
         now: u64,
     ) -> Result<PublicVideoIcePlan, &'static str> {
+        #[cfg(feature = "v2-public-control")]
+        if self.is_immediate_control_batch() {
+            return PublicVideoIcePlan::prepare_control_batch(
+                self.scope, self.room, grant, config, now,
+            );
+        }
         PublicVideoIcePlan::prepare(self.scope, self.room, grant, config, now)
     }
 
@@ -371,6 +402,28 @@ impl<'a> PublicControlProof<'a> {
         .map(Self)
     }
 
+    pub fn prepare_immediate_batch(
+        local: &'a Identity,
+        pinned_peer: &VerifiedPeer,
+        role: SessionRole,
+        room: Uuid,
+        generation: [u8; 32],
+        scope: PublicVideoScope,
+        now: u64,
+    ) -> Result<Self, &'static str> {
+        PublicVideoProof::prepare_for(
+            local,
+            pinned_peer,
+            role,
+            room,
+            generation,
+            scope,
+            now,
+            Purpose::ControlBatch,
+        )
+        .map(Self)
+    }
+
     pub fn challenge(&self) -> Option<SessionChallenge> {
         self.0.challenge()
     }
@@ -381,12 +434,10 @@ impl<'a> PublicControlProof<'a> {
         sdp: &str,
         now: u64,
     ) -> Result<[u8; 64], &'static str> {
-        if let Err(error) = crate::public_control_sdp::validate(
-            sdp,
-            self.0.scope,
-            self.0.role == SessionRole::Host,
-            now,
-        ) {
+        if let Err(error) = self
+            .0
+            .validate_exact_sdp(sdp, self.0.role == SessionRole::Host, now)
+        {
             self.fail();
             return Err(error);
         }
@@ -403,12 +454,8 @@ impl<'a> PublicControlProof<'a> {
     ) -> Result<(), &'static str> {
         let result = (|| {
             self.0.open(sdp, signature, now)?;
-            crate::public_control_sdp::validate(
-                sdp,
-                self.0.scope,
-                self.0.role == SessionRole::Viewer,
-                now,
-            )?;
+            self.0
+                .validate_exact_sdp(sdp, self.0.role == SessionRole::Viewer, now)?;
             Ok(())
         })();
         result.inspect_err(|_| self.fail())

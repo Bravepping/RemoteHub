@@ -147,6 +147,7 @@ it('shows the separate native permission on the control host without offering lo
   await panel.get('button').trigger('click');
   await flushPromises();
   expect(panel.text()).toContain('公网远控测试');
+  expect(panel.text()).toContain('时限以原生配置为准');
   expect(panel.text()).toContain('等待本机独立的原生键鼠确认，默认选择“否”。');
   expect(panel.text()).not.toContain('启用本次键鼠');
   expect(invoke).not.toHaveBeenCalledWith(
@@ -155,6 +156,53 @@ it('shows the separate native permission on the control host without offering lo
   );
   shell.unmount();
 });
+
+it.each([
+  [15, '本轮会话最多 15 秒'],
+  [60, '本轮会话最多 60 秒'],
+  ['60', '时限以原生配置为准'],
+  [30, '时限以原生配置为准'],
+] as const)(
+  'shows only a trusted native round limit through runtime refresh (%s)',
+  async (seconds, label) => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === 'public_video_start') return generation;
+      if (command === 'public_video_status')
+        return {
+          phase: 'starting',
+          round_seconds: seconds,
+          profile_consumed: true,
+        };
+      return undefined;
+    });
+    const shell = mount(DesktopShell, {
+      props: {
+        runtime: { ...runtime, public_control_available: true },
+        loading: false,
+        readStatus: 'ready',
+        feedback: '',
+      },
+      global: { stubs: { HomePage: true } },
+    });
+    const panel = shell.getComponent(PublicVideoPanel);
+    expect(panel.text()).not.toContain('本轮会话最多');
+    expect(panel.text()).toContain('键鼠需共享端另行原生批准');
+    await panel.get('input[value="host"]').setValue(true);
+    await panel.get('button').trigger('click');
+    await flushPromises();
+    expect(panel.text()).toContain(label);
+    await shell.setProps({
+      runtime: undefined,
+      loading: true,
+      readStatus: 'refreshing',
+    });
+    expect(panel.text()).toContain(label);
+    expect(invoke).not.toHaveBeenCalledWith('public_video_stop', {
+      generation,
+    });
+    shell.unmount();
+  },
+);
 
 it.each([
   { flag: true, message: '本次启动配置已使用', canRestart: false },

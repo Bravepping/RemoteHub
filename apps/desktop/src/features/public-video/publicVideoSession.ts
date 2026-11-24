@@ -32,6 +32,7 @@ export type PublicVideoState =
   | 'cleanup_unconfirmed';
 
 type NativePhase = 'starting' | 'ready' | 'stopping' | 'closed';
+export type PublicControlRoundSeconds = 15 | 60;
 export type PublicVideoEndReason =
   'local_stop' | 'peer_left' | 'capture_limit' | 'capture_ended' | 'failed';
 export interface PublicVideoEndDetail {
@@ -208,6 +209,7 @@ interface NativeStatus {
   end?: PublicVideoEndDetail;
   profileConsumed?: boolean;
   inputState?: PublicInputState;
+  roundSeconds?: PublicControlRoundSeconds;
 }
 
 function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
@@ -219,6 +221,7 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
     elapsed_ms?: unknown;
     profile_consumed?: unknown;
     input_state?: unknown;
+    round_seconds?: unknown;
   };
   if (
     !Object.hasOwn(parsed, 'phase') ||
@@ -242,6 +245,10 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
   const input = Object.hasOwn(parsed, 'input_state')
     ? parsed.input_state
     : undefined;
+  const seconds = Object.hasOwn(parsed, 'round_seconds')
+    ? parsed.round_seconds
+    : undefined;
+  if (seconds === 15 || seconds === 60) result.roundSeconds = seconds;
   if (
     input === 'view_only' ||
     input === 'pending' ||
@@ -342,6 +349,9 @@ export class PublicVideoSession {
       state: PublicInputState,
       enabled: boolean,
       releasing: boolean,
+    ) => void = () => {},
+    private readonly onRound: (
+      seconds: PublicControlRoundSeconds,
     ) => void = () => {},
   ) {}
 
@@ -533,6 +543,8 @@ export class PublicVideoSession {
           );
           if (!this.active(run)) return;
           const current = parseStatus(nativeStatus, run.role);
+          if (run.controlLaunch && current.roundSeconds !== undefined)
+            this.onRound(current.roundSeconds);
           this.observeProfile(run, current);
           statusAt = performance.now();
           if (current.error !== undefined || current.end?.reason === 'failed') {

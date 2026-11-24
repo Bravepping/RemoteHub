@@ -160,9 +160,45 @@ fn video_and_control_bearers_and_public_endpoint_policy_are_separate() {
 #[cfg(feature = "public-control")]
 #[tokio::test]
 async fn control_wss_uses_only_its_exact_path_and_bearer_after_verified_tls() {
+    control_wss(false).await;
+}
+
+#[cfg(feature = "public-control")]
+#[tokio::test]
+async fn immediate_batch_header_is_exact_and_only_on_explicit_control_endpoint() {
+    let source = "192.168.2.3".parse().unwrap();
+    let relay = "93.184.216.34:8443".parse().unwrap();
+    assert!(PublicVideoEndpoint::new(source, relay, 701, 100).is_err());
+    assert!(PublicControlEndpoint::new(source, relay, 701, 100).is_err());
+    assert!(PublicControlEndpoint::new_immediate_batch(source, relay, 1900, 100).is_ok());
+    assert!(PublicControlEndpoint::new_immediate_batch(source, relay, 1901, 100).is_err());
+    control_wss(true).await;
+}
+
+#[cfg(feature = "public-control")]
+async fn control_wss(immediate_batch: bool) {
     let (trust, tls) = tls_fixture("127.0.0.1");
     let listener = TcpListener::bind((LOCALHOST, 0)).await.unwrap();
-    let endpoint = PublicControlEndpoint(loopback_endpoint(&listener));
+    let endpoint = if immediate_batch {
+        // Test fixture only; actual client constructors still refuse loopback.
+        let SocketAddr::V4(address) = listener.local_addr().unwrap() else {
+            unreachable!()
+        };
+        let now = epoch_seconds().unwrap();
+        PublicControlEndpoint(
+            PublicVideoEndpoint::with_lease(
+                LOCALHOST,
+                address,
+                now + 900,
+                now,
+                Instant::now(),
+                CONTROL_BATCH_LEASE,
+            )
+            .unwrap(),
+        )
+    } else {
+        PublicControlEndpoint(loopback_endpoint(&listener))
+    };
     let token_text = format!("rhctl1-{}", "a".repeat(64));
     let token = PublicControlToken::new(token_text.clone()).unwrap();
     let room_text = "b".repeat(32);
@@ -177,6 +213,13 @@ async fn control_wss_uses_only_its_exact_path_and_bearer_after_verified_tls() {
                 PUBLIC_CONTROL_PATH
             );
             assert!(request.headers()[header::AUTHORIZATION] == format!("Bearer {token_text}"));
+            assert_eq!(
+                request
+                    .headers()
+                    .get("x-rh-public-control-batch")
+                    .map(|v| v.to_str().unwrap()),
+                immediate_batch.then_some("immediate-v1")
+            );
             Ok(response)
         })
         .await

@@ -134,13 +134,35 @@ impl IceConfig {
         now: u64,
         expected: IceMode,
     ) -> Result<(), String> {
+        self.validate_mode_with_max(grant, now, expected, 600)
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub fn validate_immediate_control_batch(
+        &self,
+        grant: &RelayGrant,
+        now: u64,
+    ) -> Result<(), String> {
+        if self.expires_at != grant.expires_at {
+            return Err("ICE_SESSION_EXPIRED_OR_MISMATCHED".into());
+        }
+        self.validate_mode_with_max(grant, now, IceMode::RelayOnly, 1800)
+    }
+
+    fn validate_mode_with_max(
+        &self,
+        grant: &RelayGrant,
+        now: u64,
+        expected: IceMode,
+        max_ttl: u64,
+    ) -> Result<(), String> {
         if self.mode != expected {
             return Err("ICE_MODE_NOT_ENABLED_IN_P006A".into());
         }
         if !grant.is_current(now)
             || self.session_id != grant.session
             || self.expires_at > grant.expires_at
-            || !(60..=600).contains(&self.expires_at.saturating_sub(now))
+            || !(60..=max_ttl).contains(&self.expires_at.saturating_sub(now))
         {
             return Err("ICE_SESSION_EXPIRED_OR_MISMATCHED".into());
         }
@@ -176,6 +198,20 @@ impl IceConfig {
         now: u64,
     ) -> Result<RTCConfiguration, String> {
         self.validate(grant, now)?;
+        Ok(self.relay_configuration())
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn immediate_control_batch_configuration(
+        &self,
+        grant: &RelayGrant,
+        now: u64,
+    ) -> Result<RTCConfiguration, String> {
+        self.validate_immediate_control_batch(grant, now)?;
+        Ok(self.relay_configuration())
+    }
+
+    fn relay_configuration(&self) -> RTCConfiguration {
         let servers = self
             .ice_servers
             .iter()
@@ -185,10 +221,10 @@ impl IceConfig {
                 credential: s.credential.clone(),
             })
             .collect();
-        Ok(RTCConfigurationBuilder::default()
+        RTCConfigurationBuilder::default()
             .with_ice_servers(servers)
             .with_ice_transport_policy(RTCIceTransportPolicy::Relay)
-            .build())
+            .build()
     }
 }
 

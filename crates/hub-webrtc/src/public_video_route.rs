@@ -25,6 +25,8 @@ pub struct PublicVideoIcePlan {
     local: Ipv4Addr,
     pub(crate) grant: RouteGrant,
     config: IceConfig,
+    #[cfg(feature = "v2-public-control")]
+    immediate_control_batch: bool,
 }
 
 impl PublicVideoIcePlan {
@@ -35,6 +37,37 @@ impl PublicVideoIcePlan {
         config: IceConfig,
         now: u64,
     ) -> Result<Self, &'static str> {
+        Self::prepare_for(scope, room, relay, config, now, false)
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn prepare_control_batch(
+        scope: PublicVideoScope,
+        room: Uuid,
+        relay: RelayGrant,
+        config: IceConfig,
+        now: u64,
+    ) -> Result<Self, &'static str> {
+        Self::prepare_for(scope, room, relay, config, now, true)
+    }
+
+    fn prepare_for(
+        scope: PublicVideoScope,
+        room: Uuid,
+        relay: RelayGrant,
+        config: IceConfig,
+        now: u64,
+        immediate_control_batch: bool,
+    ) -> Result<Self, &'static str> {
+        #[cfg(not(feature = "v2-public-control"))]
+        let _ = immediate_control_batch;
+        #[cfg(feature = "v2-public-control")]
+        if immediate_control_batch {
+            scope.checked_control_batch(now)?;
+        } else {
+            scope.checked_mode(now)?;
+        }
+        #[cfg(not(feature = "v2-public-control"))]
         scope.checked_mode(now)?;
         let target = relay.target();
         if relay.session() != room.to_string()
@@ -50,6 +83,17 @@ impl PublicVideoIcePlan {
         if config.ice_servers.len() != 1 || config.ice_servers[0].urls.len() != 1 {
             return Err(CONFIG_MISMATCH);
         }
+        #[cfg(feature = "v2-public-control")]
+        if immediate_control_batch {
+            config
+                .validate_immediate_control_batch(&relay, now)
+                .map_err(|_| CONFIG_MISMATCH)?;
+        } else {
+            config
+                .validate_mode(&relay, now, scope.mode)
+                .map_err(|_| CONFIG_MISMATCH)?;
+        }
+        #[cfg(not(feature = "v2-public-control"))]
         config
             .validate_mode(&relay, now, scope.mode)
             .map_err(|_| CONFIG_MISMATCH)?;
@@ -65,6 +109,8 @@ impl PublicVideoIcePlan {
             local: target.local,
             grant,
             config,
+            #[cfg(feature = "v2-public-control")]
+            immediate_control_batch,
         })
     }
 
@@ -87,6 +133,17 @@ impl PublicVideoIcePlan {
     /// Rechecks expiry and configuration at point of use. The session owner
     /// must still enforce the runtime socket boundary and stop by this expiry.
     pub fn rtc_configuration(&self, now: u64) -> Result<RTCConfiguration, &'static str> {
+        #[cfg(feature = "v2-public-control")]
+        if self.immediate_control_batch {
+            self.scope.checked_control_batch(now)?;
+            let RouteGrant::Relay(ref grant) = self.grant else {
+                return Err(CONFIG_MISMATCH);
+            };
+            return self
+                .config
+                .immediate_control_batch_configuration(grant, now)
+                .map_err(|_| CONFIG_MISMATCH);
+        }
         self.scope.checked_mode(now)?;
         match &self.grant {
             RouteGrant::Direct(grant) => grant.configuration(Some(&self.config), now),

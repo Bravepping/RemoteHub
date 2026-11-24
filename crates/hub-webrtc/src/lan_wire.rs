@@ -77,6 +77,7 @@ enum Domain {
     #[cfg(feature = "v2-public-control")]
     PublicControl {
         room: String,
+        immediate_batch: bool,
     },
 }
 
@@ -141,6 +142,7 @@ impl Codec {
         nonce: String,
         room: &str,
         host: bool,
+        immediate_batch: bool,
     ) -> Result<Self, String> {
         if room.len() != 32
             || !room
@@ -153,7 +155,10 @@ impl Codec {
             key,
             nonce,
             host,
-            Domain::PublicControl { room: room.into() },
+            Domain::PublicControl {
+                room: room.into(),
+                immediate_batch,
+            },
         )
     }
 
@@ -196,8 +201,15 @@ impl Codec {
                 &frame.payload,
             )),
             #[cfg(feature = "v2-public-control")]
-            Domain::PublicControl { room } => serde_json::to_vec(&(
-                "RemoteHub.Signaling.public-control.v1",
+            Domain::PublicControl {
+                room,
+                immediate_batch,
+            } => serde_json::to_vec(&(
+                if *immediate_batch {
+                    "RemoteHub.Signaling.public-control.immediate-batch.v1"
+                } else {
+                    "RemoteHub.Signaling.public-control.v1"
+                },
                 room,
                 frame.version,
                 &frame.direction,
@@ -299,19 +311,35 @@ mod tests {
         let mut video_host =
             Codec::new_v2(key.clone(), TEST_NONCE.into(), TEST_ROOM, true).unwrap();
         let mut control_viewer =
-            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, false).unwrap();
+            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, false, false)
+                .unwrap();
         let video = video_host
             .encode("host_challenge", "fixed proof".into())
             .unwrap();
         assert!(control_viewer.accept(video).is_err());
 
         let mut control_host =
-            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, true).unwrap();
+            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, true, false)
+                .unwrap();
+        let mut batch_viewer =
+            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, false, true)
+                .unwrap();
+        let mut batch_host =
+            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, true, true)
+                .unwrap();
         let mut video_viewer = Codec::new_v2(key, TEST_NONCE.into(), TEST_ROOM, false).unwrap();
         let control = control_host
             .encode("host_challenge", "fixed proof".into())
             .unwrap();
         let copy = serde_json::from_slice(&serde_json::to_vec(&control).unwrap()).unwrap();
+        let batch_copy = serde_json::from_slice(&serde_json::to_vec(&control).unwrap()).unwrap();
+        assert!(batch_viewer.accept(batch_copy).is_err());
+        let batch = batch_host
+            .encode("host_challenge", "fixed proof".into())
+            .unwrap();
+        let control_copy = serde_json::from_slice(&serde_json::to_vec(&batch).unwrap()).unwrap();
+        assert!(control_viewer.accept(control_copy).is_err());
+        assert!(batch_viewer.accept(batch).is_ok());
         assert!(video_viewer.accept(copy).is_err());
         assert_eq!(
             control_viewer.accept(control).unwrap(),

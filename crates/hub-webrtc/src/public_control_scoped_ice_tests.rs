@@ -14,6 +14,15 @@ mod local_turn;
 
 #[tokio::test]
 async fn control_and_video_share_the_same_signed_loopback_turn_path() {
+    exchange(false).await;
+}
+
+#[tokio::test]
+async fn immediate_control_batch_clamps_the_live_shared_boundary_once() {
+    exchange(true).await;
+}
+
+async fn exchange(batch: bool) {
     timeout(Duration::from_secs(20), async {
         let relay = local_turn::FixtureTurn::start(15).await.unwrap();
         relay.block_direct(true);
@@ -25,14 +34,19 @@ async fn control_and_video_share_the_same_signed_loopback_turn_path() {
             turn: SocketAddrV4::new(local_turn::RELAY_LABEL, relay.server().port()),
             relay_ports: local_turn::RELAY_PORTS,
             mode: IceMode::RelayOnly,
-            expires_at: now + 90,
+            expires_at: now + if batch { 1800 } else { 90 },
         };
         let host_identity = Identity::generate_ephemeral().unwrap();
         let viewer_identity = Identity::generate_ephemeral().unwrap();
         let proof = |local, remote: &Identity, role| {
             let remote_pub = remote.public();
             let peer = local_identity_pin(local, &remote_pub);
-            PublicControlProof::prepare(local, &peer, role, room, [3; 32], scope, now)
+            let prepare = if batch {
+                PublicControlProof::prepare_immediate_batch
+            } else {
+                PublicControlProof::prepare
+            };
+            prepare(local, &peer, role, room, [3; 32], scope, now)
                 .unwrap()
                 .into_inner()
         };
@@ -79,6 +93,19 @@ async fn control_and_video_share_the_same_signed_loopback_turn_path() {
             host_channel.scope().viewer_key,
             viewer_identity.public().public_key
         );
+
+        if batch {
+            let host_deadline = host_channel.begin_immediate_batch_round().unwrap();
+            let viewer_deadline = viewer_channel.begin_immediate_batch_round().unwrap();
+            assert!(host_deadline <= std::time::Instant::now() + Duration::from_secs(60));
+            assert_eq!(host_deadline, host_channel.deadline());
+            assert_eq!(viewer_deadline, viewer_channel.deadline());
+            assert_eq!(host_deadline, host.runtime.effective_deadline());
+            assert_eq!(viewer_deadline, viewer.runtime.effective_deadline());
+            assert!(host_channel.begin_immediate_batch_round().is_err());
+        } else {
+            assert!(host_channel.begin_immediate_batch_round().is_err());
+        }
 
         let host_video = host.checked_track(wall_seconds().unwrap()).await.unwrap();
         assert!(host_video.pair == host_channel.pair);

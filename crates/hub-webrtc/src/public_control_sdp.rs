@@ -1,7 +1,7 @@
 //! Strict native-only TURN SDP for the separately signed product-control
 //! purpose. Exactly one bundled H.264 section and one reliable SCTP media
 //! section may use the same signed transport description.
-use crate::{direct_policy::Candidate, ice_policy::IceMode, public_video::PublicVideoScope};
+use crate::{direct_policy::Candidate, public_video::PublicVideoScope};
 
 pub(crate) const ERROR: &str = "PUBLIC_CONTROL_SDP_POLICY";
 const VIDEO: &str = "m=video 9 UDP/TLS/RTP/SAVPF 102";
@@ -81,7 +81,7 @@ pub(crate) fn validate(
     answer: bool,
     now: u64,
 ) -> Result<Vec<Candidate>> {
-    if scope.mode != IceMode::RelayOnly
+    if scope.checked_control_batch(now).is_err()
         || sdp.len() > hub_identity::session::MAX_SIGNAL_BYTES
         || !sdp.is_ascii()
         || !sdp.starts_with("v=0\r\n")
@@ -208,7 +208,7 @@ pub(crate) fn validate(
     // video-only public entry point. Its codec parser doesn't inspect BUNDLE;
     // both exact ordered MIDs were checked above against signed bytes.
     let candidates =
-        crate::public_video_ice::validate(video_only, scope, answer, now).map_err(|_| ERROR)?;
+        crate::public_video_ice::validate_shape(video_only, scope, answer).map_err(|_| ERROR)?;
     if candidates.len() != 1 {
         return Err(ERROR);
     }
@@ -218,7 +218,10 @@ pub(crate) fn validate(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::public_video::{PublicControlProof, PublicVideoProof};
+    use crate::{
+        ice_policy::IceMode,
+        public_video::{PublicControlProof, PublicVideoProof},
+    };
     use hub_identity::{pairing::PairingCandidate, session::SessionRole, Identity};
     use uuid::Uuid;
 
@@ -373,6 +376,73 @@ mod tests {
             .unwrap();
         assert!(control_host.verify(&offer, &video_signed, NOW).is_err());
         assert!(control_host.challenge().is_none());
+
+        let mut batch_host = PublicControlProof::prepare_immediate_batch(
+            &host,
+            &host_pin,
+            SessionRole::Host,
+            room,
+            GENERATION,
+            scope(),
+            NOW,
+        )
+        .unwrap();
+        let ordinary_signed = viewer_p()
+            .seal(batch_host.challenge().unwrap(), &offer, NOW)
+            .unwrap();
+        assert!(batch_host.verify(&offer, &ordinary_signed, NOW).is_err());
+
+        let far_scope = PublicVideoScope {
+            expires_at: NOW + 1800,
+            ..scope()
+        };
+        let mut expire_host = PublicControlProof::prepare_immediate_batch(
+            &host,
+            &host_pin,
+            SessionRole::Host,
+            room,
+            GENERATION,
+            far_scope,
+            NOW,
+        )
+        .unwrap();
+        let mut expire_viewer = PublicControlProof::prepare_immediate_batch(
+            &viewer,
+            &viewer_pin,
+            SessionRole::Viewer,
+            room,
+            GENERATION,
+            far_scope,
+            NOW,
+        )
+        .unwrap();
+        let signature = expire_viewer
+            .seal(expire_host.challenge().unwrap(), &offer, NOW)
+            .unwrap();
+        expire_host.verify(&offer, &signature, NOW).unwrap();
+        assert!(PublicControlProof::prepare(
+            &host,
+            &host_pin,
+            SessionRole::Host,
+            room,
+            GENERATION,
+            far_scope,
+            NOW
+        )
+        .is_err());
+        assert!(PublicControlProof::prepare_immediate_batch(
+            &host,
+            &host_pin,
+            SessionRole::Host,
+            room,
+            GENERATION,
+            PublicVideoScope {
+                expires_at: NOW + 1801,
+                ..scope()
+            },
+            NOW
+        )
+        .is_err());
 
         let mut wrong_generation = PublicControlProof::prepare(
             &host,

@@ -14,11 +14,41 @@ use tokio::{
     time::{timeout, Instant},
 };
 
+const STANDARD_WINDOW: Duration = Duration::from_secs(15);
+
 #[cfg(not(feature = "v2-public-video-60s-test"))]
-pub(crate) const CAPTURE_WINDOW: Duration = Duration::from_secs(15);
+pub(crate) const CAPTURE_WINDOW: Duration = STANDARD_WINDOW;
 #[cfg(feature = "v2-public-video-60s-test")]
 pub(crate) const CAPTURE_WINDOW: Duration =
     Duration::from_secs(hub_encode_win::PUBLIC_VIDEO_TEST_SECONDS as u64);
+#[cfg(feature = "v2-public-control-desktop")]
+pub(crate) const CONTROL_WINDOW: Duration =
+    Duration::from_secs(hub_encode_win::PUBLIC_VIDEO_TEST_SECONDS as u64);
+
+// Video-only runs keep their own existing startup clock. The control build
+// only accepts an actor-established deadline and never starts another clock.
+pub(crate) enum CaptureTiming {
+    VideoOnly(Duration),
+    #[cfg(feature = "v2-public-control-desktop")]
+    Control(watch::Receiver<Option<MonotonicInstant>>),
+}
+
+impl From<Duration> for CaptureTiming {
+    fn from(window: Duration) -> Self {
+        Self::VideoOnly(window)
+    }
+}
+
+impl CaptureTiming {
+    fn is_extended(&self) -> bool {
+        match self {
+            Self::VideoOnly(window) => *window > STANDARD_WINDOW,
+            #[cfg(feature = "v2-public-control-desktop")]
+            Self::Control(_) => true,
+        }
+    }
+}
+
 const PATH_WAIT: Duration = Duration::from_secs(25);
 const SEND_WAIT: Duration = Duration::from_millis(250);
 // Bound the native handoff before packetization allocates anything. The scoped
@@ -121,13 +151,14 @@ pub(crate) async fn run(
     sender: ScopedVideoSender,
     stop: watch::Receiver<bool>,
     phase: watch::Receiver<ScopedWssState>,
+    timing: CaptureTiming,
 ) -> CaptureOutcome {
     use hub_encode_win::stream::{self, StreamReport};
     use hub_encode_win::EncodeError;
-    #[cfg(not(feature = "v2-public-video-60s-test"))]
     use {hub_encode_win::EncoderConfig, std::sync::atomic::AtomicBool};
 
-    run_with_source(sender, stop, phase, CAPTURE_WINDOW, |handoff| {
+    let extended = timing.is_extended();
+    run_with_source(sender, stop, phase, timing, move |handoff| {
         let mut handoff_error = None;
         let publish = |_: &StreamReport| handoff.mark_started();
         let sink = |frame| {
@@ -136,20 +167,36 @@ pub(crate) async fn run(
                 EncodeError::Native(code.into())
             })
         };
-        #[cfg(not(feature = "v2-public-video-60s-test"))]
-        let result = stream::run(
-            true,
-            EncoderConfig {
-                seconds: CAPTURE_WINDOW.as_secs() as u32,
-                ..Default::default()
-            },
-            handoff.cancel.clone(),
-            &AtomicBool::new(false),
-            publish,
-            sink,
-        );
-        #[cfg(feature = "v2-public-video-60s-test")]
-        let result = stream::run_public_video_60s_test(true, handoff.cancel.clone(), publish, sink);
+        let standard = |sink| {
+            stream::run(
+                true,
+                EncoderConfig {
+                    seconds: STANDARD_WINDOW.as_secs() as u32,
+                    ..Default::default()
+                },
+                handoff.cancel.clone(),
+                &AtomicBool::new(false),
+                publish,
+                sink,
+            )
+        };
+        #[cfg(any(
+            feature = "v2-public-video-60s-test",
+            feature = "v2-public-control-desktop"
+        ))]
+        let result = if extended {
+            stream::run_public_video_60s_test(true, handoff.cancel.clone(), publish, sink)
+        } else {
+            standard(sink)
+        };
+        #[cfg(not(any(
+            feature = "v2-public-video-60s-test",
+            feature = "v2-public-control-desktop"
+        )))]
+        let result = {
+            let _ = extended;
+            standard(sink)
+        };
         result
             .map(|_| ())
             .map_err(|error| handoff_error.unwrap_or_else(|| safe_encoder_error(&error)))
@@ -161,13 +208,14 @@ async fn run_with_source(
     mut sender: ScopedVideoSender,
     mut stop: watch::Receiver<bool>,
     mut phase: watch::Receiver<ScopedWssState>,
-    capture_window: Duration,
+    timing: impl Into<CaptureTiming>,
     source: impl FnOnce(FrameHandoff) -> Result<(), &'static str> + Send + 'static,
 ) -> CaptureOutcome {
+    let setup_deadline = Instant::now() + PATH_WAIT;
     tokio::select! {
         biased;
         _ = stop.wait_for(|&stop| stop) => return CaptureOutcome::before_start(Ok(CaptureEnd::LocalStop)),
-        phase = timeout(PATH_WAIT, phase.wait_for(|state| verified(state) || *state == ScopedWssState::Closed)) => {
+        phase = tokio::time::timeout_at(setup_deadline, phase.wait_for(|state| verified(state) || *state == ScopedWssState::Closed)) => {
             match phase {
                 Ok(Ok(state)) if verified(&state) => (),
                 Ok(_) => return CaptureOutcome::before_start(Ok(CaptureEnd::TransportEnded)),
@@ -176,8 +224,33 @@ async fn run_with_source(
         }
     }
 
+    let timing = timing.into();
+    let extended = timing.is_extended();
+    let deadline = match timing {
+        CaptureTiming::VideoOnly(window) => Instant::now() + window,
+        #[cfg(feature = "v2-public-control-desktop")]
+        CaptureTiming::Control(mut round) => {
+            let candidate = tokio::select! {
+                biased;
+                _ = stop.wait_for(|&stop| stop) => return CaptureOutcome::before_start(Ok(CaptureEnd::LocalStop)),
+                _ = phase.wait_for(|state| !verified(state)) => return CaptureOutcome::before_start(Ok(CaptureEnd::TransportEnded)),
+                event = tokio::time::timeout_at(setup_deadline, round.wait_for(Option::is_some)) => match event {
+                    Ok(Ok(value)) => value.expect("wait_for checked Some"),
+                    Ok(Err(_)) => return CaptureOutcome::before_start(Ok(CaptureEnd::TransportEnded)),
+                    Err(_) => return CaptureOutcome::before_start(Err(PATH_TIMEOUT)),
+                },
+            };
+            let now = MonotonicInstant::now();
+            if candidate <= now {
+                return CaptureOutcome::before_start(Ok(CaptureEnd::Limit));
+            }
+            if candidate - now > CONTROL_WINDOW {
+                return CaptureOutcome::before_start(Err("PUBLIC_CONTROL_ROUND_DEADLINE"));
+            }
+            Instant::from_std(candidate)
+        }
+    };
     let cancel = CancelOnDrop(StopToken::default());
-    let deadline = Instant::now() + capture_window;
     let started = Arc::new(OnceLock::new());
     let (tx, mut rx) = mpsc::channel(1);
     let handoff = FrameHandoff {
@@ -199,15 +272,28 @@ async fn run_with_source(
         (result, MonotonicInstant::now())
     });
 
-    #[cfg(not(feature = "v2-public-video-60s-test"))]
-    let mut packetizer = Packetizer::default();
-    #[cfg(feature = "v2-public-video-60s-test")]
-    let mut packetizer = Packetizer::public_video_60s_test();
+    #[cfg(any(
+        feature = "v2-public-video-60s-test",
+        feature = "v2-public-control-desktop"
+    ))]
+    let mut packetizer = if extended {
+        Packetizer::public_video_60s_test()
+    } else {
+        Packetizer::default()
+    };
+    #[cfg(not(any(
+        feature = "v2-public-video-60s-test",
+        feature = "v2-public-control-desktop"
+    )))]
+    let mut packetizer = {
+        let _ = extended;
+        Packetizer::default()
+    };
     let end = tokio::select! {
         biased;
         _ = stop.wait_for(|&stop| stop) => Ok(CaptureEnd::LocalStop),
-        _ = phase.wait_for(|state| !verified(state)) => Ok(CaptureEnd::TransportEnded),
         _ = tokio::time::sleep_until(deadline) => Ok(CaptureEnd::Limit),
+        _ = phase.wait_for(|state| !verified(state)) => Ok(CaptureEnd::TransportEnded),
         result = async {
             while let Some(frame) = rx.recv().await {
                 let packets = packetizer.packets(frame, 102).map_err(|_| BAD_AU)?;
@@ -482,6 +568,75 @@ mod tests {
                 .elapsed_ms
                 .expect("only source readiness starts the clock");
             assert!((1..=window.as_millis() as u64).contains(&elapsed));
+        }
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    #[tokio::test]
+    async fn batch_capture_requires_actor_deadline_and_never_restarts_it() {
+        let (_media, sender) = ScopedVideoMedia::host();
+        let (_stop, stop_rx) = watch::channel(false);
+        let (_phase, phase_rx) = watch::channel(path());
+        let (round, round_rx) = watch::channel(None);
+        let (ready, started) = tokio::sync::oneshot::channel();
+        let capture = run_with_source(
+            sender,
+            stop_rx,
+            phase_rx,
+            CaptureTiming::Control(round_rx),
+            |handoff| {
+                handoff.mark_started();
+                let _ = ready.send(handoff.deadline);
+                while handoff.is_live() {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                Ok(())
+            },
+        );
+        tokio::pin!(capture);
+        assert!(timeout(Duration::from_millis(10), &mut capture)
+            .await
+            .is_err());
+        let deadline = MonotonicInstant::now() + Duration::from_millis(180);
+        round.send_replace(Some(deadline));
+
+        let observe = async {
+            assert_eq!(started.await.unwrap(), deadline);
+            round.send_replace(Some(deadline + Duration::from_secs(30)));
+        };
+        let (outcome, ()) = timeout(Duration::from_secs(2), async {
+            tokio::join!(capture, observe)
+        })
+        .await
+        .expect("capture must stop at the actor's first deadline");
+        assert_eq!(outcome.end, Ok(CaptureEnd::Limit));
+        assert!(outcome.elapsed_ms.is_some_and(|ms| ms <= 180));
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    #[tokio::test]
+    async fn batch_capture_rejects_out_of_bounds_deadline_without_starting() {
+        for (deadline, expected) in [
+            (MonotonicInstant::now(), Ok(CaptureEnd::Limit)),
+            (
+                MonotonicInstant::now() + Duration::from_secs(70),
+                Err("PUBLIC_CONTROL_ROUND_DEADLINE"),
+            ),
+        ] {
+            let (_media, sender) = ScopedVideoMedia::host();
+            let (_stop, stop_rx) = watch::channel(false);
+            let (_phase, phase_rx) = watch::channel(path());
+            let (_round, round_rx) = watch::channel(Some(deadline));
+            let outcome = run_with_source(
+                sender,
+                stop_rx,
+                phase_rx,
+                CaptureTiming::Control(round_rx),
+                |_| panic!("an invalid or already elapsed actor deadline must not start capture"),
+            )
+            .await;
+            assert_eq!(outcome.end, expected);
+            assert_eq!(outcome.elapsed_ms, None);
         }
     }
 

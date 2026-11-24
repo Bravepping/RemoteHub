@@ -133,6 +133,7 @@ pub struct PublicControlWssInvitation {
     role: Role,
     expires_at: u64,
     token: PublicControlToken,
+    immediate_batch: bool,
 }
 
 #[cfg(feature = "v2-public-control")]
@@ -151,7 +152,22 @@ impl PublicControlWssInvitation {
             role,
             expires_at,
             token,
+            immediate_batch: false,
         })
+    }
+    pub fn new_immediate_batch(
+        room: Uuid,
+        role: Role,
+        expires_at: u64,
+        token: PublicControlToken,
+    ) -> Result<Self, &'static str> {
+        let mut invitation = Self::new(room, role, expires_at, token)?;
+        let now = wall_seconds()?;
+        if !(1..=1800).contains(&expires_at.saturating_sub(now)) {
+            return Err("PUBLIC_CONTROL_WSS_INVITATION");
+        }
+        invitation.immediate_batch = true;
+        Ok(invitation)
     }
 }
 
@@ -264,6 +280,8 @@ struct ProofContext<'a> {
     scope_deadline: Instant,
     #[cfg(feature = "v2-public-control")]
     control: bool,
+    #[cfg(feature = "v2-public-control")]
+    immediate_batch: bool,
 }
 
 pub struct PendingPublicVideoWss<'a> {
@@ -359,6 +377,8 @@ impl<'a> PublicVideoWss<'a> {
                     scope_deadline: route.deadline,
                     #[cfg(feature = "v2-public-control")]
                     control: false,
+                    #[cfg(feature = "v2-public-control")]
+                    immediate_batch: false,
                 },
                 host_registered: false,
             },
@@ -382,7 +402,12 @@ impl<'a> PublicVideoWss<'a> {
         {
             return Err("PUBLIC_CONTROL_WSS_SCOPE");
         }
-        scope.checked_mode(now)?;
+        let immediate_batch = cfg.invitation.immediate_batch;
+        if immediate_batch {
+            scope.checked_control_batch(now)?;
+        } else {
+            scope.checked_mode(now)?;
+        }
         cfg.peer
             .session_binding(
                 &cfg.local_identity.public(),
@@ -399,14 +424,33 @@ impl<'a> PublicVideoWss<'a> {
         }
         let trust =
             LoopbackTlsTrust::from_ca_der(cfg.ca_der).map_err(|_| "PUBLIC_CONTROL_WSS_CA_PIN")?;
-        let plan = PublicVideoIcePlan::prepare(scope, room, cfg.relay_grant, cfg.ice_config, now)?;
+        let plan = if immediate_batch {
+            PublicVideoIcePlan::prepare_control_batch(
+                scope,
+                room,
+                cfg.relay_grant,
+                cfg.ice_config,
+                now,
+            )?
+        } else {
+            PublicVideoIcePlan::prepare(scope, room, cfg.relay_grant, cfg.ice_config, now)?
+        };
         let deadline = Instant::now() + Duration::from_secs(plan.expires_at() - now);
-        let endpoint = hub_signal_v2::PublicControlEndpoint::new(
-            plan.local_ip(),
-            scope.wss,
-            plan.expires_at(),
-            now,
-        )
+        let endpoint = if immediate_batch {
+            hub_signal_v2::PublicControlEndpoint::new_immediate_batch(
+                plan.local_ip(),
+                scope.wss,
+                plan.expires_at(),
+                now,
+            )
+        } else {
+            hub_signal_v2::PublicControlEndpoint::new(
+                plan.local_ip(),
+                scope.wss,
+                plan.expires_at(),
+                now,
+            )
+        }
         .map_err(|_| "PUBLIC_CONTROL_WSS_ENDPOINT")?;
         let room_id = RoomId::new(room.simple().to_string()).map_err(relay_error)?;
         let relay = timeout_at(
@@ -436,6 +480,7 @@ impl<'a> PublicVideoWss<'a> {
                     scope,
                     scope_deadline: deadline,
                     control: true,
+                    immediate_batch,
                 },
                 host_registered: false,
             },
@@ -488,6 +533,8 @@ impl<'a> PublicVideoWss<'a> {
                 scope_deadline,
                 #[cfg(feature = "v2-public-control")]
                 control: false,
+                #[cfg(feature = "v2-public-control")]
+                immediate_batch: false,
             },
             host_registered: false,
         })
@@ -916,7 +963,12 @@ impl<'a> PendingPublicVideoWss<'a> {
         let proof = prepare_video()?;
         #[cfg(feature = "v2-public-control")]
         let proof = if ctx.control {
-            crate::public_video::PublicControlProof::prepare(
+            let prepare = if ctx.immediate_batch {
+                crate::public_video::PublicControlProof::prepare_immediate_batch
+            } else {
+                crate::public_video::PublicControlProof::prepare
+            };
+            prepare(
                 ctx.identity,
                 ctx.peer,
                 session_role(ctx.role),
@@ -1232,17 +1284,60 @@ impl ScopedPublicVideoWss<'_> {
     /// Reporting failure to stop is preferred to silently losing that result.
     #[cfg(feature = "v2-public-control")]
     pub async fn run_with_media_and_control<F, Owner>(
-        mut self,
-        mut stop: watch::Receiver<bool>,
+        self,
+        stop: watch::Receiver<bool>,
         state: watch::Sender<ScopedWssState>,
-        mut media: ScopedVideoMedia,
+        media: ScopedVideoMedia,
         start_control: F,
     ) -> Result<ScopedWssEnd, &'static str>
     where
         F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
         Owner: std::future::Future<Output = Result<(), &'static str>>,
     {
-        if !self.control || media.role() != self.wire.role {
+        self.run_control_inner(stop, state, media, None, start_control)
+            .await
+    }
+
+    /// Run one v2 immediate-batch slot. A 60-second cap starts when both
+    /// signed transport tuples are live locally; capture receives the same
+    /// cutoff before its media pump or input owner is allowed to start.
+    #[cfg(feature = "v2-public-control")]
+    pub async fn run_with_media_and_control_batch<F, Owner>(
+        self,
+        stop: watch::Receiver<bool>,
+        state: watch::Sender<ScopedWssState>,
+        media: ScopedVideoMedia,
+        round_deadline: watch::Sender<Option<std::time::Instant>>,
+        start_control: F,
+    ) -> Result<ScopedWssEnd, &'static str>
+    where
+        F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
+        Owner: std::future::Future<Output = Result<(), &'static str>>,
+    {
+        self.run_control_inner(stop, state, media, Some(round_deadline), start_control)
+            .await
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    async fn run_control_inner<F, Owner>(
+        mut self,
+        mut stop: watch::Receiver<bool>,
+        state: watch::Sender<ScopedWssState>,
+        mut media: ScopedVideoMedia,
+        round_deadline: Option<watch::Sender<Option<std::time::Instant>>>,
+        start_control: F,
+    ) -> Result<ScopedWssEnd, &'static str>
+    where
+        F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
+        Owner: std::future::Future<Output = Result<(), &'static str>>,
+    {
+        if !self.control
+            || media.role() != self.wire.role
+            || self.ice.is_immediate_control_batch() != round_deadline.is_some()
+            || round_deadline
+                .as_ref()
+                .is_some_and(|tx| tx.borrow().is_some())
+        {
             return Err(PROTOCOL);
         }
         state.send_replace(ScopedWssState::Negotiating);
@@ -1290,11 +1385,29 @@ impl ScopedPublicVideoWss<'_> {
                     Err(_) => break 'session Err("PUBLIC_CONTROL_CHANNEL_TIMEOUT"),
                 },
             };
+            let round_end = match &round_deadline {
+                Some(tx) => {
+                    let deadline = match control.begin_immediate_batch_round() {
+                        Ok(deadline) => deadline,
+                        Err(error) => break 'session Err(error),
+                    };
+                    tx.send_replace(Some(deadline));
+                    Some(deadline)
+                }
+                None => None,
+            };
+            let round_elapsed = async {
+                match round_end {
+                    Some(deadline) => tokio::time::sleep_until(Instant::from_std(deadline)).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
             let (owner_stop, owner_signal) = watch::channel(false);
             let mut owner = std::pin::pin!(start_control(control, owner_signal));
             let (terminal, owner_finished) = tokio::select! {
                 biased;
                 () = stop_requested(&mut stop) => (Ok(ScopedWssEnd::Stopped), false),
+                () = round_elapsed => (Ok(ScopedWssEnd::Stopped), false),
                 end = &mut watcher => (end, false),
                 end = media.pump(ice, &state) => (end.map(|()| ScopedWssEnd::Stopped), false),
                 end = &mut owner => (end.map(|()| ScopedWssEnd::Stopped), true),

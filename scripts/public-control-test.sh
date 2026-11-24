@@ -117,7 +117,7 @@ ttl=600
 format=()
 if [[ $1 == new ]]; then
     ttl=1800
-    format=(--batch)
+    format=(--batch --all-ready)
 fi
 openssl x509 -in "$cert/wss.pem" -noout -checkend "$((ttl + 60))"
 

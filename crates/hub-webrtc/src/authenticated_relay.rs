@@ -158,8 +158,14 @@ impl AuthenticatedLoopbackRelay {
         nonce: String,
         trust: &LoopbackTlsTrust,
     ) -> Result<Self, ClientError> {
-        let codec = Codec::new_public_control(key, nonce, room.as_str(), role == Role::Host)
-            .map_err(|_| ClientError::Protocol)?;
+        let codec = Codec::new_public_control(
+            key,
+            nonce,
+            room.as_str(),
+            role == Role::Host,
+            endpoint.is_immediate_batch(),
+        )
+        .map_err(|_| ClientError::Protocol)?;
         let relay = connect_public_control_wss(endpoint, token, room, role, trust).await?;
         Ok(Self {
             relay: Some(RelayConnection::PublicControl(relay)),

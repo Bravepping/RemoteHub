@@ -35,6 +35,14 @@ pub(crate) fn validate(
     now: u64,
 ) -> Result<Vec<Candidate>, &'static str> {
     scope.checked_mode(now)?;
+    validate_shape(sdp, scope, answer)
+}
+
+pub(super) fn validate_shape(
+    sdp: &str,
+    scope: PublicVideoScope,
+    answer: bool,
+) -> Result<Vec<Candidate>, &'static str> {
     if sdp.len() > MAX_SIGNAL_BYTES || !sdp.is_ascii() || !canonical_lines(sdp) {
         return Err(POLICY);
     }
