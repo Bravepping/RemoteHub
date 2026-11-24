@@ -31,6 +31,28 @@ const BACKPRESSURE: &str = "PUBLIC_VIDEO_CAPTURE_BACKPRESSURE";
 const STOPPED: &str = "PUBLIC_VIDEO_CAPTURE_STOPPED";
 const TRANSPORT_CLOSED: &str = "PUBLIC_VIDEO_MEDIA_CLOSED";
 
+#[cfg(windows)]
+fn safe_encoder_error(error: &hub_encode_win::EncodeError) -> &'static str {
+    use hub_capture_win::CaptureError;
+    use hub_encode_win::EncodeError;
+    match error {
+        EncodeError::Busy => "PUBLIC_VIDEO_CAPTURE_BUSY",
+        EncodeError::Capture(CaptureError::AccessLost) => "PUBLIC_VIDEO_CAPTURE_DISPLAY_CHANGED",
+        EncodeError::Capture(CaptureError::NoFrames)
+        | EncodeError::Timeout("live first DXGI frame") => "PUBLIC_VIDEO_CAPTURE_NO_DESKTOP_FRAME",
+        EncodeError::Capture(_) => "PUBLIC_VIDEO_CAPTURE_DESKTOP_UNAVAILABLE",
+        EncodeError::Unsupported(_) => "PUBLIC_VIDEO_CAPTURE_H264_UNSUPPORTED",
+        EncodeError::Windows(_) => "PUBLIC_VIDEO_CAPTURE_MEDIA_FOUNDATION_FAILED",
+        EncodeError::Bitstream(_) => BAD_AU,
+        EncodeError::Native(code) => match code.as_str() {
+            "CANCELLED_DURING_SETUP" => STOPPED,
+            "LIVE_DISPLAY_RESIZED" => "PUBLIC_VIDEO_CAPTURE_DISPLAY_CHANGED",
+            _ => "PUBLIC_VIDEO_CAPTURE_ENCODER_FAILED",
+        },
+        _ => "PUBLIC_VIDEO_CAPTURE_ENCODER_FAILED",
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum CaptureEnd {
     LocalStop,
@@ -93,7 +115,7 @@ pub(crate) async fn run(
         let result = stream::run_public_video_60s_test(true, handoff.cancel.clone(), publish, sink);
         result
             .map(|_| ())
-            .map_err(|_| handoff_error.unwrap_or("PUBLIC_VIDEO_CAPTURE_ENCODER_FAILED"))
+            .map_err(|error| handoff_error.unwrap_or_else(|| safe_encoder_error(&error)))
     })
     .await
 }
@@ -287,6 +309,29 @@ mod tests {
             15
         };
         assert_eq!(CAPTURE_WINDOW.as_secs(), expected);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn capture_error_codes_do_not_expose_native_error_details() {
+        use hub_capture_win::CaptureError;
+        use hub_encode_win::EncodeError;
+        assert_eq!(
+            safe_encoder_error(&EncodeError::Capture(CaptureError::AccessLost)),
+            "PUBLIC_VIDEO_CAPTURE_DISPLAY_CHANGED"
+        );
+        assert_eq!(
+            safe_encoder_error(&EncodeError::Timeout("live first DXGI frame")),
+            "PUBLIC_VIDEO_CAPTURE_NO_DESKTOP_FRAME"
+        );
+        assert_eq!(
+            safe_encoder_error(&EncodeError::Unsupported("private detail".into())),
+            "PUBLIC_VIDEO_CAPTURE_H264_UNSUPPORTED"
+        );
+        assert_eq!(
+            safe_encoder_error(&EncodeError::Native("private native detail".into())),
+            "PUBLIC_VIDEO_CAPTURE_ENCODER_FAILED"
+        );
     }
 
     #[tokio::test]
