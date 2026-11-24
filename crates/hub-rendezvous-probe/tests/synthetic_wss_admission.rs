@@ -34,6 +34,7 @@ use hub_webrtc::{
         Error as ProofError, FakeInputProof, FakeInputProofScope, FakeInputTestMode,
     },
     public_video::PublicVideoScope,
+    synthetic_admission_rtc as rtc,
 };
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair,
@@ -55,7 +56,7 @@ use std::{
 };
 use tokio::{
     net::{TcpSocket, TcpStream},
-    sync::mpsc,
+    sync::{mpsc, watch},
     task::JoinHandle,
     time::{timeout, timeout_at, Instant},
 };
@@ -73,6 +74,7 @@ const ROLE: &str = "x-rh-fixture-role";
 const ROOM: &str = "x-rh-fixture-room";
 const GENERATION: &str = "x-rh-fixture-generation";
 const LEASE: Duration = Duration::from_secs(12);
+const RTC_LEASE: Duration = Duration::from_secs(20);
 const IO_WAIT: Duration = Duration::from_secs(3);
 const AUTH_LABEL: &[u8] = b"RemoteHub synthetic fixture invitation";
 const RHF1_HEADER: usize = 54;
@@ -157,6 +159,7 @@ struct Gate {
     active: [bool; 2],
     outbound: [Option<mpsc::Sender<Message>>; 2],
     terminal: bool,
+    closed: watch::Sender<bool>,
     flow: Flow,
 }
 
@@ -166,6 +169,7 @@ impl Gate {
         self.active = [false; 2];
         self.flow.close();
         self.outbound = [None, None];
+        self.closed.send_replace(true);
     }
 }
 
@@ -200,6 +204,7 @@ impl App {
                 active: [false; 2],
                 outbound: [None, None],
                 terminal: false,
+                closed: watch::channel(false).0,
                 flow: Flow::new(scope),
             }),
         })
@@ -505,7 +510,9 @@ impl Fixture {
         };
         let slot = &self.app.slots[index(role)];
         let now = wall();
-        let endpoint = SyntheticEndpoint::new(slot.source, address, now + LEASE.as_secs(), now)?;
+        let remaining = self.app.expires.saturating_duration_since(Instant::now());
+        let endpoint =
+            SyntheticEndpoint::new(slot.source, address, now + remaining.as_secs(), now)?;
         let invitation = SyntheticInvitation::new(
             self.app.scope,
             role,
@@ -792,7 +799,7 @@ fn received_sdp(frame: &[u8]) -> (&str, &[u8; 64]) {
     )
 }
 
-async fn pinned_proof_exchange(fixture: &Fixture, tamper_offer: bool) {
+async fn pinned_pair(fixture: &Fixture) -> (SyntheticRelay, SyntheticRelay) {
     let pin_ca = ca_pin(&fixture.ca_der);
     let mut host = fixture
         .pinned_client(Role::Host, &fixture.ca_der, pin_ca)
@@ -806,6 +813,38 @@ async fn pinned_proof_exchange(fixture: &Fixture, tamper_offer: bool) {
     // pinned socket. The four signed frames start only after this control.
     tokio::try_join!(host.wait_paired(), viewer.wait_paired()).unwrap();
 
+    (host, viewer)
+}
+
+async fn paired_challenges(
+    fixture: &Fixture,
+    host: &mut SyntheticRelay,
+    viewer: &mut SyntheticRelay,
+    host_proof: &mut FakeInputProof<'_>,
+    viewer_proof: &mut FakeInputProof<'_>,
+) -> (SessionChallenge, SessionChallenge) {
+    let host_wire = pinned_transfer(
+        host,
+        viewer,
+        Kind::HostChallenge,
+        fixture.frame([1, 1], &host_proof.challenge(wall()).unwrap().to_bytes()),
+    )
+    .await;
+    let viewer_wire = pinned_transfer(
+        viewer,
+        host,
+        Kind::ViewerChallenge,
+        fixture.frame([2, 2], &viewer_proof.challenge(wall()).unwrap().to_bytes()),
+    )
+    .await;
+    (
+        received_challenge(&host_wire),
+        received_challenge(&viewer_wire),
+    )
+}
+
+async fn pinned_proof_exchange(fixture: &Fixture, tamper_offer: bool) {
+    let (mut host, mut viewer) = pinned_pair(fixture).await;
     let host_id = Identity::generate_ephemeral().unwrap();
     let viewer_id = Identity::generate_ephemeral().unwrap();
     assert!(host_id.public().public_key != viewer_id.public().public_key);
@@ -832,24 +871,16 @@ async fn pinned_proof_exchange(fixture: &Fixture, tamper_offer: bool) {
     )
     .unwrap();
 
-    let host_wire = pinned_transfer(
+    let (host_challenge, viewer_challenge) = paired_challenges(
+        fixture,
         &mut host,
         &mut viewer,
-        Kind::HostChallenge,
-        fixture.frame([1, 1], &host_proof.challenge(wall()).unwrap().to_bytes()),
-    )
-    .await;
-    let viewer_wire = pinned_transfer(
-        &mut viewer,
-        &mut host,
-        Kind::ViewerChallenge,
-        fixture.frame([2, 2], &viewer_proof.challenge(wall()).unwrap().to_bytes()),
+        &mut host_proof,
+        &mut viewer_proof,
     )
     .await;
     let offer = fixed_sdp(SessionRole::Viewer);
-    let mut offer_signature = viewer_proof
-        .seal(received_challenge(&host_wire), &offer, wall())
-        .unwrap();
+    let mut offer_signature = viewer_proof.seal(host_challenge, &offer, wall()).unwrap();
     if tamper_offer {
         offer_signature[0] ^= 1;
     }
@@ -876,9 +907,7 @@ async fn pinned_proof_exchange(fixture: &Fixture, tamper_offer: bool) {
     verified.unwrap();
 
     let answer = fixed_sdp(SessionRole::Host);
-    let answer_signature = host_proof
-        .seal(received_challenge(&viewer_wire), &answer, wall())
-        .unwrap();
+    let answer_signature = host_proof.seal(viewer_challenge, &answer, wall()).unwrap();
     let answer_wire = pinned_transfer(
         &mut host,
         &mut viewer,
@@ -938,4 +967,147 @@ async fn structurally_valid_tampered_signature_is_denied_by_endpoint() {
     let fixture = Fixture::start(App::new(Instant::now() + LEASE)).await;
     pinned_proof_exchange(&fixture, true).await;
     fixture.finish().await;
+}
+
+/// Dedicated pinned signaling with real native ICE/DTLS/SCTP on loopback.
+/// Exactly one fixed synthetic marker and ACK, never OS input or media.
+#[tokio::test]
+async fn pinned_admission_carries_one_marker_only_over_verified_live_turn() {
+    timeout(RTC_LEASE, async {
+        let fixture = Fixture::start(App::new(Instant::now() + RTC_LEASE)).await;
+        let turn = rtc::FixtureTurn::start().await.unwrap();
+        assert_eq!(*turn.server().ip(), Ipv4Addr::LOCALHOST);
+        let (mut host, mut viewer) = pinned_pair(&fixture).await;
+
+        // Receive actual closure from either Axum WSS handler, including
+        // from invalid frames. Don't cancel a client recv (which would itself
+        // drop the socket) and don't put another control on the wire.
+        let mut closed = fixture.app.gate.lock().unwrap().closed.subscribe();
+        let active = pinned_relay_marker(&fixture, &turn, &mut host, &mut viewer);
+        let (host_peer, viewer_peer) = tokio::select! {
+            biased;
+            disconnected = closed.wait_for(|ended| *ended) => {
+                disconnected.expect("live fixture termination signal");
+                panic!("WSS ended before the verified relay marker and acknowledgement");
+            }
+            finished = active => finished,
+        };
+        assert!(fixture.app.paired());
+        viewer.close().await.unwrap();
+        assert_eq!(host.recv_frame().await, Err(SyntheticClientError::Closed));
+        tokio::try_join!(host_peer.close(), viewer_peer.close()).unwrap();
+        // This confirms local relay listener teardown, not immediate
+        // disappearance of each TURN allocation on an external server.
+        turn.close().await.unwrap();
+        fixture.finish().await;
+    })
+    .await
+    .expect("bounded dedicated pinned WSS/TURN integration");
+}
+
+async fn pinned_relay_marker(
+    fixture: &Fixture,
+    turn: &rtc::FixtureTurn,
+    host: &mut SyntheticRelay,
+    viewer: &mut SyntheticRelay,
+) -> (rtc::Peer, rtc::Peer) {
+    let host_id = Identity::generate_ephemeral().unwrap();
+    let viewer_id = Identity::generate_ephemeral().unwrap();
+    assert!(host_id.public().public_key != viewer_id.public().public_key);
+    let pinned_viewer = pin(&host_id, &viewer_id);
+    let pinned_host = pin(&viewer_id, &host_id);
+    let mut scope = fixture.proof_scope();
+    assert_eq!(*scope.route.wss.ip(), rtc::RELAY_LABEL);
+    // The actual TURN listener port is signed under the synthetic scope;
+    // this public-looking IP is a proof label only, never a destination.
+    scope.route.turn = SocketAddrV4::new(rtc::RELAY_LABEL, turn.server().port());
+    scope.route.relay_ports = rtc::RELAY_PORTS;
+    scope.route.expires_at = wall() + RTC_LEASE.as_secs();
+    let mut host_proof = FakeInputProof::prepare(
+        &host_id,
+        &pinned_viewer,
+        SessionRole::Host,
+        scope,
+        FakeInputTestMode::Enabled,
+        wall(),
+    )
+    .unwrap();
+    let mut viewer_proof = FakeInputProof::prepare(
+        &viewer_id,
+        &pinned_host,
+        SessionRole::Viewer,
+        scope,
+        FakeInputTestMode::Enabled,
+        wall(),
+    )
+    .unwrap();
+    let (host_challenge, viewer_challenge) =
+        paired_challenges(fixture, host, viewer, &mut host_proof, &mut viewer_proof).await;
+
+    let mut viewer_peer = rtc::Peer::start(turn, SessionRole::Viewer).await.unwrap();
+    let offer = viewer_peer.local().await.unwrap();
+    let signature = viewer_proof.seal(host_challenge, &offer, wall()).unwrap();
+    let inbound = pinned_transfer(
+        viewer,
+        host,
+        Kind::Offer,
+        fixture.frame([3, 2], &signed_body(&offer, signature)),
+    )
+    .await;
+    let (offer, signature) = received_sdp(&inbound);
+    let mut host_peer = rtc::Peer::start(turn, SessionRole::Host).await.unwrap();
+    // Shared role peer verifies exact bytes/signature before installing SDP.
+    host_peer
+        .remote(offer, signature, &mut host_proof)
+        .await
+        .unwrap();
+
+    let answer = host_peer.local().await.unwrap();
+    let signature = host_proof.seal(viewer_challenge, &answer, wall()).unwrap();
+    let inbound = pinned_transfer(
+        host,
+        viewer,
+        Kind::Answer,
+        fixture.frame([4, 1], &signed_body(&answer, signature)),
+    )
+    .await;
+    let (answer, signature) = received_sdp(&inbound);
+    viewer_peer
+        .remote(answer, signature, &mut viewer_proof)
+        .await
+        .unwrap();
+
+    let host_pair = host_proof.approved_relay_pair(wall()).unwrap();
+    let viewer_pair = viewer_proof.approved_relay_pair(wall()).unwrap();
+    assert_eq!(host_pair.local(), viewer_pair.remote());
+    assert_eq!(viewer_pair.local(), host_pair.remote());
+    assert!(fixture.app.gate.lock().unwrap().flow.is_complete());
+    let (mut host_channel, mut viewer_channel) =
+        tokio::try_join!(host_peer.open(), viewer_peer.open()).unwrap();
+    tokio::try_join!(
+        host_peer.verify_pair(&mut host_proof),
+        viewer_peer.verify_pair(&mut viewer_proof),
+    )
+    .unwrap();
+
+    let before = turn.stats();
+    assert_eq!(before.allocations_created, 2);
+    assert_eq!(before.active, 2);
+    assert!(before.permissions_created >= 2);
+    assert_eq!(before.direct_forwarded, 0);
+
+    assert!(fixture.app.paired());
+    viewer_channel.send_marker().await.unwrap();
+    host_channel.recv_marker().await.unwrap();
+    assert!(fixture.app.paired());
+    host_peer.verify_pair(&mut host_proof).await.unwrap();
+    host_channel.send_ack().await.unwrap();
+    viewer_channel.recv_ack().await.unwrap();
+    viewer_peer.verify_pair(&mut viewer_proof).await.unwrap();
+
+    let after = turn.stats();
+    assert_eq!(after.allocations_created, 2);
+    assert!(after.forwarded_packets > before.forwarded_packets);
+    assert_eq!(after.direct_forwarded, 0);
+    (host_peer, viewer_peer)
 }

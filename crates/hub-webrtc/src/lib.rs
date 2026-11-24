@@ -52,6 +52,7 @@ pub mod public_fake_input_profile;
 #[cfg(feature = "v2-public-fake-input-proof")]
 mod public_fake_input_sdp;
 #[cfg(any(
+    all(target_os = "linux", feature = "v2-synthetic-admission-rtc-test"),
     all(test, feature = "v2-public-fake-input-proof"),
     feature = "v2-public-fake-input-loopback-check",
     all(
@@ -61,6 +62,7 @@ mod public_fake_input_sdp;
 ))]
 mod public_fake_input_sdp_fixture;
 #[cfg(any(
+    all(target_os = "linux", feature = "v2-synthetic-admission-rtc-test"),
     all(test, feature = "v2-public-fake-input-proof"),
     feature = "v2-public-fake-input-loopback-check",
     all(
@@ -70,6 +72,7 @@ mod public_fake_input_sdp_fixture;
 ))]
 mod public_fake_input_turn_fixture;
 #[cfg(any(
+    all(target_os = "linux", feature = "v2-synthetic-admission-rtc-test"),
     all(test, feature = "v2-public-fake-input-proof"),
     feature = "v2-public-fake-input-loopback-check",
     all(
@@ -107,6 +110,9 @@ mod public_fake_input_wss_wire;
 #[cfg(feature = "v2-public-fake-input-loopback-check")]
 #[doc(hidden)]
 pub use public_fake_input_turn_tests::run_wss_turn_loopback_check;
+#[cfg(all(target_os = "linux", feature = "v2-synthetic-admission-rtc-test"))]
+#[doc(hidden)]
+pub mod synthetic_admission_rtc;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
 #[cfg(feature = "v2-public-video-wss")]

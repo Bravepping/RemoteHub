@@ -1,9 +1,14 @@
 //! Shared RTC owner for the two local synthetic TURN check harnesses.
 //! A role can dial only the inherited exact IPv4 loopback mock TURN
 //! listener; signed public-looking relay addresses are logical labels.
+#[cfg(any(
+    test,
+    feature = "v2-public-fake-input-loopback-check",
+    feature = "v2-public-fake-input-process-check"
+))]
+use crate::public_fake_input::FakeInputProof;
 use crate::{
     pinned_runtime::PinnedRuntime,
-    public_fake_input::FakeInputProof,
     public_fake_input_sdp_fixture::sanitize,
     public_fake_input_turn_net::{RELAY_LABEL, RELAY_PORTS},
     relay_runtime::RelayRuntime,
@@ -11,7 +16,7 @@ use crate::{
 use rtc::{
     ice::{mdns::MulticastDnsMode, network_type::NetworkType},
     peer_connection::transport::{
-        RTCDtlsTransportState, RTCIceTransportState, RTCSctpTransportState,
+        RTCDtlsTransportState, RTCIceCandidatePair, RTCIceTransportState, RTCSctpTransportState,
     },
 };
 use std::{
@@ -26,12 +31,18 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tokio::sync::{mpsc, watch};
+#[cfg(any(
+    test,
+    feature = "v2-public-fake-input-loopback-check",
+    feature = "v2-public-fake-input-process-check"
+))]
+use webrtc::data_channel::DataChannelEvent;
 use webrtc::{
-    data_channel::{DataChannel, DataChannelEvent},
+    data_channel::DataChannel,
     peer_connection::{
-        PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
-        RTCIceGatheringState, RTCIceServer, RTCIceTransportPolicy, RTCSessionDescription,
-        SettingEngineBuilder,
+        transport::SctpTransport, PeerConnection, PeerConnectionBuilder,
+        PeerConnectionEventHandler, RTCConfigurationBuilder, RTCIceGatheringState, RTCIceServer,
+        RTCIceTransportPolicy, RTCSessionDescription, SettingEngineBuilder,
     },
     runtime::{
         AsyncInterval, AsyncTcpListener, AsyncTcpStream, AsyncUdpSocket, JoinHandle, Runtime,
@@ -281,39 +292,46 @@ impl Peer {
         self.pc.set_remote_description(desc).await.unwrap();
     }
 
+    #[cfg(any(
+        test,
+        feature = "v2-public-fake-input-loopback-check",
+        feature = "v2-public-fake-input-process-check"
+    ))]
     pub(super) async fn verify_pair(&self, proof: &mut FakeInputProof<'_>) {
         let sctp = self.pc.sctp().await.unwrap();
-        let dtls = sctp.transport();
-        let ice = dtls.ice_transport();
-        assert_eq!(
-            sctp.state().await.unwrap(),
-            RTCSctpTransportState::Connected
-        );
-        assert_eq!(
-            dtls.state().await.unwrap(),
-            RTCDtlsTransportState::Connected
-        );
-        assert!(matches!(
-            ice.state().await.unwrap(),
-            RTCIceTransportState::Connected | RTCIceTransportState::Completed
-        ));
-        let actual = ice.get_selected_candidate_pair().await.unwrap();
-        assert_eq!(
-            sctp.state().await.unwrap(),
-            RTCSctpTransportState::Connected
-        );
-        assert_eq!(
-            dtls.state().await.unwrap(),
-            RTCDtlsTransportState::Connected
-        );
-        assert!(matches!(
-            ice.state().await.unwrap(),
-            RTCIceTransportState::Connected | RTCIceTransportState::Completed
-        ));
+        let actual = live_pair(&*sctp).await.unwrap();
         proof
-            .verify_selected_relay_pair(actual.as_ref(), wall())
+            .verify_selected_relay_pair(Some(&actual), wall())
             .unwrap();
     }
+}
+
+pub(super) async fn live_pair(
+    sctp: &dyn SctpTransport,
+) -> Result<RTCIceCandidatePair, &'static str> {
+    const PAIR: &str = "FIXTURE_RTC_SELECTED_PAIR";
+    let dtls = sctp.transport();
+    let ice = dtls.ice_transport();
+    let connected = async || -> Result<(), &'static str> {
+        if sctp.state().await.map_err(|_| PAIR)? != RTCSctpTransportState::Connected
+            || dtls.state().await.map_err(|_| PAIR)? != RTCDtlsTransportState::Connected
+            || !matches!(
+                ice.state().await.map_err(|_| PAIR)?,
+                RTCIceTransportState::Connected | RTCIceTransportState::Completed
+            )
+        {
+            return Err(PAIR);
+        }
+        Ok(())
+    };
+    connected().await?;
+    let observed = ice
+        .get_selected_candidate_pair()
+        .await
+        .map_err(|_| PAIR)?
+        .ok_or(PAIR)?;
+    connected().await?;
+    Ok(observed)
 }
 
 pub(super) fn wall() -> u64 {
@@ -323,6 +341,11 @@ pub(super) fn wall() -> u64 {
         .as_secs()
 }
 
+#[cfg(any(
+    test,
+    feature = "v2-public-fake-input-loopback-check",
+    feature = "v2-public-fake-input-process-check"
+))]
 pub(super) async fn opened(channel: &Arc<dyn DataChannel>) {
     while let Some(event) = channel.poll().await {
         match event {
@@ -334,6 +357,11 @@ pub(super) async fn opened(channel: &Arc<dyn DataChannel>) {
     panic!("sealed fixture channel did not open");
 }
 
+#[cfg(any(
+    test,
+    feature = "v2-public-fake-input-loopback-check",
+    feature = "v2-public-fake-input-process-check"
+))]
 pub(super) async fn text(channel: &Arc<dyn DataChannel>, next: &str) {
     loop {
         match channel.poll().await {
