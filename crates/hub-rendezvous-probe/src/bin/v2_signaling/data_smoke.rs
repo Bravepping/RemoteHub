@@ -19,6 +19,8 @@ use hub_webrtc::{
     pinned_runtime::PinnedRuntime,
     verified_wss::{VerifiedWssConfig, VerifiedWssError, VerifiedWssEvent, VerifiedWssSignaling},
 };
+#[path = "data_smoke_input.rs"]
+mod data_smoke_input;
 use rtc::ice::{mdns::MulticastDnsMode, network_type::NetworkType};
 use std::{
     net::{Ipv4Addr, SocketAddr},
@@ -413,15 +415,20 @@ async fn native_webrtc_connects_over_wss_with_verified_device_signatures() {
 
 #[tokio::test]
 async fn reusable_wss_signaling_connects_with_signed_inline_candidates() {
-    reusable_inline_round_trip(false).await;
+    reusable_inline_round_trip(false, false).await;
 }
 
 #[tokio::test]
 async fn reusable_wss_rejects_unexpected_device_key_before_applying_sdp() {
-    reusable_inline_round_trip(true).await;
+    reusable_inline_round_trip(true, false).await;
 }
 
-async fn reusable_inline_round_trip(wrong_viewer_pin: bool) {
+#[tokio::test]
+async fn verified_wss_loopback_sctp_acks_only_applied_fake_input() {
+    reusable_inline_round_trip(false, true).await;
+}
+
+async fn reusable_inline_round_trip(wrong_viewer_pin: bool, fake_input: bool) {
     timeout(Duration::from_secs(15), async {
         let (app, token) = fixture();
         let ca = make_ca();
@@ -456,6 +463,17 @@ async fn reusable_inline_round_trip(wrong_viewer_pin: bool) {
         session_nonce[..16].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
         session_nonce[16..].copy_from_slice(uuid::Uuid::new_v4().as_bytes());
 
+        if fake_input {
+            let mut hash = ring::digest::Context::new(&ring::digest::SHA256);
+            hash.update(b"RemoteHub.fixture.loopback-fake-input.v1\0");
+            hash.update(&session_nonce);
+            session_nonce.copy_from_slice(hash.finish().as_ref());
+        }
+        let scope = hub_webrtc::input_approval::InputScope {
+            room: *uuid::Uuid::parse_str(room.as_str()).unwrap().as_bytes(),
+            generation: session_nonce,
+            viewer_key: *expected_viewer.public_key(),
+        };
         let host_pending = VerifiedWssSignaling::connect(VerifiedWssConfig {
             address: addr,
             token: &token,
@@ -493,7 +511,14 @@ async fn reusable_inline_round_trip(wrong_viewer_pin: bool) {
         let mut viewer = Peer::new().await;
         let channel = viewer
             .pc
-            .create_data_channel("relay-smoke", None)
+            .create_data_channel(
+                if fake_input {
+                    data_smoke_input::LABEL
+                } else {
+                    "relay-smoke"
+                },
+                fake_input.then(data_smoke_input::channel_init),
+            )
             .await
             .unwrap();
 
@@ -534,6 +559,7 @@ async fn reusable_inline_round_trip(wrong_viewer_pin: bool) {
         else {
             panic!("expected verified SDP offer")
         };
+        let viewer_addr = fake_input.then(|| data_smoke_input::signed_candidate(&data));
         host.pc
             .set_remote_description(RTCSessionDescription::offer(data).unwrap())
             .await
@@ -556,12 +582,28 @@ async fn reusable_inline_round_trip(wrong_viewer_pin: bool) {
         else {
             panic!("expected verified SDP answer")
         };
+        let host_addr = fake_input.then(|| data_smoke_input::signed_candidate(&data));
         viewer
             .pc
             .set_remote_description(RTCSessionDescription::answer(data).unwrap())
             .await
             .unwrap();
 
+        if let (Some(host_addr), Some(viewer_addr)) = (host_addr, viewer_addr) {
+            data_smoke_input::exercise(&mut host, &viewer, channel, scope, host_addr, viewer_addr)
+                .await;
+            viewer.pc.close().await.unwrap();
+            host.pc.close().await.unwrap();
+            viewer_signaling.leave().await.unwrap();
+            assert!(matches!(
+                host_signaling.next_event(Duration::from_secs(3)).await,
+                Ok(VerifiedWssEvent::PeerLeft)
+            ));
+            assert!(app.rooms.lock().unwrap().is_empty());
+            server.abort();
+            assert!(server.await.unwrap_err().is_cancelled());
+            return;
+        }
         round_trip_data_channel(&mut host, channel).await;
         viewer.pc.close().await.unwrap();
         host.pc.close().await.unwrap();
