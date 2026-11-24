@@ -7,6 +7,7 @@ test('dedicated invitation main only observes, focuses and stops the actual remo
   await page.addInitScript(() => {
     const calls = [];
     let phase;
+    let invitation = 0;
     Object.assign(window, {
       isTauri: true,
       ownedWindowCalls: calls,
@@ -28,9 +29,10 @@ test('dedicated invitation main only observes, focuses and stops the actual remo
                 public_dedicated_session: true,
               };
             case 'select_control_invitation':
+              invitation++;
               return [
                 {
-                  id: 'a'.repeat(32),
+                  id: String(invitation).repeat(32),
                   role: 'viewer',
                   round: null,
                   expires_at: 2_000_000_000,
@@ -39,7 +41,7 @@ test('dedicated invitation main only observes, focuses and stops the actual remo
             case 'public_session_window_open':
               if (
                 args.role !== 'viewer' ||
-                args.invitationId !== 'a'.repeat(32)
+                args.invitationId !== String(invitation).repeat(32)
               )
                 throw new Error();
               phase = 'ready';
@@ -73,7 +75,17 @@ test('dedicated invitation main only observes, focuses and stops the actual remo
   await panel.getByRole('button', { name: '显示远控窗口' }).click();
   await panel.getByRole('button', { name: '断开连接' }).click();
   await expect(panel.getByText('已建立远程连接')).toHaveCount(0);
+  for (let cycle = 0; cycle < 2; cycle++) {
+    await panel.getByRole('button', { name: '打开邀请 ZIP 或 JSON' }).click();
+    await panel.getByRole('button', { name: '开始本次会话' }).click();
+    await expect(panel.getByText('已建立远程连接')).toBeVisible();
+    await panel.getByRole('button', { name: '断开连接' }).click();
+    await expect(panel.getByText('已建立远程连接')).toHaveCount(0);
+  }
   const calls = await page.evaluate(() => window.ownedWindowCalls);
+  expect(
+    calls.filter((call) => call === 'public_session_window_open'),
+  ).toHaveLength(3);
   expect(calls).toContain('public_session_window_focus');
   expect(calls).toContain('public_session_window_stop');
   expect(calls).not.toContain('public_video_start');

@@ -14,7 +14,46 @@ struct Intent {
 pub(super) struct Slot {
     label: String,
     intent: Option<Intent>,
+    attaching: bool,
     closing: bool,
+}
+
+enum Open {
+    Existing(String),
+    Reserved {
+        label: String,
+        retired: Option<Slot>,
+    },
+}
+
+fn reserve_open(state: &DesktopVideoState, intent: Intent) -> Result<Open, String> {
+    // Match start_session's active -> slot order. Pending or in-flight
+    // attachment has no terminal state and cannot be replaced.
+    let active = state.active.lock().map_err(|_| STATE)?;
+    let mut slot = state.remote_window.lock().map_err(|_| STATE)?;
+    if let Some(current) = slot.as_ref() {
+        let current_running = active
+            .as_ref()
+            .is_some_and(|s| s.owner == current.label && s.status.borrow().phase != Phase::Closed);
+        if current.closing || current.intent.is_some() || current.attaching || current_running {
+            return Ok(Open::Existing(current.label.clone()));
+        }
+    }
+
+    if active
+        .as_ref()
+        .is_some_and(|s| s.status.borrow().phase != Phase::Closed)
+    {
+        return Err("PUBLIC_VIDEO_BUSY".into());
+    }
+    let label = format!("{LABEL_PREFIX}{}", uuid::Uuid::new_v4().simple());
+    let retired = slot.replace(Slot {
+        label: label.clone(),
+        intent: Some(intent),
+        attaching: false,
+        closing: false,
+    });
+    Ok(Open::Reserved { label, retired })
 }
 
 #[derive(Serialize)]
@@ -100,30 +139,35 @@ pub(crate) async fn public_session_window_open(
         return Err(MISSING.into());
     }
 
-    let (label, newly_reserved) = {
-        let mut slot = state.remote_window.lock().map_err(|_| STATE)?;
-        if let Some(current) = slot.as_ref() {
-            (current.label.clone(), false)
-        } else {
-            let label = format!("{LABEL_PREFIX}{}", uuid::Uuid::new_v4().simple());
-            *slot = Some(Slot {
-                label: label.clone(),
-                intent: Some(Intent {
-                    role,
-                    invitation_id,
-                }),
-                closing: false,
-            });
-            (label, true)
+    let label = match reserve_open(
+        &state,
+        Intent {
+            role,
+            invitation_id,
+        },
+    )? {
+        Open::Existing(label) => {
+            if let Some(existing) = window.get_webview_window(&label) {
+                focus(&existing)?;
+            }
+            return Ok("existing");
+        }
+        Open::Reserved { label, retired } => {
+            if let Some(retired) = retired {
+                let removed = window
+                    .get_webview_window(&retired.label)
+                    .is_none_or(|old| old.destroy().is_ok());
+                if !removed {
+                    let mut slot = state.remote_window.lock().map_err(|_| STATE)?;
+                    if slot.as_ref().is_some_and(|s| s.label == label) {
+                        *slot = Some(retired);
+                    }
+                    return Err("PUBLIC_SESSION_WINDOW_CLOSE_FAILED".into());
+                }
+            }
+            label
         }
     };
-
-    if !newly_reserved {
-        if let Some(existing) = window.get_webview_window(&label) {
-            focus(&existing)?;
-        }
-        return Ok("existing");
-    }
 
     let view = tauri::WebviewWindowBuilder::new(
         window.app_handle(),
@@ -152,12 +196,19 @@ pub(crate) fn public_session_window_attach(window: WebviewWindow) -> Result<Snap
         let mut slot = state.remote_window.lock().map_err(|_| STATE)?;
         let entry = slot
             .as_mut()
-            .filter(|s| s.label == label && !s.closing)
+            .filter(|s| s.label == label && !s.closing && !s.attaching)
             .ok_or(MISSING)?;
-        entry.intent.take()
+        let intent = entry.intent.take();
+        entry.attaching = intent.is_some();
+        intent
     };
     if let Some(intent) = intent {
-        start_session(window.clone(), intent.role, Some(intent.invitation_id))?;
+        let result = start_session(window.clone(), intent.role, Some(intent.invitation_id));
+        let mut slot = state.remote_window.lock().map_err(|_| STATE)?;
+        if let Some(entry) = slot.as_mut().filter(|s| s.label == label) {
+            entry.attaching = false;
+        }
+        result?;
     }
     let snap = snapshot(&window, &state)?;
     if snap.generation.is_none() {
@@ -345,7 +396,7 @@ pub(super) fn still_open(state: &DesktopVideoState, label: &str) -> bool {
 pub(super) fn reservation_busy(state: &DesktopVideoState) -> bool {
     state.remote_window.lock().map_or(true, |slot| {
         slot.as_ref()
-            .is_some_and(|entry| entry.closing || entry.intent.is_some())
+            .is_some_and(|entry| entry.closing || entry.attaching || entry.intent.is_some())
     })
 }
 
@@ -402,6 +453,73 @@ mod tests {
         assert!(*session.stop.borrow());
     }
 
+    fn next_intent() -> Intent {
+        Intent {
+            role: "viewer".to_owned(),
+            invitation_id: uuid::Uuid::new_v4().simple().to_string(),
+        }
+    }
+
+    #[test]
+    fn explicit_open_reuses_live_slot_and_replaces_only_terminal_generations() {
+        let state = DesktopVideoState::new();
+        let Open::Reserved {
+            mut label,
+            retired: None,
+        } = reserve_open(&state, next_intent()).unwrap()
+        else {
+            panic!("first explicit request should reserve its own window");
+        };
+        for _ in 0..3 {
+            assert!(matches!(
+                reserve_open(&state, next_intent()).unwrap(),
+                Open::Existing(current) if current == label
+            ));
+            {
+                let mut slot = state.remote_window.lock().unwrap();
+                let slot = slot.as_mut().unwrap();
+                assert!(slot.intent.take().is_some());
+                slot.attaching = true;
+            }
+            assert!(matches!(
+                reserve_open(&state, next_intent()).unwrap(),
+                Open::Existing(current) if current == label
+            ));
+
+            let previous = Arc::new(Session::owned(Role::Viewer, true, &label));
+            *state.active.lock().unwrap() = Some(previous.clone());
+            state
+                .remote_window
+                .lock()
+                .unwrap()
+                .as_mut()
+                .unwrap()
+                .attaching = false;
+            previous.request_stop();
+            assert!(matches!(
+                reserve_open(&state, next_intent()).unwrap(),
+                Open::Existing(current) if current == label
+            ));
+            previous.status.send_replace(Status::closed(Err(CANCELLED)));
+            let Open::Reserved {
+                label: new_label,
+                retired: Some(retired),
+            } = reserve_open(&state, next_intent()).unwrap()
+            else {
+                panic!("new invite should replace the terminal window");
+            };
+            assert_eq!(retired.label, label);
+            assert_ne!(new_label, label);
+            clear_slot(&state, &label); // Late native Destroyed event.
+            assert_eq!(
+                current_label(&state).unwrap().as_deref(),
+                Some(new_label.as_str())
+            );
+            assert!(active_for(&state, &new_label).unwrap().is_none());
+            label = new_label;
+        }
+    }
+
     #[test]
     fn replaced_or_closing_label_cannot_use_or_clear_another_session_owner() {
         let state = DesktopVideoState::new();
@@ -410,6 +528,7 @@ mod tests {
         *state.remote_window.lock().unwrap() = Some(Slot {
             label: owner.to_owned(),
             intent: None,
+            attaching: false,
             closing: false,
         });
         let session = Arc::new(Session::owned(Role::Viewer, true, owner));
