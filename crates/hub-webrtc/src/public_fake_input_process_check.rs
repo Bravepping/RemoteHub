@@ -149,6 +149,25 @@ impl RunScope {
     }
 }
 
+#[cfg(windows)]
+fn worker_system_root() -> Result<std::ffi::OsString> {
+    use std::os::windows::ffi::OsStringExt;
+    use windows_sys::Win32::System::SystemInformation::GetSystemWindowsDirectoryW;
+
+    const ERROR: &str = "worker Windows directory";
+    let mut path = vec![0_u16; 32_768];
+    // SAFETY: path is initialized writable UTF-16 storage of the given length.
+    let len = unsafe { GetSystemWindowsDirectoryW(path.as_mut_ptr(), path.len() as u32) } as usize;
+    if len == 0 || len >= path.len() || path[len] != 0 || path[..len].contains(&0) {
+        return Err(ERROR);
+    }
+    let path = std::ffi::OsString::from_wide(&path[..len]);
+    if !std::path::Path::new(&path).is_absolute() {
+        return Err(ERROR);
+    }
+    Ok(path)
+}
+
 struct Worker {
     child: Child,
     boot: Option<ChildStdin>,
@@ -165,9 +184,14 @@ impl Worker {
             (SessionRole::Host, Lane::Turn) => TURN_HOST_WORKER,
             (SessionRole::Viewer, Lane::Turn) => TURN_VIEWER_WORKER,
         };
-        let mut child = Command::new(exe)
+        let mut command = Command::new(exe);
+        command.env_clear();
+        // Without SystemRoot, a Windows Winsock provider can fail to locate its DLL
+        // (10106). Allow only the OS directory, never copy inherited variables.
+        #[cfg(windows)]
+        command.env("SystemRoot", worker_system_root()?);
+        let mut child = command
             .arg(arg)
-            .env_clear()
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
