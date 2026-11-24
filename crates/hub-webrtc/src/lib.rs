@@ -35,6 +35,8 @@ mod private_wss_contract;
 #[cfg(feature = "v2-public-fake-input-proof")]
 pub mod public_fake_input;
 #[cfg(feature = "v2-public-fake-input-proof")]
+mod public_fake_input_pair;
+#[cfg(feature = "v2-public-fake-input-proof")]
 mod public_fake_input_sdp;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
