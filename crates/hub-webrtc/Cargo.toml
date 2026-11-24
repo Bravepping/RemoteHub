@@ -18,6 +18,10 @@ v2-public-fake-input-loopback-check = [
   "v2-public-fake-input-proof", "hub-identity/ephemeral-test", "dep:rcgen",
   "dep:rustls", "dep:futures-util", "dep:tokio-rustls", "dep:tokio-tungstenite",
 ]
+v2-public-fake-input-process-check = [
+  "v2-public-fake-input-proof", "hub-identity/ephemeral-test", "dep:rcgen",
+  "dep:rustls", "dep:futures-util", "dep:tokio-rustls", "dep:tokio-tungstenite", "tokio/process",
+]
 v2-native-input-consent-check = ["v2-input-approval", "dep:windows-sys"]
 v2-private-wss-lan = ["v2-verified-lan", "v2-loopback-signaling"]
 p3-lan = ["dep:windows-sys"]
@@ -34,6 +38,13 @@ path = "tests/wss_turn_loopback_check.rs"
 harness = false
 test = false
 required-features = ["v2-public-fake-input-loopback-check"]
+
+[[test]]
+name = "remotehub-wss-signed-sdp-process-check"
+path = "tests/wss_signed_sdp_process_check.rs"
+harness = false
+test = false
+required-features = ["v2-public-fake-input-process-check"]
 
 [[bin]]
 name = "turn-allocate-probe"

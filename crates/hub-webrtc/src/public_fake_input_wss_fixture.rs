@@ -4,12 +4,13 @@
 
 use crate::public_fake_input_wss_wire::MAX_FRAME_BYTES;
 use futures_util::{SinkExt, StreamExt};
+use hub_identity::session::SessionRole;
 use rcgen::{
     BasicConstraints, CertificateParams, CertifiedIssuer, ExtendedKeyUsagePurpose, IsCa, KeyPair,
     KeyUsagePurpose,
 };
 use rustls::{
-    pki_types::{PrivatePkcs8KeyDer, ServerName},
+    pki_types::{CertificateDer, PrivatePkcs8KeyDer, ServerName},
     ClientConfig, RootCertStore, ServerConfig,
 };
 use sha2::{Digest, Sha256};
@@ -41,6 +42,7 @@ const VIEWER_PATH: &str = "/__remotehub-fixture/fake-input/viewer";
 const LIFETIME: Duration = Duration::from_secs(20);
 const IO_WAIT: Duration = Duration::from_secs(3);
 const MAX_RELAYED: usize = 8;
+const MAX_CA_DER_BYTES: usize = 4096;
 const CLOSED: &str = "FAKE_INPUT_FIXTURE_WSS_CLOSED";
 const IO: &str = "FAKE_INPUT_FIXTURE_WSS_IO";
 const DEADLINE: &str = "FAKE_INPUT_FIXTURE_WSS_DEADLINE";
@@ -50,10 +52,17 @@ const TLS: &str = "FAKE_INPUT_FIXTURE_WSS_TLS";
 type Result<T> = std::result::Result<T, &'static str>;
 type RelaySocket = WebSocketStream<server::TlsStream<TcpStream>>;
 
+#[cfg(any(test, feature = "v2-public-fake-input-loopback-check"))]
 pub(super) struct FixtureWss {
     pub(super) host: FixtureSocket,
     pub(super) viewer: FixtureSocket,
-    ca_sha256: [u8; 32],
+    server: FixtureWssServer,
+}
+
+/// Loopback test relay independent of the role processes. Only public CA
+/// DER and the allocated loopback port may leave this fixture owner.
+pub(super) struct FixtureWssServer {
+    ca_der: Vec<u8>,
     port: u16,
     task: RelayTask,
     deadline: Instant,
@@ -65,48 +74,103 @@ pub(super) struct FixtureSocket {
     closed: bool,
 }
 
+#[cfg(any(test, feature = "v2-public-fake-input-loopback-check"))]
 impl FixtureWss {
     pub(super) async fn start() -> Result<Self> {
+        let server = FixtureWssServer::start().await?;
+        // Establish the host before dialing viewer: the fixture binds each
+        // role to a distinct URI in a fixed two-connection order.
+        let host = connect_role(server.port(), server.ca_der(), SessionRole::Host).await?;
+        let viewer = connect_role(server.port(), server.ca_der(), SessionRole::Viewer).await?;
+        Ok(Self {
+            host,
+            viewer,
+            server,
+        })
+    }
+
+    pub(super) fn ca_sha256(&self) -> [u8; 32] {
+        self.server.ca_sha256()
+    }
+
+    pub(super) fn port(&self) -> u16 {
+        self.server.port()
+    }
+
+    pub(super) async fn close(mut self) -> Result<()> {
+        let notify = self.host.disconnect().await;
+        let until = io_deadline(self.server.deadline);
+        let joined = self.server.wait_until(until).await;
+        notify?;
+        joined
+    }
+}
+
+impl FixtureWssServer {
+    pub(super) async fn start() -> Result<Self> {
         let deadline = Instant::now() + LIFETIME;
-        let (trust, tls, ca_sha256) = tls_material()?;
+        let (tls, ca_der) = tls_material()?;
         let listener = TcpListener::bind((LOOPBACK, 0)).await.map_err(|_| IO)?;
         let SocketAddr::V4(endpoint) = listener.local_addr().map_err(|_| IO)? else {
             return Err(IO);
         };
         let task = RelayTask(Some(tokio::spawn(serve(listener, tls, endpoint, deadline))));
-        // The two clients have exact, distinct, fixture-only paths. Complete
-        // the host handshake before dialing viewer to keep the role order known.
-        let host = connect(endpoint, trust.clone(), HOST_PATH, deadline).await?;
-        let viewer = connect(endpoint, trust, VIEWER_PATH, deadline).await?;
         Ok(Self {
-            host,
-            viewer,
-            ca_sha256,
+            ca_der,
             port: endpoint.port(),
             task,
             deadline,
         })
     }
 
-    pub(super) fn ca_sha256(&self) -> [u8; 32] {
-        self.ca_sha256
-    }
-
     pub(super) fn port(&self) -> u16 {
         self.port
     }
 
-    pub(super) async fn close(mut self) -> Result<()> {
-        let notify = self.host.disconnect().await;
+    pub(super) fn ca_der(&self) -> &[u8] {
+        &self.ca_der
+    }
+
+    pub(super) fn ca_sha256(&self) -> [u8; 32] {
+        Sha256::digest(self.ca_der()).into()
+    }
+
+    /// Wait for the two-role relay to finish, within its original hard
+    /// lifetime. Canceling the wait or dropping the owner aborts the task.
+    #[cfg(any(
+        test,
+        all(target_os = "linux", feature = "v2-public-fake-input-process-check")
+    ))]
+    pub(super) async fn wait(self) -> Result<()> {
+        let deadline = self.deadline;
+        self.wait_until(deadline).await
+    }
+
+    async fn wait_until(mut self, deadline: Instant) -> Result<()> {
         let task = self.task.0.as_mut().ok_or(CLOSED)?;
-        let joined = timeout_at(io_deadline(self.deadline), task)
+        let joined = timeout_at(deadline, task)
             .await
             .map_err(|_| DEADLINE)?
             .map_err(|_| IO)?;
         self.task.0.take();
-        notify?;
         joined
     }
+}
+
+/// Dial exactly the already allocated 127.0.0.1 fixture port. The role
+/// process must have received the single test CA through a trusted parent.
+pub(super) async fn connect_role(
+    port: u16,
+    ca_der: &[u8],
+    role: SessionRole,
+) -> Result<FixtureSocket> {
+    let endpoint = SocketAddrV4::new(LOOPBACK, port);
+    let trust = client_trust(ca_der)?;
+    let path = match role {
+        SessionRole::Host => HOST_PATH,
+        SessionRole::Viewer => VIEWER_PATH,
+    };
+    connect(endpoint, trust, path, Instant::now() + LIFETIME).await
 }
 
 struct RelayTask(Option<JoinHandle<Result<()>>>);
@@ -192,21 +256,14 @@ fn websocket_limits() -> WebSocketConfig {
         .max_frame_size(Some(MAX_FRAME_BYTES))
 }
 
-fn tls_material() -> Result<(Arc<ClientConfig>, TlsAcceptor, [u8; 32])> {
+fn tls_material() -> Result<(TlsAcceptor, Vec<u8>)> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
     let mut authority = CertificateParams::default();
     authority.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
     authority.key_usages = vec![KeyUsagePurpose::KeyCertSign];
     let ca = CertifiedIssuer::self_signed(authority, KeyPair::generate().map_err(|_| TLS)?)
         .map_err(|_| TLS)?;
-    let mut roots = RootCertStore::empty();
-    roots.add(ca.der().clone()).map_err(|_| TLS)?;
-    let ca_sha256 = Sha256::digest(ca.der().as_ref()).into();
-    let trust = ClientConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .map_err(|_| TLS)?
-        .with_root_certificates(roots)
-        .with_no_client_auth();
+    let ca_der = ca.der().as_ref().to_vec();
     let key = KeyPair::generate().map_err(|_| TLS)?;
     let mut leaf = CertificateParams::new(vec![LOOPBACK.to_string()]).map_err(|_| TLS)?;
     leaf.extended_key_usages = vec![ExtendedKeyUsagePurpose::ServerAuth];
@@ -220,7 +277,22 @@ fn tls_material() -> Result<(Arc<ClientConfig>, TlsAcceptor, [u8; 32])> {
             PrivatePkcs8KeyDer::from(key.serialize_der()).into(),
         )
         .map_err(|_| TLS)?;
-    Ok((Arc::new(trust), TlsAcceptor::from(Arc::new(tls)), ca_sha256))
+    Ok((TlsAcceptor::from(Arc::new(tls)), ca_der))
+}
+
+fn client_trust(ca_der: &[u8]) -> Result<Arc<ClientConfig>> {
+    if ca_der.is_empty() || ca_der.len() > MAX_CA_DER_BYTES {
+        return Err(TLS);
+    }
+    let mut roots = RootCertStore::empty();
+    roots.add(CertificateDer::from(ca_der)).map_err(|_| TLS)?;
+    let trust =
+        ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+            .with_safe_default_protocol_versions()
+            .map_err(|_| TLS)?
+            .with_root_certificates(roots)
+            .with_no_client_auth();
+    Ok(Arc::new(trust))
 }
 
 async fn connect(
@@ -270,8 +342,13 @@ async fn accept(
     path: &'static str,
     deadline: Instant,
 ) -> Result<RelaySocket> {
+    // Child-process startup can take longer than a socket operation, but
+    // cannot extend the server's original hard lifetime.
+    let (tcp, source) = timeout_at(deadline, listener.accept())
+        .await
+        .map_err(|_| DEADLINE)?
+        .map_err(|_| IO)?;
     timeout_at(io_deadline(deadline), async {
-        let (tcp, source) = listener.accept().await.map_err(|_| IO)?;
         if source.ip() != LOOPBACK
             || tcp.peer_addr().map_err(|_| IO)? != source
             || tcp.local_addr().map_err(|_| IO)? != SocketAddr::V4(endpoint)
@@ -370,10 +447,27 @@ mod tests {
         fixture.close().await.unwrap();
     }
     #[tokio::test]
+    async fn separate_role_dials_use_the_exported_root_and_reap_relay() {
+        let server = FixtureWssServer::start().await.unwrap();
+        let port = server.port();
+        let ca = server.ca_der().to_vec();
+        // Only inert public data crosses the relay/role ownership boundary.
+        assert_eq!(<[u8; 32]>::from(Sha256::digest(&ca)), server.ca_sha256());
+        let mut host = connect_role(port, &ca, SessionRole::Host).await.unwrap();
+        let mut viewer = connect_role(port, &ca, SessionRole::Viewer).await.unwrap();
+        viewer.send(b"opaque").await.unwrap();
+        assert_eq!(host.recv().await.unwrap(), b"opaque");
+        host.disconnect().await.unwrap();
+        assert_eq!(viewer.recv().await, Err(CLOSED));
+        server.wait().await.unwrap();
+    }
+
+    #[tokio::test]
     async fn independent_fixture_roots_are_not_interchangeable() {
-        let (_, tls, server_hash) = tls_material().unwrap();
-        let (wrong_root, _, wrong_hash) = tls_material().unwrap();
-        assert_ne!(server_hash, wrong_hash);
+        let (tls, server_ca) = tls_material().unwrap();
+        let (_, wrong_ca) = tls_material().unwrap();
+        assert_ne!(server_ca, wrong_ca);
+        let wrong_root = client_trust(&wrong_ca).unwrap();
         let listener = TcpListener::bind((LOOPBACK, 0)).await.unwrap();
         let SocketAddr::V4(endpoint) = listener.local_addr().unwrap() else {
             panic!("fixture binds IPv4 only");

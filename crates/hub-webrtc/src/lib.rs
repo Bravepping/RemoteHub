@@ -36,6 +36,11 @@ mod private_wss_contract;
 pub mod public_fake_input;
 #[cfg(feature = "v2-public-fake-input-proof")]
 mod public_fake_input_pair;
+#[cfg(all(target_os = "linux", feature = "v2-public-fake-input-process-check"))]
+mod public_fake_input_process_check;
+#[cfg(all(target_os = "linux", feature = "v2-public-fake-input-process-check"))]
+#[doc(hidden)]
+pub use public_fake_input_process_check::run_wss_signed_sdp_process_check;
 #[cfg(feature = "v2-public-fake-input-proof")]
 pub mod public_fake_input_profile;
 #[cfg(feature = "v2-public-fake-input-proof")]
@@ -52,12 +57,14 @@ mod public_fake_input_sdp_fixture;
 mod public_fake_input_turn_tests;
 #[cfg(any(
     all(test, feature = "v2-public-fake-input-proof"),
-    feature = "v2-public-fake-input-loopback-check"
+    feature = "v2-public-fake-input-loopback-check",
+    all(target_os = "linux", feature = "v2-public-fake-input-process-check")
 ))]
 mod public_fake_input_wss_fixture;
 #[cfg(any(
     all(test, feature = "v2-public-fake-input-proof"),
-    feature = "v2-public-fake-input-loopback-check"
+    feature = "v2-public-fake-input-loopback-check",
+    all(target_os = "linux", feature = "v2-public-fake-input-process-check")
 ))]
 mod public_fake_input_wss_wire;
 // Only the opt-in, harness-less loopback diagnostic calls this entry point.
