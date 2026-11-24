@@ -10,3 +10,6 @@ pub use client::{
 
 pub mod wire;
 pub use wire::{Role, SignalKind};
+
+#[cfg(feature = "synthetic-admission")]
+pub mod synthetic;

@@ -6,6 +6,9 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[features]
+synthetic-admission = []
+
 [dependencies]
 rustls = { version = "=0.23.46", default-features = false, features = ["std", "ring", "tls12"] }
 tokio-rustls = { version = "=0.26.6", default-features = false, features = ["ring", "tls12"] }
