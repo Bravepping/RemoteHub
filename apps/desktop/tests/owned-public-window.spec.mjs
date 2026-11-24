@@ -130,8 +130,13 @@ test('owned viewer attaches once; control center and blur pause input without en
             frame.set(bytes, 24);
             return frame.buffer;
           }
-          if (command === 'public_control_send_input')
+          if (command === 'public_control_send_input') {
+            if (window.rejectNextOwnedInput) {
+              window.rejectNextOwnedInput = false;
+              throw 'PUBLIC_CONTROL_WINDOW_PAUSED';
+            }
             return window.recordOwnedInput(args.event);
+          }
           throw new Error('UNEXPECTED_OWNED_COMMAND');
         },
       },
@@ -163,6 +168,17 @@ test('owned viewer attaches once; control center and blur pause input without en
   await page.evaluate(() => window.dispatchEvent(new Event('blur')));
   await expect.poll(() => input.at(-1)?.kind).toBe('release_all');
   await expect(panel.getByRole('status')).toContainText('正在显示');
+  await expect(enable).toBeEnabled();
+
+  await enable.click();
+  await page.evaluate(() => {
+    window.rejectNextOwnedInput = true;
+  });
+  const beforeNativePause = input.length;
+  await page.keyboard.press('d');
+  await expect
+    .poll(() => input.slice(beforeNativePause))
+    .toEqual([{ kind: 'release_all' }]);
   await expect(enable).toBeEnabled();
   const calls = await page.evaluate(() => window.ownedWindowCalls);
   expect(

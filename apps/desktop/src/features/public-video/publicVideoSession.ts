@@ -528,6 +528,13 @@ export class PublicVideoSession {
       (cause: unknown) => {
         run.inputInFlight = false;
         if (this.active(run)) {
+          if (!release && cause === 'PUBLIC_CONTROL_WINDOW_PAUSED') {
+            // Native visibility beat the renderer event. An unsent event
+            // does not advance input or end the viewing session.
+            if (run.inputEnabled) this.pauseInput();
+            else this.driveInput(run);
+            return;
+          }
           // Only the exact native rejection codes are safe to expose.
           const code =
             cause === 'PUBLIC_CONTROL_NOT_ALLOWED' ||

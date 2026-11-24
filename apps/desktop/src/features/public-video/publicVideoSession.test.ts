@@ -250,8 +250,38 @@ describe('public video viewer controller', () => {
     await session.stop();
   });
 
+  it.each([false, true])(
+    'honors native pause even when the focus notification arrived first (%s)',
+    async (localPause) => {
+      const { bridge, session, input, draw, update } = harness();
+      const pending = deferred<unknown>();
+      bridge.sendInput.mockReturnValueOnce(pending.promise);
+      bridge.status.mockResolvedValue(allowed);
+      session.start('viewer', true);
+      await vi.advanceTimersByTimeAsync(0);
+      draw();
+      expect(session.enableInput()).toBe(true);
+      expect(session.sendInput(keyA)).toBe(true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(session.sendInput({ ...keyA, key: 'KeyB' })).toBe(true);
+      if (localPause) session.pauseInput();
+      pending.reject('PUBLIC_CONTROL_WINDOW_PAUSED');
+      await vi.advanceTimersByTimeAsync(0);
+      expect(bridge.sendInput.mock.calls).toEqual([
+        [first, '{"kind":"key","key":"KeyA","down":true}'],
+        [first, '{"kind":"release_all"}'],
+      ]);
+      expect(input).toHaveBeenLastCalledWith('allowed', false, false);
+      expect(session.sendInput(keyA)).toBe(false);
+      expect(update).toHaveBeenLastCalledWith('watching');
+      expect(bridge.stop).not.toHaveBeenCalled();
+      await session.stop();
+    },
+  );
+
   it.each([
     ['PUBLIC_CONTROL_NOT_ALLOWED', 'PUBLIC_CONTROL_NOT_ALLOWED'],
+    ['PUBLIC_CONTROL_WINDOW_PAUSED', 'PUBLIC_CONTROL_INPUT_IPC_FAILED'],
     ['PUBLIC_CONTROL_EVENT_REJECTED', 'PUBLIC_CONTROL_EVENT_REJECTED'],
     ['PUBLIC_CONTROL_BACKPRESSURE', 'PUBLIC_CONTROL_BACKPRESSURE'],
     [

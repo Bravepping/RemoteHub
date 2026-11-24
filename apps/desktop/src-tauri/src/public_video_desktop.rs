@@ -588,9 +588,10 @@ pub(crate) fn public_control_send_input(
         && (!window.is_focused().unwrap_or(false) || window.is_minimized().unwrap_or(true))
         && !matches!(parsed, Ok(Event::Release { .. }))
     {
-        // The dedicated UI also queues Release; non-release input cannot
-        // leave an obscured/minimized window, and video remains alive.
-        return Ok(());
+        // This event did not leave the native window. Reporting the pause
+        // lets the viewer clear pending events and send release even if it
+        // has not yet received the separate native focus notification.
+        return Err("PUBLIC_CONTROL_WINDOW_PAUSED".into());
     }
     session.input_events.try_send(event).map_err(|_| {
         session.request_stop();
