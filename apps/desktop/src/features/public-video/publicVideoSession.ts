@@ -11,6 +11,8 @@ import {
 
 const FRAME_HEADER_BYTES = 24;
 const MAX_AU_BYTES = 1024 * 1024;
+const MAX_BATCH_FRAMES = 3;
+const MAX_BATCH_AU_BYTES = 256 * 1024;
 const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const STATUS_INTERVAL_MS = 350;
 const EMPTY_FRAME_DELAY_MS = 33;
@@ -135,12 +137,14 @@ export interface PublicVideoBridge {
   start(role: PublicVideoRole): Promise<unknown>;
   status(generation: string): Promise<unknown>;
   nextFrame(generation: string): Promise<unknown>;
+  nextFrames?(generation: string, maximum: number): Promise<unknown>;
   stop(generation: string): Promise<unknown>;
   sendInput?(generation: string, event: string): Promise<unknown>;
 }
 
 export interface PublicVideoRenderer {
   start(): VideoFrameIngress | undefined;
+  availableCapacity?(): number;
   stop(): void;
 }
 
@@ -163,6 +167,7 @@ interface Run {
   cancelled: boolean;
   revoke?: Promise<void>;
   delay?: () => void;
+  statusDelay?: () => void;
 }
 
 /** Only trusted native IPC is wired to this parser; a valid frame is not authorization. */
@@ -174,7 +179,37 @@ export function parsePublicVideoFrame(value: unknown): NativeVideoFrame | null {
     value.byteLength > FRAME_HEADER_BYTES + MAX_AU_BYTES
   )
     throw new InvalidResponse();
-  const header = new DataView(value);
+  return parseFrameRecord(value, 0, MAX_AU_BYTES, true);
+}
+
+/** The entire bounded reply must be valid before any of its AUs is delivered. */
+export function parsePublicVideoBatch(value: unknown): NativeVideoFrame[] {
+  if (
+    !(value instanceof ArrayBuffer) ||
+    value.byteLength >
+      MAX_BATCH_FRAMES * (FRAME_HEADER_BYTES + MAX_BATCH_AU_BYTES)
+  )
+    throw new InvalidResponse();
+  const frames: NativeVideoFrame[] = [];
+  let offset = 0;
+  while (offset < value.byteLength) {
+    if (frames.length === MAX_BATCH_FRAMES) throw new InvalidResponse();
+    const frame = parseFrameRecord(value, offset, MAX_BATCH_AU_BYTES, false);
+    frames.push(frame);
+    offset += FRAME_HEADER_BYTES + frame.annexB.byteLength;
+  }
+  return frames;
+}
+
+function parseFrameRecord(
+  value: ArrayBuffer,
+  offset: number,
+  maximum: number,
+  exact: boolean,
+): NativeVideoFrame {
+  const available = value.byteLength - offset - FRAME_HEADER_BYTES;
+  if (available <= 0) throw new InvalidResponse();
+  const header = new DataView(value, offset, FRAME_HEADER_BYTES);
   const sequence = header.getBigUint64(0, true);
   const timestampUs = header.getBigUint64(8, true);
   const bytes = header.getUint32(16, true);
@@ -182,7 +217,10 @@ export function parsePublicVideoFrame(value: unknown): NativeVideoFrame | null {
   if (
     sequence > MAX_SAFE_BIGINT ||
     timestampUs > MAX_SAFE_BIGINT ||
-    bytes !== value.byteLength - FRAME_HEADER_BYTES ||
+    bytes === 0 ||
+    bytes > maximum ||
+    bytes > available ||
+    (exact && bytes !== available) ||
     flags > 1 ||
     header.getUint8(21) !== 0 ||
     header.getUint8(22) !== 0 ||
@@ -193,7 +231,7 @@ export function parsePublicVideoFrame(value: unknown): NativeVideoFrame | null {
     sequence: Number(sequence),
     timestampUs: Number(timestampUs),
     keyframe: flags === 1,
-    annexB: new Uint8Array(value, FRAME_HEADER_BYTES, bytes),
+    annexB: new Uint8Array(value, offset + FRAME_HEADER_BYTES, bytes),
   };
 }
 
@@ -591,36 +629,27 @@ export class PublicVideoSession {
       run.generationId = generation;
       let statusAt = -Infinity;
       let ready = false;
+      let statusInterval = STATUS_INTERVAL_MS;
+      let pullBatch: PublicVideoBridge['nextFrames'];
       while (this.active(run)) {
-        if (performance.now() - statusAt >= STATUS_INTERVAL_MS) {
+        if (!pullBatch && performance.now() - statusAt >= statusInterval) {
           diagnosticPhase = 'status';
           const nativeStatus = await withDeadline(
             this.bridge.status(generation),
           );
           if (!this.active(run)) return;
           const current = parseStatus(nativeStatus, run.role);
-          this.onPath(current.connectionPath);
-          run.inputWheel = current.inputWheel === true;
-          if (run.controlLaunch && current.roundSeconds !== undefined)
-            this.onRound(current.roundSeconds);
-          this.observeProfile(run, current);
           statusAt = performance.now();
-          if (current.error !== undefined || current.end?.reason === 'failed') {
-            await this.retire(
-              run,
-              'failed',
-              errorCode(current.error, 'status'),
-              current.end,
-            );
-            return;
-          }
-          if (current.phase === 'closed' || current.phase === 'stopping') {
-            run.inputState = 'closed';
-            await this.retire(run, 'stopped', undefined, current.end);
-            return;
-          }
-          if (!this.observeInput(run, current)) return;
-          if (ready && current.phase !== 'ready') throw new InvalidResponse();
+          statusInterval =
+            current.phase === 'starting' &&
+            run.controlLaunch &&
+            run.role === 'viewer' &&
+            this.bridge.nextFrames &&
+            (current.roundSeconds === undefined ||
+              current.roundSeconds === 1800)
+              ? EMPTY_FRAME_DELAY_MS
+              : STATUS_INTERVAL_MS;
+          if (!this.applyStatus(run, current, ready)) return;
           if (!ready && current.phase === 'ready') {
             ready = true;
             if (run.role === 'host') {
@@ -642,11 +671,21 @@ export class PublicVideoSession {
               if (!this.active(run)) return;
               if (!run.ingress) throw new Error('Decoder unavailable');
               this.update('waiting');
+              if (
+                run.controlLaunch &&
+                current.roundSeconds === 1800 &&
+                this.bridge.nextFrames
+              ) {
+                pullBatch = this.bridge.nextFrames.bind(this.bridge);
+                // V3 media must keep draining through an unrelated status
+                // IPC about the connection/input state.
+                void this.watchStatus(run, generation);
+              }
             }
           }
         }
         if (!run.ingress) {
-          await this.delay(run, STATUS_INTERVAL_MS);
+          await this.delay(run, statusInterval);
           continue;
         }
         // A previous generation's IPC may settle after its stop acknowledgement.
@@ -661,7 +700,18 @@ export class PublicVideoSession {
           );
         }
         if (!this.active(run)) return;
-        const pending = this.bridge.nextFrame(generation);
+        const capacity = pullBatch
+          ? Math.min(MAX_BATCH_FRAMES, run.renderer?.availableCapacity?.() ?? 1)
+          : 1;
+        if (capacity === 0) {
+          // Leave the decoder cap intact. Wait for an output to return a credit
+          // before asking native for more complete AUs.
+          await this.delay(run, 10);
+          continue;
+        }
+        const pending = pullBatch
+          ? pullBatch(generation, capacity)
+          : this.bridge.nextFrame(generation);
         this.outstandingFrame = pending;
         const released = () => {
           if (this.outstandingFrame === pending)
@@ -670,11 +720,18 @@ export class PublicVideoSession {
         void pending.then(released, released);
         const bytes = await withDeadline(pending);
         if (!this.active(run)) return;
-        const frame = parsePublicVideoFrame(bytes);
-        if (!frame) await this.delay(run, EMPTY_FRAME_DELAY_MS);
+        const frames = pullBatch
+          ? parsePublicVideoBatch(bytes)
+          : [parsePublicVideoFrame(bytes)];
+        if (frames.length > capacity) throw new InvalidResponse();
+        if (!frames[0]) await this.delay(run, EMPTY_FRAME_DELAY_MS);
         else {
           diagnosticPhase = 'display';
-          if (!run.ingress(frame)) throw new Error('Decoder rejected frame');
+          for (const frame of frames) {
+            if (!this.active(run)) return;
+            if (!frame || !run.ingress(frame))
+              throw new Error('Decoder rejected frame');
+          }
         }
       }
     } catch (cause) {
@@ -683,6 +740,53 @@ export class PublicVideoSession {
           this.profileConsumed(run);
         await this.retire(run, 'failed', errorCode(cause, diagnosticPhase));
       }
+    }
+  }
+
+  private applyStatus(
+    run: Run,
+    current: NativeStatus,
+    ready: boolean,
+  ): boolean {
+    this.onPath(current.connectionPath);
+    run.inputWheel = current.inputWheel === true;
+    if (run.controlLaunch && current.roundSeconds !== undefined)
+      this.onRound(current.roundSeconds);
+    this.observeProfile(run, current);
+    if (current.error !== undefined || current.end?.reason === 'failed') {
+      void this.retire(
+        run,
+        'failed',
+        errorCode(current.error, 'status'),
+        current.end,
+      );
+      return false;
+    }
+    if (current.phase === 'closed' || current.phase === 'stopping') {
+      run.inputState = 'closed';
+      void this.retire(run, 'stopped', undefined, current.end);
+      return false;
+    }
+    if (!this.observeInput(run, current)) return false;
+    if (ready && current.phase !== 'ready') throw new InvalidResponse();
+    return true;
+  }
+
+  private async watchStatus(run: Run, generation: string): Promise<void> {
+    try {
+      while (this.active(run)) {
+        await this.delay(run, STATUS_INTERVAL_MS, 'statusDelay');
+        if (!this.active(run)) return;
+        const raw = await withDeadline(this.bridge.status(generation));
+        if (
+          !this.active(run) ||
+          !this.applyStatus(run, parseStatus(raw, run.role), true)
+        )
+          return;
+      }
+    } catch (cause) {
+      if (this.active(run))
+        await this.retire(run, 'failed', errorCode(cause, 'status'));
     }
   }
 
@@ -722,15 +826,19 @@ export class PublicVideoSession {
     }
   }
 
-  private delay(run: Run, ms: number): Promise<void> {
+  private delay(
+    run: Run,
+    ms: number,
+    wake: 'delay' | 'statusDelay' = 'delay',
+  ): Promise<void> {
     return new Promise((resolve) => {
       const done = () => {
         clearTimeout(timer);
-        run.delay = undefined;
+        run[wake] = undefined;
         resolve();
       };
       const timer = setTimeout(done, ms);
-      run.delay = done;
+      run[wake] = done;
     });
   }
 
@@ -754,6 +862,7 @@ export class PublicVideoSession {
             ),
           };
     run.delay?.();
+    run.statusDelay?.();
     run.ingress = undefined;
     run.renderer?.stop();
     run.renderer = undefined;

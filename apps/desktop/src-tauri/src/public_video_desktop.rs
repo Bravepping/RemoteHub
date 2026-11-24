@@ -40,6 +40,7 @@ const CANCELLED: &str = "PUBLIC_VIDEO_CANCELLED";
 const UNEXPECTED_CLOSE: &str = "PUBLIC_VIDEO_CLOSED_UNEXPECTEDLY";
 const PULL_TIMEOUT: Duration = Duration::from_millis(500);
 const MAX_FRAME_BYTES: usize = 256 * 1024;
+const MAX_PULLED_FRAMES: usize = 3;
 
 pub(crate) struct DesktopVideoState {
     launch: LaunchMode,
@@ -699,6 +700,7 @@ pub(crate) async fn public_video_stop(
 pub(crate) async fn public_video_next_frame(
     window: WebviewWindow,
     generation: String,
+    batch: Option<usize>,
 ) -> Result<Response, String> {
     let session = find(&window, &generation)?;
     if session.role != Role::Viewer {
@@ -715,6 +717,21 @@ pub(crate) async fn public_video_next_frame(
     if session.round_elapsed() {
         return Ok(Response::new(Vec::<u8>::new()));
     }
+    #[cfg(feature = "v2-session-window-sustained")]
+    let limit = if session.control
+        && session.owner != "main"
+        && session.round_seconds.get().copied()
+            == Some(hub_webrtc::public_video::SUSTAINED_CONTROL_SESSION_SECONDS as u16)
+    {
+        batch.unwrap_or(1).clamp(1, MAX_PULLED_FRAMES)
+    } else {
+        1
+    };
+    #[cfg(not(feature = "v2-session-window-sustained"))]
+    let limit = {
+        let _ = batch;
+        1
+    };
     let mut guard = session
         .receiver
         .try_lock()
@@ -734,8 +751,11 @@ pub(crate) async fn public_video_next_frame(
     }
     match result {
         Ok(Ok(frame)) => {
-            let bytes = frame_bytes(frame)?;
-            if *stop.borrow() {
+            let bytes = frame_bytes(frame, limit, receiver)?;
+            if receiver.is_revoked()
+                || *stop.borrow()
+                || session.status.borrow().phase != Phase::Ready
+            {
                 return Ok(Response::new(Vec::<u8>::new()));
             }
             #[cfg(feature = "v2-public-control-desktop")]
@@ -748,18 +768,38 @@ pub(crate) async fn public_video_next_frame(
     }
 }
 
-fn frame_bytes(frame: VerifiedVideoFrame) -> Result<Vec<u8>, &'static str> {
+fn frame_bytes(
+    first: VerifiedVideoFrame,
+    limit: usize,
+    receiver: &mut ScopedVideoReceiver,
+) -> Result<Vec<u8>, &'static str> {
+    let mut bytes = Vec::new();
+    append_frame(&mut bytes, first)?;
+    // Pull at most two additional already queued complete AUs. Do not
+    // wait for a batch to fill or increase the transport/decoder queues.
+    for _ in 1..limit {
+        match receiver.try_next_frame() {
+            Ok(Some(frame)) => append_frame(&mut bytes, frame)?,
+            Ok(None) => break,
+            // If revocation races this drain, suppress the entire batch.
+            Err(_) => return Ok(Vec::new()),
+        }
+    }
+    Ok(bytes)
+}
+
+fn append_frame(bytes: &mut Vec<u8>, frame: VerifiedVideoFrame) -> Result<(), &'static str> {
     let len = frame.annex_b.len();
     if len == 0 || len > MAX_FRAME_BYTES {
         return Err("PUBLIC_VIDEO_FRAME_SIZE");
     }
-    let mut bytes = Vec::with_capacity(24 + len);
+    bytes.reserve_exact(24 + len);
     bytes.extend_from_slice(&frame.sequence.to_le_bytes());
     bytes.extend_from_slice(&frame.timestamp_us.to_le_bytes());
     bytes.extend_from_slice(&(len as u32).to_le_bytes());
     bytes.extend_from_slice(&[u8::from(frame.keyframe), 0, 0, 0]);
     bytes.extend_from_slice(&frame.annex_b);
-    Ok(bytes)
+    Ok(())
 }
 
 async fn stopped(stop: &mut watch::Receiver<bool>) {
@@ -1260,16 +1300,42 @@ mod tests {
 
     #[test]
     fn frame_has_fixed_little_endian_header_and_exact_bytes() {
-        let bytes = frame_bytes(VerifiedVideoFrame {
-            sequence: 7,
-            timestamp_us: 42,
-            keyframe: true,
-            annex_b: vec![0, 0, 0, 1, 0x65],
-        })
+        let mut bytes = Vec::new();
+        append_frame(
+            &mut bytes,
+            VerifiedVideoFrame {
+                sequence: 7,
+                timestamp_us: 42,
+                keyframe: true,
+                annex_b: vec![0, 0, 0, 1, 0x65],
+            },
+        )
         .unwrap();
         assert_eq!(&bytes[..8], &7u64.to_le_bytes());
         assert_eq!(&bytes[8..16], &42u64.to_le_bytes());
         assert_eq!(&bytes[16..24], &[5, 0, 0, 0, 1, 0, 0, 0]);
         assert_eq!(&bytes[24..], &[0, 0, 0, 1, 0x65]);
+    }
+
+    #[test]
+    fn appended_complete_frames_keep_record_boundaries_and_size_limit() {
+        let mut bytes = Vec::new();
+        for sequence in 0..2 {
+            append_frame(
+                &mut bytes,
+                VerifiedVideoFrame {
+                    sequence,
+                    timestamp_us: sequence * 33_333,
+                    keyframe: sequence == 0,
+                    annex_b: vec![0, 0, 1, if sequence == 0 { 0x65 } else { 0x41 }, 9],
+                },
+            )
+            .unwrap();
+        }
+        assert_eq!(bytes.len(), 58);
+        assert_eq!(&bytes[16..21], &[5, 0, 0, 0, 1]);
+        assert_eq!(&bytes[29..37], &1u64.to_le_bytes());
+        assert_eq!(&bytes[45..50], &[5, 0, 0, 0, 0]);
+        assert_eq!(&bytes[53..], &[0, 0, 1, 0x41, 9]);
     }
 }

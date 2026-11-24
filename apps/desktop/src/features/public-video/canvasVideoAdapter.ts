@@ -142,6 +142,17 @@ export class CanvasVideoAdapter {
     return this.active === run ? (frame) => this.push(run, frame) : undefined;
   }
 
+  availableCapacity(): number {
+    const run = this.active;
+    if (!run?.decoder) return 0;
+    const queued = run.decoder.decodeQueueSize;
+    if (!Number.isSafeInteger(queued) || queued < 0) return 0;
+    return Math.max(
+      0,
+      MAX_PENDING_VIDEO_FRAMES - Math.max(run.pending.size, queued),
+    );
+  }
+
   private push(run: Generation, frame: NativeVideoFrame): boolean {
     if (this.active !== run || !run.decoder) return false;
     const decoder = run.decoder;

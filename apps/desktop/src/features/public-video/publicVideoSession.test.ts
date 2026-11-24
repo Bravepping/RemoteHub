@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VideoDisplayFailure } from './canvasVideoAdapter';
 import {
+  parsePublicVideoBatch,
   parsePublicVideoFrame,
   PublicVideoSession,
   type PublicVideoBridge,
@@ -30,6 +31,36 @@ function raw(sequence = 0, timestampUs = 0, key = true): ArrayBuffer {
   new Uint8Array(frame, 24).set(payload);
   return frame;
 }
+
+function packed(...frames: ArrayBuffer[]): ArrayBuffer {
+  const buffer = new ArrayBuffer(
+    frames.reduce((sum, frame) => sum + frame.byteLength, 0),
+  );
+  let offset = 0;
+  for (const frame of frames) {
+    new Uint8Array(buffer, offset, frame.byteLength).set(new Uint8Array(frame));
+    offset += frame.byteLength;
+  }
+  return buffer;
+}
+
+describe('native bounded video batch', () => {
+  it('parses complete ordered records or rejects the entire invalid reply', () => {
+    expect(parsePublicVideoBatch(new ArrayBuffer(0))).toEqual([]);
+    const batch = packed(raw(), raw(1, 33_333, false), raw(2, 66_666, false));
+    expect(parsePublicVideoBatch(batch).map((frame) => frame.sequence)).toEqual(
+      [0, 1, 2],
+    );
+    expect(() => parsePublicVideoBatch(packed(batch, raw(3)))).toThrow();
+    expect(() => parsePublicVideoBatch(batch.slice(0, -1))).toThrow();
+    const invalid = packed(raw(), raw(1));
+    new DataView(invalid).setUint8(raw().byteLength + 22, 1);
+    expect(() => parsePublicVideoBatch(invalid)).toThrow();
+    expect(() =>
+      parsePublicVideoBatch(new ArrayBuffer(3 * (24 + 256 * 1024) + 1)),
+    ).toThrow();
+  });
+});
 
 describe('native raw video frame', () => {
   it('parses the little-endian layout and treats only an empty buffer as pending', () => {
@@ -96,13 +127,22 @@ describe('public video viewer controller', () => {
       nextFrame: vi
         .fn<PublicVideoBridge['nextFrame']>()
         .mockResolvedValue(new ArrayBuffer(0)),
+      nextFrames: vi
+        .fn<NonNullable<PublicVideoBridge['nextFrames']>>()
+        .mockResolvedValue(new ArrayBuffer(0)),
       stop: vi.fn<PublicVideoBridge['stop']>().mockResolvedValue(undefined),
       sendInput: vi
         .fn<NonNullable<PublicVideoBridge['sendInput']>>()
         .mockResolvedValue(undefined),
     };
-    const ingress = vi.fn(() => true);
-    const renderer = { start: vi.fn(() => ingress), stop: vi.fn() };
+    const ingress = vi.fn<
+      (frame: NonNullable<ReturnType<typeof parsePublicVideoFrame>>) => boolean
+    >(() => true);
+    const renderer = {
+      start: vi.fn(() => ingress),
+      availableCapacity: vi.fn(() => 3),
+      stop: vi.fn(),
+    };
     let draw!: () => void;
     const create = vi.fn(
       (_failed: (code: VideoDisplayFailure) => void, presented: () => void) => {
@@ -134,6 +174,108 @@ describe('public video viewer controller', () => {
       draw: () => draw(),
     };
   }
+
+  it('drains a bounded 30fps source in order while a status IPC stalls and suppresses both late lanes after Stop', async () => {
+    const { bridge, renderer, ingress, update, session, input } = harness();
+    const status = deferred<unknown>();
+    const frame = deferred<unknown>();
+    bridge.status
+      .mockResolvedValueOnce({ phase: 'starting', round_seconds: 1800 })
+      .mockResolvedValueOnce({
+        phase: 'ready',
+        round_seconds: 1800,
+        input_state: 'pending',
+      })
+      .mockReturnValueOnce(status.promise)
+      .mockResolvedValue({ phase: 'closed', profile_consumed: true });
+    const queue: ArrayBuffer[] = [];
+    let sequence = 0;
+    let currentPulls = 0;
+    let maxPulls = 0;
+    let queueWouldOverflow = false;
+    let lastPull: Promise<unknown> | undefined;
+    bridge.nextFrames.mockImplementation(async (_generation, limit) => {
+      ++currentPulls;
+      maxPulls = Math.max(maxPulls, currentPulls);
+      try {
+        // Model one 50ms IPC round trip: a single-frame pull is slower
+        // than the source even without a stalled status call.
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return lastPull ?? packed(...queue.splice(0, limit));
+      } finally {
+        --currentPulls;
+      }
+    });
+    const producer = setInterval(() => {
+      if (queue.length === 3) {
+        queueWouldOverflow = true;
+        return;
+      }
+      queue.push(raw(sequence, sequence * 33_333, sequence === 0));
+      ++sequence;
+    }, 33);
+    try {
+      session.start('viewer', true);
+      await vi.advanceTimersByTimeAsync(34);
+      expect(bridge.status).toHaveBeenCalledTimes(2);
+      expect(bridge.nextFrames).toHaveBeenCalledWith(first, 3);
+      expect(bridge.nextFrame).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(685);
+      expect(bridge.status).toHaveBeenCalledTimes(3);
+      expect(ingress.mock.calls.length).toBeGreaterThan(15);
+      expect(ingress.mock.calls.map(([value]) => value.sequence)).toEqual(
+        Array.from({ length: ingress.mock.calls.length }, (_, n) => n),
+      );
+      expect(queueWouldOverflow).toBe(false);
+      expect(maxPulls).toBe(1);
+      lastPull = frame.promise;
+      await vi.advanceTimersByTimeAsync(70);
+      const framesBeforeStop = ingress.mock.calls.length;
+      // Stop owns native shutdown; neither pending IPC is a prerequisite.
+      await session.stop();
+      status.resolve({
+        phase: 'ready',
+        round_seconds: 1800,
+        input_state: 'allowed',
+      });
+      frame.resolve(packed(raw(sequence, sequence * 33_333, false)));
+      await vi.advanceTimersByTimeAsync(5);
+      expect(ingress.mock.calls.length).toBe(framesBeforeStop);
+      expect(input).not.toHaveBeenCalledWith(
+        'allowed',
+        expect.anything(),
+        expect.anything(),
+      );
+      expect(renderer.stop).toHaveBeenCalledTimes(1);
+      expect(update).toHaveBeenLastCalledWith('stopped', undefined, {
+        reason: 'local_stop',
+      });
+    } finally {
+      clearInterval(producer);
+    }
+  });
+
+  it('reserves only advertised decoder credits, and rejects an oversized reply before delivering any frame', async () => {
+    const { bridge, renderer, ingress, session, update } = harness();
+    bridge.status
+      .mockResolvedValueOnce({ phase: 'ready', round_seconds: 1800 })
+      .mockResolvedValue({ phase: 'closed', profile_consumed: true });
+    renderer.availableCapacity.mockReturnValue(0);
+    bridge.nextFrames.mockResolvedValueOnce(
+      packed(raw(), raw(1, 33_333, false)),
+    );
+    session.start('viewer', true);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(bridge.nextFrames).not.toHaveBeenCalled();
+    renderer.availableCapacity.mockReturnValue(1);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(bridge.nextFrames).toHaveBeenCalledExactlyOnceWith(first, 1);
+    expect(ingress).not.toHaveBeenCalled();
+    expect(update).toHaveBeenLastCalledWith(
+      'failed',
+      'PUBLIC_VIDEO_RESPONSE_INVALID',
+    );
+  });
 
   it.each(['host', 'viewer'] as const)(
     'shows only confirmed paths for %s and clears stale paths',

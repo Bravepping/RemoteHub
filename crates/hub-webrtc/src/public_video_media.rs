@@ -150,6 +150,28 @@ impl ScopedVideoReceiver {
         }
         Ok(frame)
     }
+
+    /// Native callers must recheck revocation after serializing a response.
+    pub fn is_revoked(&self) -> bool {
+        *self.closed.borrow()
+    }
+
+    /// Drain a complete verified AU without waiting. Revocation wins even
+    /// when a frame has already been queued.
+    pub fn try_next_frame(&mut self) -> Result<Option<VerifiedVideoFrame>, &'static str> {
+        if *self.closed.borrow() {
+            return Err(CLOSED);
+        }
+        let frame = match self.queue.try_recv() {
+            Ok(frame) => Some(frame),
+            Err(mpsc::error::TryRecvError::Empty) => None,
+            Err(mpsc::error::TryRecvError::Disconnected) => return Err(CLOSED),
+        };
+        if *self.closed.borrow() {
+            return Err(CLOSED);
+        }
+        Ok(frame)
+    }
 }
 
 fn validate_access_unit(packets: &[Packet]) -> Result<(), &'static str> {
@@ -507,6 +529,27 @@ mod tests {
             .ok()
             .unwrap();
         media.revoke();
+        assert_eq!(receiver.next_frame().await.err(), Some(CLOSED));
+    }
+
+    #[tokio::test]
+    async fn opportunistic_complete_frame_drain_is_ordered_and_revocation_wins() {
+        let (media, mut receiver) = ScopedVideoMedia::viewer();
+        let Port::Viewer(queue) = &media.port else {
+            panic!("viewer queue")
+        };
+        assert!(receiver.try_next_frame().unwrap().is_none());
+        for sequence in 0..3 {
+            queue.try_send(complete_frame(sequence)).unwrap();
+        }
+        assert_eq!(receiver.next_frame().await.unwrap().sequence, 0);
+        assert_eq!(receiver.try_next_frame().unwrap().unwrap().sequence, 1);
+        assert_eq!(receiver.try_next_frame().unwrap().unwrap().sequence, 2);
+        assert!(receiver.try_next_frame().unwrap().is_none());
+        queue.try_send(complete_frame(3)).unwrap();
+        media.revoke();
+        assert!(receiver.is_revoked());
+        assert_eq!(receiver.try_next_frame().err(), Some(CLOSED));
         assert_eq!(receiver.next_frame().await.err(), Some(CLOSED));
     }
 

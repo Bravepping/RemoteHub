@@ -521,6 +521,10 @@ onMounted(() => {
       status: (generation) => invoke('public_video_status', { generation }),
       nextFrame: (generation) =>
         invoke('public_video_next_frame', { generation }),
+      nextFrames: props.windowOwner
+        ? (generation, batch) =>
+            invoke('public_video_next_frame', { generation, batch })
+        : undefined,
       stop: (generation) => invoke('public_video_stop', { generation }),
       sendInput: (generation, event) =>
         invoke('public_control_send_input', { generation, event }),

@@ -238,3 +238,20 @@ it('clears the canvas on a paint fault and emits only a fixed error code', () =>
   expect(f.failed).toHaveBeenLastCalledWith('VIDEO_PAINT_FAILED');
   expect(f.decoders[0].close).toHaveBeenCalledTimes(1);
 });
+
+it('reports only available decoder credits and returns them on valid output', () => {
+  const f = fixture();
+  expect(f.adapter.availableCapacity()).toBe(0);
+  const ingest = f.adapter.start()!;
+  expect(f.adapter.availableCapacity()).toBe(MAX_PENDING_VIDEO_FRAMES);
+  expect(ingest(au())).toBe(true);
+  expect(ingest(au(1))).toBe(true);
+  expect(f.adapter.availableCapacity()).toBe(MAX_PENDING_VIDEO_FRAMES - 2);
+  f.decoders[0].decodeQueueSize = MAX_PENDING_VIDEO_FRAMES - 1;
+  expect(f.adapter.availableCapacity()).toBe(1);
+  f.decoders[0].decodeQueueSize = 0;
+  f.decoders[0].init.output(decoded(0));
+  expect(f.adapter.availableCapacity()).toBe(MAX_PENDING_VIDEO_FRAMES - 1);
+  f.adapter.stop();
+  expect(f.adapter.availableCapacity()).toBe(0);
+});
