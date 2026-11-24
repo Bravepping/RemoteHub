@@ -42,6 +42,10 @@ mod public_fake_input_sdp;
 mod public_fake_input_sdp_fixture;
 #[cfg(all(test, feature = "v2-public-fake-input-proof"))]
 mod public_fake_input_turn_tests;
+#[cfg(all(test, feature = "v2-public-fake-input-proof"))]
+mod public_fake_input_wss_fixture;
+#[cfg(all(test, feature = "v2-public-fake-input-proof"))]
+mod public_fake_input_wss_wire;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
 #[cfg(feature = "v2-public-video-wss")]

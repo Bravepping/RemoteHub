@@ -1,12 +1,16 @@
-//! Real ICE/DTLS/SCTP plus a fake input sink. Only fixture loopback UDP
-//! can leave the driver; the relay's public-looking tuples are labels.
+//! Real loopback-only WSS and TURN ICE/DTLS/SCTP with a fake input sink.
+//! Public-looking relay tuples are only labels; neither path leaves loopback.
 use crate::{
     ice_policy::IceMode,
     input_approval::{End, Error as ApprovalError, InputScope, SessionSink, SinkError, State},
     input_queue::{Control, Dispatch, Error as QueueError, InputQueue},
     pinned_runtime::PinnedRuntime,
-    public_fake_input::{FakeInputProof, FakeInputProofScope, FakeInputTestMode},
+    public_fake_input::{
+        Error as ProofError, FakeInputProof, FakeInputProofScope, FakeInputTestMode,
+    },
     public_fake_input_sdp_fixture::sanitize,
+    public_fake_input_wss_fixture::FixtureWss,
+    public_fake_input_wss_wire::{self as wire, Context as WireContext, Frame, Kind},
     public_video::PublicVideoScope,
     relay_runtime::RelayRuntime,
 };
@@ -361,9 +365,52 @@ impl SessionSink for Rc<Fake> {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Case {
+    Approved,
+    StopBeforeConsent,
+    TamperedOffer,
+}
+
 #[tokio::test]
-async fn signed_relay_only_sctp_applies_only_one_approved_fixture_marker() {
+async fn signed_wss_turn_sctp_applies_only_one_approved_fixture_marker() {
+    exercise(Case::Approved).await;
+}
+
+#[tokio::test]
+async fn wss_loss_before_consent_prevents_late_yes_and_ack() {
+    exercise(Case::StopBeforeConsent).await;
+}
+
+#[tokio::test]
+async fn wss_delivered_tampered_offer_never_admits_a_relay_peer() {
+    exercise(Case::TamperedOffer).await;
+}
+
+async fn close_rtc(host: &Peer, viewer: &Peer, turn: &FixtureTurn) {
+    host.runtime.revoke();
+    viewer.runtime.revoke();
+    let (host_close, viewer_close) = tokio::join!(host.pc.close(), viewer.pc.close());
+    host_close.unwrap();
+    viewer_close.unwrap();
+    for runtime in [&host.runtime, &viewer.runtime] {
+        let loopback = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        loopback.set_nonblocking(true).unwrap();
+        let socket = runtime.wrap_udp_socket(loopback).unwrap();
+        assert_eq!(
+            socket
+                .send_to(b"stopped fixture", turn.server().into())
+                .await
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::PermissionDenied
+        );
+    }
+}
+
+async fn exercise(case: Case) {
     tokio::time::timeout(WAIT, async {
+        let mut wss = FixtureWss::start().await.unwrap();
         let turn = FixtureTurn::start(20).await.unwrap();
         turn.block_direct(true);
         assert_eq!(*turn.server().ip(), Ipv4Addr::LOCALHOST);
@@ -375,9 +422,11 @@ async fn signed_relay_only_sctp_applies_only_one_approved_fixture_marker() {
             room: Uuid::new_v4(),
             generation: [9; 32],
             route: PublicVideoScope {
-                wss: SocketAddrV4::new(RELAY_LABEL, 8443), // signed label, never dialed
-                ca_sha256: [7; 32],
-                turn: SocketAddrV4::new(RELAY_LABEL, 3478),
+                // Bind the real fixture port and CA, but only the socket
+                // fixture ever dials it (at its physical loopback IP).
+                wss: SocketAddrV4::new(RELAY_LABEL, wss.port()),
+                ca_sha256: wss.ca_sha256(),
+                turn: SocketAddrV4::new(RELAY_LABEL, turn.server().port()),
                 relay_ports: RELAY_PORTS,
                 mode: IceMode::RelayOnly,
                 expires_at: wall() + 120,
@@ -396,6 +445,38 @@ async fn signed_relay_only_sctp_applies_only_one_approved_fixture_marker() {
             wall(),
         )
         .unwrap();
+        let ctx = WireContext {
+            room: scope.room,
+            generation: scope.generation,
+        };
+        let host_challenge = wire::encode(
+            ctx,
+            Kind::HostChallenge,
+            Frame::Challenge(host_proof.challenge(wall()).unwrap()),
+        )
+        .unwrap();
+        wss.host.send(&host_challenge).await.unwrap();
+        let host_wire = wss.viewer.recv().await.unwrap();
+        let Frame::Challenge(host_challenge) =
+            wire::decode(ctx, Kind::HostChallenge, &host_wire).unwrap()
+        else {
+            panic!("expected host challenge over WSS")
+        };
+
+        let viewer_challenge = wire::encode(
+            ctx,
+            Kind::ViewerChallenge,
+            Frame::Challenge(viewer_proof.challenge(wall()).unwrap()),
+        )
+        .unwrap();
+        wss.viewer.send(&viewer_challenge).await.unwrap();
+        let viewer_wire = wss.host.recv().await.unwrap();
+        let Frame::Challenge(viewer_challenge) =
+            wire::decode(ctx, Kind::ViewerChallenge, &viewer_wire).unwrap()
+        else {
+            panic!("expected viewer challenge over WSS")
+        };
+
         let mut host = Peer::start(&turn).await;
         let mut viewer = Peer::start(&turn).await;
         let viewer_channel = viewer
@@ -411,24 +492,83 @@ async fn signed_relay_only_sctp_applies_only_one_approved_fixture_marker() {
             .unwrap();
 
         let offer = viewer.local(false).await;
-        let sig = viewer_proof
-            .seal(host_proof.challenge(wall()).unwrap(), &offer, wall())
-            .unwrap();
-        host_proof.verify(&offer, &sig, wall()).unwrap();
+        let mut signature = viewer_proof.seal(host_challenge, &offer, wall()).unwrap();
+        if case == Case::TamperedOffer {
+            signature[0] ^= 1;
+        }
+        let offer_frame = wire::encode(
+            ctx,
+            Kind::Offer,
+            Frame::SignedSdp {
+                sdp: &offer,
+                signature,
+            },
+        )
+        .unwrap();
+        wss.viewer.send(&offer_frame).await.unwrap();
+        let offer_wire = wss.host.recv().await.unwrap();
+        let Frame::SignedSdp {
+            sdp: received_offer,
+            signature,
+        } = wire::decode(ctx, Kind::Offer, &offer_wire).unwrap()
+        else {
+            panic!("expected signed offer over WSS")
+        };
+        assert_eq!(received_offer.as_bytes(), offer.as_bytes());
+        let verified = host_proof.verify(received_offer, &signature, wall());
+        if case == Case::TamperedOffer {
+            assert_eq!(verified, Err(ProofError::Rejected));
+            assert!(host_proof.approved_relay_pair(wall()).is_none());
+            assert!(host.pc.remote_description().await.is_none());
+            for port in [RELAY_PORTS.0, RELAY_PORTS.1] {
+                assert!(!host
+                    .runtime
+                    .allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, port).into()));
+            }
+            assert_eq!(turn.stats().forwarded_packets, 0);
+            close_rtc(&host, &viewer, &turn).await;
+            wss.close().await.unwrap();
+            return;
+        }
+        verified.unwrap();
+
+        // The physical helper may start an allocation, but the logical
+        // peer does not enter the runtime until the exact WSS bytes verify.
         let viewer_relay = scope
-            .validate_relay_sctp_description(&offer, SessionRole::Viewer, wall())
+            .validate_relay_sctp_description(received_offer, SessionRole::Viewer, wall())
             .unwrap();
-        host.remote(&offer, false, viewer_relay).await;
+        host.remote(received_offer, false, viewer_relay).await;
         let answer = host.local(true).await;
-        let sig = host_proof
-            .seal(viewer_proof.challenge(wall()).unwrap(), &answer, wall())
+        let signature = host_proof.seal(viewer_challenge, &answer, wall()).unwrap();
+        let answer_frame = wire::encode(
+            ctx,
+            Kind::Answer,
+            Frame::SignedSdp {
+                sdp: &answer,
+                signature,
+            },
+        )
+        .unwrap();
+        wss.host.send(&answer_frame).await.unwrap();
+        let answer_wire = wss.viewer.recv().await.unwrap();
+        let Frame::SignedSdp {
+            sdp: received_answer,
+            signature,
+        } = wire::decode(ctx, Kind::Answer, &answer_wire).unwrap()
+        else {
+            panic!("expected signed answer over WSS")
+        };
+        assert_eq!(received_answer.as_bytes(), answer.as_bytes());
+        viewer_proof
+            .verify(received_answer, &signature, wall())
             .unwrap();
-        viewer_proof.verify(&answer, &sig, wall()).unwrap();
         let viewer_pair = viewer_proof.approved_relay_pair(wall()).unwrap();
         let host_pair = host_proof.approved_relay_pair(wall()).unwrap();
         assert_eq!(host_pair.remote(), viewer_pair.local());
         assert_eq!(host_pair.local(), viewer_pair.remote());
-        viewer.remote(&answer, true, viewer_pair.remote()).await;
+        viewer
+            .remote(received_answer, true, viewer_pair.remote())
+            .await;
 
         let host_channel = host.channels.recv().await.unwrap();
         tokio::join!(opened(&host_channel), opened(&viewer_channel));
@@ -472,6 +612,32 @@ async fn signed_relay_only_sctp_applies_only_one_approved_fixture_marker() {
         assert_eq!(input.enqueue(&input_scope, ()), Err(DENIED));
         assert_eq!(fake.applied.get(), 0);
         no_ack(&viewer_channel).await;
+
+        if case == Case::StopBeforeConsent {
+            // Observe loss from the actual authenticated fixture socket.
+            // The serialized owner processes it before the delayed reply.
+            wss.viewer.disconnect().await.unwrap();
+            assert_eq!(wss.host.recv().await, Err("FAKE_INPUT_FIXTURE_WSS_CLOSED"));
+            assert_eq!(
+                input.advance(Control::TransportLost),
+                Ok(State::Ended(End::Disconnected))
+            );
+            assert_eq!(
+                input.complete_local_decision(pending, &input_scope, true, Control::TransportLost),
+                Err(DENIED)
+            );
+            assert_eq!(input.enqueue(&input_scope, ()), Err(DENIED));
+            assert_eq!(
+                input.dispatch_next(&input_scope, Control::Continue),
+                Ok(Dispatch::Closed)
+            );
+            assert_eq!(fake.applied.get(), 0);
+            assert_eq!(fake.released.get(), 0);
+            no_ack(&viewer_channel).await;
+            close_rtc(&host, &viewer, &turn).await;
+            wss.close().await.unwrap();
+            return;
+        }
 
         // Test owner's separate consent. Nothing read from SCTP can grant it.
         input
@@ -517,24 +683,8 @@ async fn signed_relay_only_sctp_applies_only_one_approved_fixture_marker() {
         assert!(turn.stats().forwarded_packets > connected.forwarded_packets);
         assert_eq!(turn.stats().direct_forwarded, 0);
 
-        host.runtime.revoke();
-        viewer.runtime.revoke();
-        let (host_close, viewer_close) = tokio::join!(host.pc.close(), viewer.pc.close());
-        host_close.unwrap();
-        viewer_close.unwrap();
-        for runtime in [&host.runtime, &viewer.runtime] {
-            let loopback = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-            loopback.set_nonblocking(true).unwrap();
-            let socket = runtime.wrap_udp_socket(loopback).unwrap();
-            assert_eq!(
-                socket
-                    .send_to(b"stopped fixture", turn.server().into())
-                    .await
-                    .unwrap_err()
-                    .kind(),
-                io::ErrorKind::PermissionDenied
-            );
-        }
+        close_rtc(&host, &viewer, &turn).await;
+        wss.close().await.unwrap();
         assert!(!host.runtime.allows_turn_peer(host_pair.remote().into()));
         assert!(!viewer.runtime.allows_turn_peer(viewer_pair.remote().into()));
     })
