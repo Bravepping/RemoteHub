@@ -47,9 +47,24 @@ pub mod public_fake_input_profile;
 mod public_fake_input_sdp;
 #[cfg(any(
     all(test, feature = "v2-public-fake-input-proof"),
-    feature = "v2-public-fake-input-loopback-check"
+    feature = "v2-public-fake-input-loopback-check",
+    all(target_os = "linux", feature = "v2-public-fake-input-process-check")
 ))]
 mod public_fake_input_sdp_fixture;
+#[cfg(any(
+    all(test, feature = "v2-public-fake-input-proof"),
+    feature = "v2-public-fake-input-loopback-check",
+    all(target_os = "linux", feature = "v2-public-fake-input-process-check")
+))]
+mod public_fake_input_turn_fixture;
+#[cfg(any(
+    all(test, feature = "v2-public-fake-input-proof"),
+    feature = "v2-public-fake-input-loopback-check",
+    all(target_os = "linux", feature = "v2-public-fake-input-process-check")
+))]
+#[path = "public_video_turn_fixture_net.rs"]
+#[allow(dead_code)]
+mod public_fake_input_turn_net;
 #[cfg(any(
     all(test, feature = "v2-public-fake-input-proof"),
     feature = "v2-public-fake-input-loopback-check"

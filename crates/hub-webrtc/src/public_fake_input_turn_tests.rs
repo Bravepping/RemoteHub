@@ -4,285 +4,40 @@ use crate::{
     ice_policy::IceMode,
     input_approval::{End, Error as ApprovalError, InputScope, SessionSink, SinkError, State},
     input_queue::{Control, Dispatch, Error as QueueError, InputQueue},
-    pinned_runtime::PinnedRuntime,
     public_fake_input::{
         Error as ProofError, FakeInputProof, FakeInputProofScope, FakeInputTestMode,
     },
     public_fake_input_profile::{check_pair, Error as ProfileError, SyntheticProfile},
-    public_fake_input_sdp_fixture::sanitize,
+    public_fake_input_turn_fixture::{
+        no_ack, opened, text, wall, Peer, TurnFixtureConfig, LABEL, PROTOCOL, WAIT,
+    },
+    public_fake_input_turn_net::{FixtureTurn, RELAY_LABEL, RELAY_PORTS},
     public_fake_input_wss_fixture::{FixtureSocket, FixtureWss},
     public_fake_input_wss_wire::{self as wire, Context as WireContext, Frame, Kind},
     public_video::PublicVideoScope,
-    relay_runtime::RelayRuntime,
 };
 use hub_identity::{
     pairing::{PairingCandidate, VerifiedPeer},
     session::SessionRole,
     Identity,
 };
-use rtc::{
-    ice::{mdns::MulticastDnsMode, network_type::NetworkType},
-    peer_connection::transport::{
-        RTCDtlsTransportState, RTCIceTransportState, RTCSctpTransportState,
-    },
-};
 use std::{
     cell::Cell,
-    future::Future,
     io,
-    net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, UdpSocket},
-    pin::Pin,
+    net::{Ipv4Addr, SocketAddrV4, UdpSocket},
     rc::Rc,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, Mutex,
-    },
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    sync::Arc,
+    time::{Duration, Instant},
 };
-use tokio::sync::{mpsc, watch};
 use uuid::Uuid;
 use webrtc::{
-    data_channel::{DataChannel, DataChannelEvent, RTCDataChannelInit},
-    peer_connection::{
-        PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
-        RTCIceGatheringState, RTCIceTransportPolicy, RTCSessionDescription, SettingEngineBuilder,
-    },
-    runtime::{
-        AsyncInterval, AsyncTcpListener, AsyncTcpStream, AsyncUdpSocket, JoinHandle, Runtime,
-    },
+    data_channel::{DataChannel, RTCDataChannelInit},
+    runtime::Runtime,
 };
 
-#[path = "public_video_turn_fixture_net.rs"]
-#[allow(dead_code)]
-mod turn_fixture_net;
-use turn_fixture_net::{FixtureTurn, RELAY_LABEL, RELAY_PORTS};
-
-const LABEL: &str = "remotehub-turn-fiction";
-const PROTOCOL: &str = "remotehub.fixture";
-const WAIT: Duration = Duration::from_secs(12);
 const DENIED: QueueError = QueueError::Approval(ApprovalError::NotAllowed);
 const WSS_CLOSED: &str = "FAKE_INPUT_FIXTURE_WSS_CLOSED";
 const TEST_MODE: FakeInputTestMode = FakeInputTestMode::Enabled;
-
-#[derive(Debug)]
-struct FixtureRuntime {
-    physical: RelayRuntime,
-    peer: Mutex<Option<SocketAddrV4>>,
-}
-
-impl FixtureRuntime {
-    fn new(turn: &FixtureTurn) -> Self {
-        Self {
-            physical: RelayRuntime {
-                base: PinnedRuntime {
-                    inner: webrtc::runtime::default_runtime().unwrap(),
-                    local: Ipv4Addr::LOCALHOST.into(),
-                    peer: Ipv4Addr::LOCALHOST.into(),
-                    counters: Arc::default(),
-                },
-                endpoint: turn.server().into(),
-                deadline: Instant::now() + WAIT,
-                stopped: Arc::new(AtomicBool::new(false)),
-            },
-            peer: Mutex::new(None),
-        }
-    }
-
-    fn admit(&self, peer: SocketAddrV4) {
-        assert_eq!(*peer.ip(), RELAY_LABEL);
-        assert!((RELAY_PORTS.0..=RELAY_PORTS.1).contains(&peer.port()));
-        assert!(self.peer.lock().unwrap().replace(peer).is_none());
-    }
-
-    fn revoke(&self) {
-        self.physical.stopped.store(true, Ordering::Release);
-        if let Ok(mut peer) = self.peer.lock() {
-            peer.take();
-        }
-    }
-}
-
-impl Runtime for FixtureRuntime {
-    fn spawn(&self, task: Pin<Box<dyn Future<Output = ()> + Send>>) -> Box<dyn JoinHandle> {
-        self.physical.spawn(task)
-    }
-    fn wrap_udp_socket(&self, socket: UdpSocket) -> io::Result<Arc<dyn AsyncUdpSocket>> {
-        self.physical.wrap_udp_socket(socket)
-    }
-    fn wrap_tcp_listener(&self, socket: TcpListener) -> io::Result<Arc<dyn AsyncTcpListener>> {
-        self.physical.wrap_tcp_listener(socket)
-    }
-    fn connect_tcp(
-        &self,
-        address: SocketAddr,
-    ) -> Pin<Box<dyn Future<Output = io::Result<Arc<dyn AsyncTcpStream>>> + Send + '_>> {
-        self.physical.connect_tcp(address)
-    }
-    fn resolve_host<'a>(
-        &'a self,
-        name: &'a str,
-    ) -> Pin<Box<dyn Future<Output = io::Result<Vec<SocketAddr>>> + Send + 'a>> {
-        self.physical.resolve_host(name)
-    }
-    fn interval(&self, delay: Duration) -> Box<dyn AsyncInterval> {
-        self.physical.interval(delay)
-    }
-    fn sleep(&self, delay: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        self.physical.sleep(delay)
-    }
-    fn block_on(&self, task: Pin<Box<dyn Future<Output = ()> + '_>>) {
-        self.physical.block_on(task)
-    }
-    fn requires_exact_turn_source(&self) -> bool {
-        true
-    }
-    fn allows_turn_peer(&self, peer: SocketAddr) -> bool {
-        !self.physical.stopped.load(Ordering::Acquire)
-            && Instant::now() < self.physical.deadline
-            && self
-                .peer
-                .lock()
-                .ok()
-                .and_then(|admitted| *admitted)
-                .map(SocketAddr::V4)
-                == Some(peer)
-    }
-}
-
-struct Events {
-    gathered: watch::Sender<bool>,
-    channels: mpsc::Sender<Arc<dyn DataChannel>>,
-}
-
-#[async_trait::async_trait]
-impl PeerConnectionEventHandler for Events {
-    async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
-        if state == RTCIceGatheringState::Complete {
-            self.gathered.send_replace(true);
-        }
-    }
-
-    async fn on_data_channel(&self, channel: Arc<dyn DataChannel>) {
-        self.channels
-            .try_send(channel)
-            .expect("one fixture channel");
-    }
-}
-
-struct Peer {
-    pc: Box<dyn PeerConnection>,
-    runtime: Arc<FixtureRuntime>,
-    gathered: watch::Receiver<bool>,
-    channels: mpsc::Receiver<Arc<dyn DataChannel>>,
-}
-
-impl Drop for Peer {
-    fn drop(&mut self) {
-        self.runtime.revoke();
-    }
-}
-
-impl Peer {
-    async fn start(turn: &FixtureTurn) -> Self {
-        let runtime = Arc::new(FixtureRuntime::new(turn));
-        let (gather_tx, gathered) = watch::channel(false);
-        let (channel_tx, channels) = mpsc::channel(1);
-        let pc = PeerConnectionBuilder::new()
-            .with_configuration(
-                RTCConfigurationBuilder::default()
-                    .with_ice_servers(vec![turn.ice_server()])
-                    .with_ice_transport_policy(RTCIceTransportPolicy::Relay)
-                    .build(),
-            )
-            .with_host_candidates(false)
-            .with_udp_addrs(vec![SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)])
-            .with_setting_engine(
-                SettingEngineBuilder::new()
-                    .with_multicast_dns_mode(MulticastDnsMode::Disabled)
-                    .with_network_types(vec![NetworkType::Udp4])
-                    .build(),
-            )
-            .with_runtime(runtime.clone())
-            .with_handler(Arc::new(Events {
-                gathered: gather_tx,
-                channels: channel_tx,
-            }))
-            .build()
-            .await
-            .unwrap();
-        Self {
-            pc: Box::new(pc),
-            runtime,
-            gathered,
-            channels,
-        }
-    }
-
-    async fn local(&mut self, answer: bool) -> String {
-        let initial = if answer {
-            self.pc.create_answer(None).await
-        } else {
-            self.pc.create_offer(None).await
-        }
-        .unwrap();
-        self.pc.set_local_description(initial).await.unwrap();
-        self.gathered.wait_for(|gathered| *gathered).await.unwrap();
-        let actual = self.pc.local_description().await.unwrap();
-        sanitize(
-            &actual.sdp,
-            RELAY_LABEL,
-            RELAY_PORTS.0,
-            RELAY_PORTS.1,
-            answer,
-        )
-        .unwrap_or_else(|error| panic!("native candidate policy rejected fixture SDP: {error}"))
-    }
-
-    async fn remote(&self, sdp: &str, answer: bool, verified_peer: SocketAddrV4) {
-        self.runtime.admit(verified_peer);
-        let desc = if answer {
-            RTCSessionDescription::answer(sdp.to_owned())
-        } else {
-            RTCSessionDescription::offer(sdp.to_owned())
-        }
-        .unwrap();
-        self.pc.set_remote_description(desc).await.unwrap();
-    }
-
-    async fn verify_pair(&self, proof: &mut FakeInputProof<'_>) {
-        let sctp = self.pc.sctp().await.unwrap();
-        let dtls = sctp.transport();
-        let ice = dtls.ice_transport();
-        assert_eq!(
-            sctp.state().await.unwrap(),
-            RTCSctpTransportState::Connected
-        );
-        assert_eq!(
-            dtls.state().await.unwrap(),
-            RTCDtlsTransportState::Connected
-        );
-        assert!(matches!(
-            ice.state().await.unwrap(),
-            RTCIceTransportState::Connected | RTCIceTransportState::Completed
-        ));
-        let actual = ice.get_selected_candidate_pair().await.unwrap();
-        assert_eq!(
-            sctp.state().await.unwrap(),
-            RTCSctpTransportState::Connected
-        );
-        assert_eq!(
-            dtls.state().await.unwrap(),
-            RTCDtlsTransportState::Connected
-        );
-        assert!(matches!(
-            ice.state().await.unwrap(),
-            RTCIceTransportState::Connected | RTCIceTransportState::Completed
-        ));
-        proof
-            .verify_selected_relay_pair(actual.as_ref(), wall())
-            .unwrap();
-    }
-}
 
 fn pin(local: &Identity, peer: &Identity) -> VerifiedPeer {
     let expected = peer.public();
@@ -292,58 +47,6 @@ fn pin(local: &Identity, peer: &Identity) -> VerifiedPeer {
             &expected.fingerprint,
         )
         .unwrap()
-}
-
-fn wall() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs()
-}
-
-async fn opened(channel: &Arc<dyn DataChannel>) {
-    while let Some(event) = channel.poll().await {
-        match event {
-            DataChannelEvent::OnOpen => return,
-            DataChannelEvent::OnClose | DataChannelEvent::OnError => break,
-            _ => (),
-        }
-    }
-    panic!("sealed fixture channel did not open");
-}
-
-async fn text(channel: &Arc<dyn DataChannel>, next: &str) {
-    loop {
-        match channel.poll().await {
-            Some(DataChannelEvent::OnMessage(message)) => {
-                assert!(message.is_string);
-                assert_eq!(message.data.as_ref(), next.as_bytes());
-                return;
-            }
-            Some(
-                DataChannelEvent::OnBufferedAmountHigh | DataChannelEvent::OnBufferedAmountLow,
-            ) => (),
-            _ => panic!("sealed fixture channel closed before marker: {next}"),
-        }
-    }
-}
-
-async fn no_ack(channel: &Arc<dyn DataChannel>) {
-    let unexpected = tokio::time::timeout(Duration::from_millis(80), async {
-        loop {
-            match channel.poll().await {
-                Some(
-                    DataChannelEvent::OnBufferedAmountHigh | DataChannelEvent::OnBufferedAmountLow,
-                ) => (),
-                other => return other,
-            }
-        }
-    })
-    .await;
-    assert!(
-        unexpected.is_err(),
-        "denied marker produced an ACK or terminal event"
-    );
 }
 
 #[derive(Default)]
@@ -438,7 +141,7 @@ enum ViewerNegotiation<'a> {
 
 async fn negotiate_host<'a>(
     wss: &mut FixtureSocket,
-    turn: &FixtureTurn,
+    turn: &TurnFixtureConfig,
     id: &'a Identity,
     pinned_viewer: &VerifiedPeer,
     scope: FakeInputProofScope,
@@ -513,7 +216,7 @@ async fn negotiate_host<'a>(
 
 async fn negotiate_viewer<'a>(
     wss: &mut FixtureSocket,
-    turn: &FixtureTurn,
+    turn: &TurnFixtureConfig,
     id: &'a Identity,
     pinned_host: &VerifiedPeer,
     scope: FakeInputProofScope,
@@ -592,28 +295,14 @@ async fn negotiate_viewer<'a>(
     ViewerNegotiation::Ready(Box::new(Negotiated { peer, proof }), channel)
 }
 
-async fn assert_rtc_revoked(peer: &Peer, turn: &FixtureTurn) {
-    let loopback = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-    loopback.set_nonblocking(true).unwrap();
-    let socket = peer.runtime.wrap_udp_socket(loopback).unwrap();
-    assert_eq!(
-        socket
-            .send_to(b"stopped fixture", turn.server().into())
-            .await
-            .unwrap_err()
-            .kind(),
-        io::ErrorKind::PermissionDenied
-    );
-}
-
-async fn close_rtc(host: &Peer, viewer: &Peer, turn: &FixtureTurn) {
-    host.runtime.revoke();
-    viewer.runtime.revoke();
+async fn close_rtc(host: &Peer, viewer: &Peer) {
+    host.revoke();
+    viewer.revoke();
     let (host_close, viewer_close) = tokio::join!(host.pc.close(), viewer.pc.close());
     host_close.unwrap();
     viewer_close.unwrap();
     for peer in [host, viewer] {
-        assert_rtc_revoked(peer, turn).await;
+        peer.assert_runtime_revoked().await;
     }
 }
 
@@ -623,6 +312,9 @@ async fn exercise(case: Case) {
         // loopback binds happen now, but no diagnostic frames or ICE yet.
         let mut wss = FixtureWss::start().await.unwrap();
         let turn = FixtureTurn::start(20).await.unwrap();
+        let turn_config =
+            TurnFixtureConfig::new(turn.server().port(), turn.username(), turn.credential())
+                .unwrap();
         turn.block_direct(true);
         assert_eq!(*turn.server().ip(), Ipv4Addr::LOCALHOST);
         let host_id = Identity::generate_ephemeral().unwrap();
@@ -704,10 +396,10 @@ async fn exercise(case: Case) {
         preflight.unwrap();
 
         let (host_result, viewer_result) = tokio::join!(
-            negotiate_host(&mut wss.host, &turn, &host_id, &host_pin, scope),
+            negotiate_host(&mut wss.host, &turn_config, &host_id, &host_pin, scope),
             negotiate_viewer(
                 &mut wss.viewer,
-                &turn,
+                &turn_config,
                 &viewer_id,
                 &viewer_pin,
                 viewer_scope,
@@ -745,9 +437,9 @@ async fn exercise(case: Case) {
                 assert_eq!(stats.allocations_created, 1);
                 assert_eq!(stats.permissions_created, 0);
                 assert_eq!(stats.forwarded_packets, 0);
-                viewer.runtime.revoke();
+                viewer.revoke();
                 viewer.pc.close().await.unwrap();
-                assert_rtc_revoked(&viewer, &turn).await;
+                viewer.assert_runtime_revoked().await;
                 wss.close().await.unwrap();
                 return;
             }
@@ -823,7 +515,7 @@ async fn exercise(case: Case) {
             assert_eq!(fake.released.get(), 0);
             assert_eq!(fake.release_calls.get(), 0);
             no_ack(&viewer_channel).await;
-            close_rtc(&host, &viewer, &turn).await;
+            close_rtc(&host, &viewer).await;
             wss.close().await.unwrap();
             return;
         }
@@ -897,7 +589,7 @@ async fn exercise(case: Case) {
         assert!(turn.stats().forwarded_packets > connected.forwarded_packets);
         assert_eq!(turn.stats().direct_forwarded, 0);
 
-        close_rtc(&host, &viewer, &turn).await;
+        close_rtc(&host, &viewer).await;
         wss.close().await.unwrap();
         assert!(!host.runtime.allows_turn_peer(host_pair.remote().into()));
         assert!(!viewer.runtime.allows_turn_peer(viewer_pair.remote().into()));
