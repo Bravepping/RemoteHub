@@ -6,10 +6,36 @@ die() { printf '%s\n' "$1" >&2; exit 1; }
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 turn=remotehub-turn-g6.service
 turn_config=/etc/remotehub-turn-g6/turnserver.conf
+turn_override_dir="/run/systemd/system/$turn.d"
+turn_override="$turn_override_dir/90-remotehub-batch-runtime.conf"
 [[ $EUID == 0 && $root =~ ^/root/[A-Za-z0-9._/-]+$ ]] || die 'Run as root from a private test directory under /root.'
 cd -- "$root"
 [[ $(stat -c '%u:%a' .) == 0:700 ]] || die 'Test directory must be owned by root with mode 700.'
 valid_dir() { [[ $1 =~ ^/root/[A-Za-z0-9._/-]+$ && $(realpath -- "$1") == "$1" ]]; }
+valid_unit() { [[ $1 =~ ^rh-pctest-[0-9]{8}-[0-9]{6}-[0-9]+\.service$ ]]; }
+override_contents() { printf '# RemoteHub test: %s\n[Service]\nRuntimeMaxSec=1800s\n' "$1"; }
+
+owns_override() {
+    [[ ! -L $turn_override && -f $turn_override ]] &&
+        cmp -s "$turn_override" <(override_contents "$1")
+}
+
+remove_own_override() {
+    if owns_override "$1"; then
+        rm -- "$turn_override"
+        systemctl daemon-reload
+    fi
+}
+
+# Do not acquire the operator lock in ExecStopPost: the operator may be
+# waiting synchronously for our transient WSS unit to stop.
+if [[ ${1:-} == __finish ]]; then
+    [[ $# == 2 ]] && valid_unit "$2" || die 'Invalid test service.'
+    [[ -f .public-control-unit && $(< .public-control-unit) == "$2" ]] || exit 0
+    systemctl stop "$turn"
+    remove_own_override "$2"
+    exit 0
+fi
 
 # Internal systemd child only. Its env file was generated with an exclusive
 # publication step and is never posted to either desktop.
@@ -32,13 +58,16 @@ stop_ours() {
     [[ -e .public-control-unit ]] || return 0
     local unit
     IFS= read -r unit <.public-control-unit
-    [[ $unit =~ ^rh-pctest-[0-9]{8}-[0-9]{6}-[0-9]+\.service$ ]] || die 'Invalid test service record.'
+    valid_unit "$unit" || die 'Invalid test service record.'
     if [[ $(systemctl show "$unit" -p LoadState --value) == loaded ]]; then
         systemctl stop "$unit"
+        systemctl stop "$turn"
+    elif owns_override "$unit"; then
         systemctl stop "$turn"
     elif systemctl is-active --quiet "$turn"; then
         die 'TURN is active without a loaded test service; stop the previous test with its STOP_CMD first.'
     fi
+    remove_own_override "$unit"
     rm -- .public-control-unit
 }
 
@@ -56,7 +85,7 @@ case ${1:-} in
         tmp=$(mktemp .public-control-settings.XXXXXXXX)
         printf '%s\n' "$@" >"$tmp"
         mv -fT -- "$tmp" .public-control-settings
-        echo 'Configured. Run: bash ./public-control-test.sh new'
+        echo 'Configured. For the 30-minute batch, explicitly opt in with: new --align-turn-runtime'
         exit 0
         ;;
     stop)
@@ -65,8 +94,12 @@ case ${1:-} in
         echo 'Tracked test is stopped.'
         exit 0
         ;;
-    new|one)
-        [[ $# = 1 ]] || die 'Usage: new (eight rounds) or one (one round)'
+    new)
+        [[ $# == 2 && $2 == --align-turn-runtime ]] ||
+            die 'For the 30-minute batch, use new --align-turn-runtime to allow a temporary TURN runtime override.'
+        ;;
+    one)
+        [[ $# == 1 ]] || die 'Usage: one (one round)'
         ;;
     *) die 'Choose configure, new, one, or stop.' ;;
 esac
@@ -107,14 +140,29 @@ esac
 
 cleanup() {
     systemctl stop "$w" 2>/dev/null || true
-    systemctl stop "$turn" 2>/dev/null || true
+    if [[ $turn_started == yes ]]; then
+        systemctl stop "$turn" 2>/dev/null || true
+    fi
+    remove_own_override "$w" || true
 }
+turn_started=no
 trap cleanup EXIT
 printf '%s\n' "$w" >.public-control-unit
+if [[ $1 == new ]]; then
+    mkdir -p -- "$turn_override_dir"
+    (set -o noclobber; override_contents "$w" >"$turn_override") ||
+        die 'Existing TURN runtime override was not changed.'
+    systemctl daemon-reload
+    [[ $(LC_ALL=C systemctl show "$turn" -p RuntimeMaxUSec --value) == 30min ]] ||
+        die 'Effective TURN runtime is not 30 minutes; nothing was started.'
+    [[ $(systemctl show "$turn" -p Restart --value) == no ]] ||
+        die 'The dedicated TURN test service must not restart on its own.'
+fi
+turn_started=yes
 systemctl start "$turn"
 systemd-run --collect --unit="$w" --property=Type=exec --property="RuntimeMaxSec=$ttl" \
     --property=NoNewPrivileges=yes \
-    --property="ExecStopPost=/usr/bin/systemctl --no-block stop $turn" \
+    --property="ExecStopPost=/bin/bash $root/public-control-test.sh __finish $w" \
     /bin/bash "$root/public-control-test.sh" __serve "$p"
 sleep 1
 printf 'WSS: '; systemctl is-active "$w"
