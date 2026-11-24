@@ -15,6 +15,7 @@ use rustls::{
 };
 use sha2::{Digest, Sha256};
 use std::{
+    io,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
     sync::Arc,
     time::Duration,
@@ -28,6 +29,7 @@ use tokio_rustls::{client, server, TlsAcceptor, TlsConnector};
 use tokio_tungstenite::{
     accept_hdr_async_with_config, client_async_with_config,
     tungstenite::{
+        error::ProtocolError,
         handshake::server::{Request, Response},
         http,
         protocol::WebSocketConfig,
@@ -45,6 +47,18 @@ const MAX_RELAYED: usize = 8;
 const MAX_CA_DER_BYTES: usize = 4096;
 const CLOSED: &str = "FAKE_INPUT_FIXTURE_WSS_CLOSED";
 const IO: &str = "FAKE_INPUT_FIXTURE_WSS_IO";
+const TCP_SOCKET: &str = "FAKE_INPUT_FIXTURE_WSS_TCP_SOCKET";
+const TCP_BIND: &str = "FAKE_INPUT_FIXTURE_WSS_TCP_BIND";
+const TCP_CONNECT: &str = "FAKE_INPUT_FIXTURE_WSS_TCP_CONNECT";
+const TCP_ACCEPT: &str = "FAKE_INPUT_FIXTURE_WSS_TCP_ACCEPT";
+const TCP_TUPLE: &str = "FAKE_INPUT_FIXTURE_WSS_TCP_TUPLE";
+const HTTP_CLIENT: &str = "FAKE_INPUT_FIXTURE_WSS_HTTP_CLIENT";
+const HTTP_SERVER: &str = "FAKE_INPUT_FIXTURE_WSS_HTTP_SERVER";
+const SEND: &str = "FAKE_INPUT_FIXTURE_WSS_SEND";
+const RECEIVE: &str = "FAKE_INPUT_FIXTURE_WSS_RECEIVE";
+const CLOSE: &str = "FAKE_INPUT_FIXTURE_WSS_CLOSE";
+const RELAY_READ: &str = "FAKE_INPUT_FIXTURE_WSS_RELAY_READ";
+const RELAY_WRITE: &str = "FAKE_INPUT_FIXTURE_WSS_RELAY_WRITE";
 const DEADLINE: &str = "FAKE_INPUT_FIXTURE_WSS_DEADLINE";
 const INVALID: &str = "FAKE_INPUT_FIXTURE_WSS_INVALID_FRAME";
 const TLS: &str = "FAKE_INPUT_FIXTURE_WSS_TLS";
@@ -110,11 +124,20 @@ impl FixtureWssServer {
     pub(super) async fn start() -> Result<Self> {
         let deadline = Instant::now() + LIFETIME;
         let (tls, ca_der) = tls_material()?;
-        let listener = TcpListener::bind((LOOPBACK, 0)).await.map_err(|_| IO)?;
-        let SocketAddr::V4(endpoint) = listener.local_addr().map_err(|_| IO)? else {
-            return Err(IO);
+        let listener = TcpListener::bind((LOOPBACK, 0))
+            .await
+            .map_err(|e| io_error(TCP_BIND, e))?;
+        let SocketAddr::V4(endpoint) = listener.local_addr().map_err(|e| io_error(TCP_TUPLE, e))?
+        else {
+            return Err(TCP_TUPLE);
         };
-        let task = RelayTask(Some(tokio::spawn(serve(listener, tls, endpoint, deadline))));
+        let task = RelayTask(Some(tokio::spawn(async move {
+            let result = serve(listener, tls, endpoint, deadline).await;
+            if let Err(code) = result {
+                eprintln!("fixture relay: {code}");
+            }
+            result
+        })));
         Ok(Self {
             ca_der,
             port: endpoint.port(),
@@ -199,8 +222,8 @@ impl FixtureSocket {
             self.socket.send(Message::Binary(bytes.to_vec().into())),
         )
         .await
-        .map_err(|_| DEADLINE)?
-        .map_err(map_error)
+        .map_err(|_| stage_timeout(SEND))?
+        .map_err(|error| ws_error(SEND, error))
     }
 
     pub(super) async fn recv(&mut self) -> Result<Vec<u8>> {
@@ -209,7 +232,7 @@ impl FixtureSocket {
         }
         match timeout_at(io_deadline(self.deadline), self.socket.next())
             .await
-            .map_err(|_| DEADLINE)?
+            .map_err(|_| stage_timeout(RECEIVE))?
         {
             Some(Ok(Message::Binary(bytes))) if bytes.len() <= MAX_FRAME_BYTES => {
                 Ok(bytes.to_vec())
@@ -220,7 +243,7 @@ impl FixtureSocket {
             }
             Some(Err(error)) => {
                 self.closed = true;
-                Err(map_error(error))
+                Err(ws_error(RECEIVE, error))
             }
             _ => Err(INVALID),
         }
@@ -232,10 +255,60 @@ impl FixtureSocket {
         }
         match timeout_at(io_deadline(self.deadline), self.socket.close(None))
             .await
-            .map_err(|_| DEADLINE)?
+            .map_err(|_| stage_timeout(CLOSE))?
         {
             Ok(()) | Err(Error::ConnectionClosed | Error::AlreadyClosed) => Ok(()),
-            Err(error) => Err(map_error(error)),
+            Err(error) => Err(ws_error(CLOSE, error)),
+        }
+    }
+
+    /// Normal process exit waits for the relay to acknowledge the WebSocket
+    /// close instead of dropping TLS immediately after queuing CLOSE.
+    #[cfg(all(
+        any(target_os = "linux", all(windows, target_arch = "x86_64")),
+        feature = "v2-public-fake-input-process-check"
+    ))]
+    pub(super) async fn disconnect_confirmed(&mut self) -> Result<()> {
+        if self.closed {
+            return Err(CLOSED);
+        }
+        self.disconnect().await?;
+        self.read_close_frame().await
+    }
+
+    /// Strict close observation for the positive process diagnostic. A bare
+    /// transport EOF is not a completed signed exchange.
+    #[cfg(all(
+        any(target_os = "linux", all(windows, target_arch = "x86_64")),
+        feature = "v2-public-fake-input-process-check"
+    ))]
+    pub(super) async fn wait_for_close(&mut self) -> Result<()> {
+        if self.closed {
+            return Err(CLOSED);
+        }
+        self.read_close_frame().await?;
+        self.closed = true;
+        // Tungstenite queued the close acknowledgement when it decoded
+        // the frame. Flush best effort because the relay already notified us.
+        let _ = timeout_at(io_deadline(self.deadline), self.socket.flush()).await;
+        Ok(())
+    }
+
+    #[cfg(all(
+        any(target_os = "linux", all(windows, target_arch = "x86_64")),
+        feature = "v2-public-fake-input-process-check"
+    ))]
+    async fn read_close_frame(&mut self) -> Result<()> {
+        match timeout_at(io_deadline(self.deadline), self.socket.next())
+            .await
+            .map_err(|_| stage_timeout(CLOSE))?
+        {
+            Some(Ok(Message::Close(_))) => Ok(()),
+            Some(Err(error)) => {
+                let _ = ws_error(CLOSE, error);
+                Err(CLOSE)
+            }
+            _ => Err(CLOSE),
         }
     }
 }
@@ -244,10 +317,41 @@ fn io_deadline(deadline: Instant) -> Instant {
     deadline.min(Instant::now() + IO_WAIT)
 }
 
-fn map_error(error: Error) -> &'static str {
+fn stage_timeout(stage: &'static str) -> &'static str {
+    eprintln!("fixture WSS: deadline at {stage}");
+    DEADLINE
+}
+
+fn io_error(stage: &'static str, error: io::Error) -> &'static str {
+    // Do not report address-bearing Display/Debug strings.
+    eprintln!(
+        "fixture WSS: {stage} io_kind={:?} os_code={:?}",
+        error.kind(),
+        error.raw_os_error()
+    );
+    stage
+}
+
+fn ws_error(stage: &'static str, error: Error) -> &'static str {
     match error {
         Error::ConnectionClosed | Error::AlreadyClosed => CLOSED,
-        _ => IO,
+        Error::Io(error) => io_error(stage, error),
+        Error::Http(response) => {
+            eprintln!(
+                "fixture WSS: {stage} http_status={}",
+                response.status().as_u16()
+            );
+            stage
+        }
+        Error::Protocol(ProtocolError::ResetWithoutClosingHandshake) => {
+            eprintln!("fixture WSS: {stage} unclean_websocket_close");
+            stage
+        }
+        Error::Protocol(_) => {
+            eprintln!("fixture WSS: {stage} websocket_protocol");
+            stage
+        }
+        _ => stage,
     }
 }
 
@@ -305,37 +409,47 @@ async fn connect(
     deadline: Instant,
 ) -> Result<FixtureSocket> {
     if *endpoint.ip() != LOOPBACK || endpoint.port() == 0 {
-        return Err(IO);
+        return Err(TCP_TUPLE);
     }
-    timeout_at(io_deadline(deadline), async {
-        let socket = TcpSocket::new_v4().map_err(|_| IO)?;
-        socket.bind((LOOPBACK, 0).into()).map_err(|_| IO)?;
-        let tcp = socket.connect(endpoint.into()).await.map_err(|_| IO)?;
-        if tcp.local_addr().map_err(|_| IO)?.ip() != LOOPBACK
-            || tcp.peer_addr().map_err(|_| IO)? != SocketAddr::V4(endpoint)
-        {
-            return Err(IO);
-        }
-        let stream = TlsConnector::from(trust)
-            .connect(ServerName::IpAddress(LOOPBACK.into()), tcp)
-            .await
-            .map_err(|_| TLS)?;
-        // No resolver, redirect, WS fallback, or system trust store.
-        let (socket, _) = client_async_with_config(
+    let until = io_deadline(deadline);
+    let socket = TcpSocket::new_v4().map_err(|e| io_error(TCP_SOCKET, e))?;
+    socket
+        .bind((LOOPBACK, 0).into())
+        .map_err(|e| io_error(TCP_BIND, e))?;
+    let tcp = timeout_at(until, socket.connect(endpoint.into()))
+        .await
+        .map_err(|_| stage_timeout(TCP_CONNECT))?
+        .map_err(|e| io_error(TCP_CONNECT, e))?;
+    if tcp.local_addr().map_err(|e| io_error(TCP_TUPLE, e))?.ip() != LOOPBACK
+        || tcp.peer_addr().map_err(|e| io_error(TCP_TUPLE, e))? != SocketAddr::V4(endpoint)
+    {
+        return Err(TCP_TUPLE);
+    }
+    let connector = TlsConnector::from(trust);
+    let stream = timeout_at(
+        until,
+        connector.connect(ServerName::IpAddress(LOOPBACK.into()), tcp),
+    )
+    .await
+    .map_err(|_| stage_timeout(TLS))?
+    .map_err(|e| io_error(TLS, e))?;
+    // No resolver, redirect, WS fallback, or system trust store.
+    let (socket, _) = timeout_at(
+        until,
+        client_async_with_config(
             format!("wss://{endpoint}{path}"),
             stream,
             Some(websocket_limits()),
-        )
-        .await
-        .map_err(|_| IO)?;
-        Ok(FixtureSocket {
-            socket,
-            deadline,
-            closed: false,
-        })
-    })
+        ),
+    )
     .await
-    .map_err(|_| DEADLINE)?
+    .map_err(|_| stage_timeout(HTTP_CLIENT))?
+    .map_err(|error| ws_error(HTTP_CLIENT, error))?;
+    Ok(FixtureSocket {
+        socket,
+        deadline,
+        closed: false,
+    })
 }
 
 async fn accept(
@@ -349,16 +463,21 @@ async fn accept(
     // cannot extend the server's original hard lifetime.
     let (tcp, source) = timeout_at(deadline, listener.accept())
         .await
-        .map_err(|_| DEADLINE)?
-        .map_err(|_| IO)?;
-    timeout_at(io_deadline(deadline), async {
-        if source.ip() != LOOPBACK
-            || tcp.peer_addr().map_err(|_| IO)? != source
-            || tcp.local_addr().map_err(|_| IO)? != SocketAddr::V4(endpoint)
-        {
-            return Err(IO);
-        }
-        let stream = tls.accept(tcp).await.map_err(|_| TLS)?;
+        .map_err(|_| stage_timeout(TCP_ACCEPT))?
+        .map_err(|e| io_error(TCP_ACCEPT, e))?;
+    if source.ip() != LOOPBACK
+        || tcp.peer_addr().map_err(|e| io_error(TCP_TUPLE, e))? != source
+        || tcp.local_addr().map_err(|e| io_error(TCP_TUPLE, e))? != SocketAddr::V4(endpoint)
+    {
+        return Err(TCP_TUPLE);
+    }
+    let until = io_deadline(deadline);
+    let stream = timeout_at(until, tls.accept(tcp))
+        .await
+        .map_err(|_| stage_timeout(TLS))?
+        .map_err(|e| io_error(TLS, e))?;
+    timeout_at(
+        until,
         accept_hdr_async_with_config(
             stream,
             move |request: &Request, response: Response| {
@@ -378,12 +497,11 @@ async fn accept(
                 }
             },
             Some(websocket_limits()),
-        )
-        .await
-        .map_err(|_| IO)
-    })
+        ),
+    )
     .await
-    .map_err(|_| DEADLINE)?
+    .map_err(|_| stage_timeout(HTTP_SERVER))?
+    .map_err(|error| ws_error(HTTP_SERVER, error))
 }
 
 async fn serve(
@@ -392,8 +510,16 @@ async fn serve(
     endpoint: SocketAddrV4,
     deadline: Instant,
 ) -> Result<()> {
-    let mut host = accept(&listener, &tls, endpoint, HOST_PATH, deadline).await?;
-    let mut viewer = accept(&listener, &tls, endpoint, VIEWER_PATH, deadline).await?;
+    let mut host = accept(&listener, &tls, endpoint, HOST_PATH, deadline)
+        .await
+        .inspect_err(|code| {
+            eprintln!("fixture relay phase=accept_host: {code}");
+        })?;
+    let mut viewer = accept(&listener, &tls, endpoint, VIEWER_PATH, deadline)
+        .await
+        .inspect_err(|code| {
+            eprintln!("fixture relay phase=accept_viewer: {code}");
+        })?;
     drop(listener);
     timeout_at(deadline, async {
         let mut frames = 0;
@@ -402,7 +528,11 @@ async fn serve(
                 frame = host.next() => (true, frame),
                 frame = viewer.next() => (false, frame),
             };
-            let other = if from_host { &mut viewer } else { &mut host };
+            let (sender, other) = if from_host {
+                (&mut host, &mut viewer)
+            } else {
+                (&mut viewer, &mut host)
+            };
             match frame {
                 Some(Ok(Message::Binary(bytes))) if bytes.len() <= MAX_FRAME_BYTES => {
                     frames += 1;
@@ -411,14 +541,26 @@ async fn serve(
                     }
                     timeout_at(io_deadline(deadline), other.send(Message::Binary(bytes)))
                         .await
-                        .map_err(|_| DEADLINE)?
-                        .map_err(map_error)?;
+                        .map_err(|_| stage_timeout(RELAY_WRITE))?
+                        .map_err(|error| ws_error(RELAY_WRITE, error))?;
                 }
-                Some(Ok(Message::Close(_))) | Some(Err(Error::ConnectionClosed)) | None => {
+                Some(Ok(Message::Close(_))) => {
+                    // Forward the Close to the still-open role before
+                    // acknowledging its initiator. The server WebSocket
+                    // queues its own acknowledgement while reading Close.
+                    let _ = timeout_at(io_deadline(deadline), other.close(None)).await;
+                    let _ = timeout_at(io_deadline(deadline), sender.flush()).await;
+                    return Ok(());
+                }
+                Some(Err(Error::ConnectionClosed)) | None => {
                     let _ = timeout_at(io_deadline(deadline), other.close(None)).await;
                     return Ok(());
                 }
-                Some(Err(error)) => return Err(map_error(error)),
+                Some(Err(error)) => {
+                    let role = if from_host { "host" } else { "viewer" };
+                    eprintln!("fixture relay phase=read role={role}");
+                    return Err(ws_error(RELAY_READ, error));
+                }
                 _ => return Err(INVALID),
             }
         }

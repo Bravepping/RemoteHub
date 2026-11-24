@@ -61,7 +61,6 @@ const CARD: usize = CODE + FINGERPRINT;
 const HELLO: usize = PREFIX.len() + 1 + CARD;
 // Version, role, port, expiry, room, generation, peer card, CA pin, DER length.
 const BOOT: usize = PREFIX.len() + 1 + 2 + 8 + 16 + 32 + CARD + 32 + 2;
-const WSS_CLOSED: &str = "FAKE_INPUT_FIXTURE_WSS_CLOSED";
 const MODE: FakeInputTestMode = FakeInputTestMode::Enabled;
 
 type Result<T> = std::result::Result<T, &'static str>;
@@ -264,7 +263,23 @@ impl Worker {
     async fn expect(&mut self, expected: u8) -> Result<()> {
         match self.status.read_u8().await {
             Ok(actual) if actual == expected => Ok(()),
-            _ => Err("worker status"),
+            result => {
+                let cause = match result {
+                    Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => "eof",
+                    Err(_) => "pipe_error",
+                    Ok(_) => "unexpected_status",
+                };
+                let role = role_name(self.role);
+                let phase = match expected {
+                    CONNECTED => "wss_connect",
+                    VERIFIED => "signed_sdp_close",
+                    RELAY_READY => "turn_ready",
+                    RELAY_DONE => "turn_done",
+                    _ => "unknown",
+                };
+                eprintln!("fixture parent: role={role} phase={phase} {cause}");
+                Err("worker status")
+            }
         }
     }
 
@@ -582,14 +597,9 @@ async fn role_exchange(
 
 async fn close_wss(role: SessionRole, wss: &mut FixtureSocket) -> Result<()> {
     match role {
-        SessionRole::Viewer => wss.disconnect().await?,
-        SessionRole::Host => {
-            if wss.recv().await != Err(WSS_CLOSED) {
-                return Err("excess frame or missing viewer close");
-            }
-        }
+        SessionRole::Viewer => wss.disconnect_confirmed().await,
+        SessionRole::Host => wss.wait_for_close().await,
     }
-    Ok(())
 }
 
 async fn relay_sdp(
@@ -835,6 +845,13 @@ mod pipe_tests {
     }
 }
 
+fn role_name(role: SessionRole) -> &'static str {
+    match role {
+        SessionRole::Host => "host",
+        SessionRole::Viewer => "viewer",
+    }
+}
+
 fn run_worker(role: SessionRole, lane: Lane) -> Result<()> {
     if !is_pipe(io::stdin()) || !is_pipe(io::stdout()) {
         return Err("worker requires private pipes");
@@ -879,6 +896,10 @@ fn run_worker(role: SessionRole, lane: Lane) -> Result<()> {
     })();
     let _ = done.send(());
     let _ = watchdog.join();
+    if let Err(code) = checked {
+        let role = role_name(role);
+        eprintln!("fixture worker: role={role} {code}");
+    }
     checked
 }
 
