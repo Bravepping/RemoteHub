@@ -415,21 +415,39 @@ async fn native_webrtc_connects_over_wss_with_verified_device_signatures() {
 
 #[tokio::test]
 async fn reusable_wss_signaling_connects_with_signed_inline_candidates() {
-    reusable_inline_round_trip(false, false).await;
+    reusable_inline_round_trip(false, None).await;
 }
 
 #[tokio::test]
 async fn reusable_wss_rejects_unexpected_device_key_before_applying_sdp() {
-    reusable_inline_round_trip(true, false).await;
+    reusable_inline_round_trip(true, None).await;
 }
 
 #[tokio::test]
 async fn verified_wss_loopback_sctp_acks_only_applied_fake_input() {
-    reusable_inline_round_trip(false, true).await;
+    reusable_inline_round_trip(false, Some(data_smoke_input::Consent::Mock(true))).await;
 }
 
-async fn reusable_inline_round_trip(wrong_viewer_pin: bool, fake_input: bool) {
-    timeout(Duration::from_secs(15), async {
+#[tokio::test]
+async fn verified_wss_loopback_sctp_declines_fake_input_without_applying() {
+    reusable_inline_round_trip(false, Some(data_smoke_input::Consent::Mock(false))).await;
+}
+
+// This test opens a native window only when expressly selected with --ignored.
+#[cfg(windows)]
+#[tokio::test]
+#[ignore = "manual Windows prompt; select this exact test interactively"]
+async fn verified_wss_loopback_sctp_native_consent_fake_input() {
+    reusable_inline_round_trip(false, Some(data_smoke_input::Consent::Native)).await;
+}
+
+async fn reusable_inline_round_trip(
+    wrong_viewer_pin: bool,
+    input: Option<data_smoke_input::Consent>,
+) {
+    let budget = Duration::from_secs(15) + input.map_or(Duration::ZERO, |c| c.extra_budget());
+    let fake_input = input.is_some();
+    timeout(budget, async {
         let (app, token) = fixture();
         let ca = make_ca();
         let trust = LoopbackTlsTrust::from_ca_der(ca.der().as_ref()).unwrap();
@@ -589,9 +607,18 @@ async fn reusable_inline_round_trip(wrong_viewer_pin: bool, fake_input: bool) {
             .await
             .unwrap();
 
-        if let (Some(host_addr), Some(viewer_addr)) = (host_addr, viewer_addr) {
-            data_smoke_input::exercise(&mut host, &viewer, channel, scope, host_addr, viewer_addr)
-                .await;
+        if let (Some(consent), Some(host_addr), Some(viewer_addr)) = (input, host_addr, viewer_addr)
+        {
+            let outcome = data_smoke_input::exercise(
+                &mut host,
+                &viewer,
+                channel,
+                scope,
+                host_addr,
+                viewer_addr,
+                consent,
+            )
+            .await;
             viewer.pc.close().await.unwrap();
             host.pc.close().await.unwrap();
             viewer_signaling.leave().await.unwrap();
@@ -602,6 +629,7 @@ async fn reusable_inline_round_trip(wrong_viewer_pin: bool, fake_input: bool) {
             assert!(app.rooms.lock().unwrap().is_empty());
             server.abort();
             assert!(server.await.unwrap_err().is_cancelled());
+            consent.report(outcome);
             return;
         }
         round_trip_data_channel(&mut host, channel).await;

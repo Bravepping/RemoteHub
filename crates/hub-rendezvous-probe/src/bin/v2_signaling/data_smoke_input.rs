@@ -107,6 +107,110 @@ impl SessionSink for FakeSink {
     }
 }
 
+#[derive(Clone, Copy)]
+pub(super) enum Consent {
+    Mock(bool),
+    #[cfg(windows)]
+    Native,
+}
+
+pub(super) enum Outcome {
+    AppliedAndRevoked,
+    Declined,
+    Expired,
+}
+
+impl Consent {
+    pub(super) fn extra_budget(self) -> Duration {
+        match self {
+            Self::Mock(_) => Duration::ZERO,
+            #[cfg(windows)]
+            Self::Native => Duration::from_secs(25),
+        }
+    }
+
+    fn decision_window(self) -> Duration {
+        match self {
+            Self::Mock(_) => Duration::from_secs(5),
+            #[cfg(windows)]
+            Self::Native => self.extra_budget(),
+        }
+    }
+
+    async fn decide(self, _deadline: Instant) -> Option<bool> {
+        match self {
+            // This is an explicit test-owner decision, not a channel message.
+            Self::Mock(approved) => Some(approved),
+            #[cfg(windows)]
+            Self::Native => windows_decision(_deadline).await,
+        }
+    }
+
+    pub(super) fn report(self, outcome: Outcome) {
+        match self {
+            Self::Mock(approved) => assert!(matches!(
+                (approved, outcome),
+                (true, Outcome::AppliedAndRevoked) | (false, Outcome::Declined)
+            )),
+            #[cfg(windows)]
+            Self::Native => println!(
+                "{}",
+                match outcome {
+                    Outcome::AppliedAndRevoked => "WSS_NATIVE_CONSENT_REVOKE_PASS",
+                    Outcome::Declined => "WSS_NATIVE_CONSENT_DECLINED_PASS",
+                    Outcome::Expired => "WSS_NATIVE_CONSENT_EXPIRED_PASS",
+                }
+            ),
+        }
+    }
+}
+
+#[cfg(windows)]
+async fn windows_decision(deadline: Instant) -> Option<bool> {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{
+        IDNO, IDYES, MB_DEFBUTTON2, MB_ICONQUESTION, MB_YESNO, MessageBoxW,
+    };
+
+    // The native modal must not block the async transport or its deadline. If
+    // left open, it can no longer authorize at the deadline and the exact-test
+    // process exits after teardown. Do not simulate a user response.
+    let (send, receive) = tokio::sync::oneshot::channel();
+    std::thread::Builder::new()
+        .name("remotehub-fixture-consent".into())
+        .spawn(move || {
+            fn wide(text: &str) -> Vec<u16> {
+                text.encode_utf16().chain(std::iter::once(0)).collect()
+            }
+            let caption = wide("RemoteHub 原生同意回环自检");
+            let text = wide(
+                "使用临时测试身份，仅验证本机 127.0.0.1 的 WebRTC 回环连接。不读取屏幕，不操作真实键鼠。
+
+是否批准一次模拟输入？默认「否」，决定窗口约 25 秒。批准后也会立即测试撤销。",
+            );
+            // SAFETY: Both UTF-16 buffers are NUL-terminated and live until
+            // MessageBoxW returns; the test uses no owner window.
+            let response = unsafe {
+                MessageBoxW(
+                    std::ptr::null_mut(),
+                    text.as_ptr(),
+                    caption.as_ptr(),
+                    MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION,
+                )
+            };
+            let _ = send.send(response);
+        })
+        .expect("could not start native consent dialog");
+
+    match tokio::time::timeout_at(deadline.into(), receive).await {
+        Err(_) => None,
+        Ok(result) => match result.expect("native consent dialog thread exited unexpectedly") {
+            IDNO => Some(false),
+            IDYES => Some(true),
+            _ => panic!("native consent dialog failed"),
+        },
+    }
+}
+
 pub(super) async fn exercise(
     host: &mut Peer,
     viewer: &Peer,
@@ -114,7 +218,8 @@ pub(super) async fn exercise(
     scope: InputScope,
     host_addr: SocketAddrV4,
     viewer_addr: SocketAddrV4,
-) {
+    consent: Consent,
+) -> Outcome {
     opened(&outgoing).await;
     let incoming = host.channels.recv().await.unwrap();
     opened(&incoming).await;
@@ -132,11 +237,8 @@ pub(super) async fn exercise(
     selected(viewer, viewer_addr, host_addr).await;
 
     let fake = Rc::new(RefCell::new(Fake::default()));
-    let mut owner = InputQueue::view_only(
-        scope,
-        Instant::now() + Duration::from_secs(5),
-        FakeSink(fake.clone()),
-    );
+    let deadline = Instant::now() + consent.decision_window();
+    let mut owner = InputQueue::view_only(scope, deadline, FakeSink(fake.clone()));
     let prompt = owner.begin_local_decision(&scope).unwrap();
     outgoing.send_text("press-before-approval").await.unwrap();
     text(&incoming, "press-before-approval").await;
@@ -145,10 +247,46 @@ pub(super) async fn exercise(
     incoming.send_text("denied").await.unwrap();
     text(&outgoing, "denied").await;
 
-    // This is an explicit test-owner decision, not a channel message.
-    owner
-        .complete_local_decision(prompt, &scope, true, Control::Continue)
-        .unwrap();
+    let decision = consent.decide(deadline).await;
+    // Recheck transport after an affirmative native response. A lost or
+    // changed route fails the fixture before the owner can accept the choice.
+    #[cfg(windows)]
+    if matches!(consent, Consent::Native) && decision == Some(true) && Instant::now() < deadline {
+        selected(host, host_addr, viewer_addr).await;
+        selected(viewer, viewer_addr, host_addr).await;
+    }
+    // The serialized owner independently samples its monotonic clock before
+    // accepting even a Yes delivered on the deadline.
+    let outcome = match owner.complete_local_decision(
+        prompt,
+        &scope,
+        decision == Some(true),
+        Control::Continue,
+    ) {
+        Ok(()) if decision == Some(true) => None,
+        Ok(()) if decision == Some(false) => Some((End::Declined, Outcome::Declined)),
+        Err(error) if error == DENIED && owner.state() == State::Ended(End::Expired) => {
+            Some((End::Expired, Outcome::Expired))
+        }
+        result => panic!("unexpected local consent result: {result:?}"),
+    };
+    if let Some((reason, outcome)) = outcome {
+        assert_eq!(owner.state(), State::Ended(reason));
+        outgoing.send_text("press-late").await.unwrap();
+        text(&incoming, "press-late").await;
+        assert_eq!(owner.enqueue(&scope, ()), Err(DENIED));
+        assert_eq!(
+            owner.dispatch_next(&scope, Control::Continue),
+            Ok(Dispatch::Closed)
+        );
+        assert_eq!(fake.borrow().applied, 0);
+        assert_eq!(fake.borrow().releases, 0);
+        assert!(!fake.borrow().held);
+        incoming.send_text("closed-no-ack").await.unwrap();
+        text(&outgoing, "closed-no-ack").await;
+        outgoing.close().await.unwrap();
+        return outcome;
+    }
     outgoing.send_text("press-approved").await.unwrap();
     text(&incoming, "press-approved").await;
     owner.enqueue(&scope, ()).unwrap();
@@ -184,4 +322,5 @@ pub(super) async fn exercise(
     incoming.send_text("revoked-no-ack").await.unwrap();
     text(&outgoing, "revoked-no-ack").await;
     outgoing.close().await.unwrap();
+    Outcome::AppliedAndRevoked
 }

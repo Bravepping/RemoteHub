@@ -42,3 +42,6 @@ async-trait = "=0.1.92"
 hub-webrtc = { path = "../hub-webrtc", features = ["v2-verified-signaling", "v2-public-video-wss", "v2-input-approval"] }
 webrtc = "=0.21.1"
 tokio-tungstenite = { version = "=0.28.0", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+
+[target.'cfg(windows)'.dev-dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_UI_WindowsAndMessaging"] }
