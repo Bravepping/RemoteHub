@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a short-lived scoped test kit without any network I/O."""
+"""Prepare a scoped RemoteHub invitation without any network I/O."""
 
 import argparse
 import base64
@@ -31,8 +31,10 @@ MIN_TTL, MAX_TTL = 180, 600
 DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 FILES = ("host.json", "viewer.json", "wss.env")
 BATCH_FILES = ("host-test-rounds.zip", "viewer-test-rounds.zip", "batch.json", "wss.env")
+BASIC_SUSTAINED_FILES = ("host-basic-sustained.zip", "viewer-basic-sustained.zip", "batch.json", "wss.env")
 BATCH_OFFSETS = (0, 0, 0, 0, 450, 450, 900, 1200)
 IMMEDIATE_BATCH_TTL = 1800
+BASIC_SUSTAINED_MIN_TTL, BASIC_SUSTAINED_MAX_TTL = 1860, 2400
 VIDEO = "public-video"
 CONTROL = "public-control"
 PRIVATE = tuple(map(ipaddress.IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
@@ -60,9 +62,9 @@ def parser():
     p = ArgumentParser(
         description=__doc__,
         epilog="Linux only. Prompts for the coturn REST secret without echo. "
-        "Keep wss.env on the server and transfer only each PC's own JSON via a private channel. "
+        "Keep wss.env and any batch.json on the server; send each PC only its own role file via a private channel. "
         "These files do not start any listener or grant permission to view, capture, or control. "
-        "Do not use them beyond the explicitly approved one-room test.",
+        "Use only for the explicitly approved room and network endpoints.",
         allow_abbrev=False,
     )
     for option, help_text in (
@@ -90,11 +92,16 @@ def parser():
                    "requires the separate enabled server and desktop build.")
     p.add_argument("--mode", choices=("relay_only", "direct_preferred"), default="relay_only",
                    help="direct_preferred enables public direct ICE with TURN fallback; requires updated clients.")
-    p.add_argument("--ttl", type=int, default=300, help="Lifetime in seconds (180–600; default 300).")
+    p.add_argument("--ttl", type=int,
+                   help="Lifetime in seconds: 180–600 (default 300), or with "
+                   "--basic-sustained 1860–2400 (default 2400).")
     p.add_argument("--batch", action="store_true",
                    help="Explicit public-control only: eight one-shot rounds in a 30-minute window.")
     p.add_argument("--all-ready", action="store_true",
                    help="Version 2 public-control batch: all eight rounds immediately available.")
+    p.add_argument("--basic-sustained", action="store_true",
+                   help="Explicit public-control v3: one dedicated sustained invitation; "
+                   "cannot be used with --batch or --all-ready.")
     p.add_argument("--self-test", action="store_true", help="Run standalone synthetic tests; use by itself.")
     return p
 
@@ -186,6 +193,24 @@ def exact_der_sequence(der):
             and len(der) == size + 2 + width)
 
 
+def invitation_lifetime(args):
+    if getattr(args, "basic_sustained", False):
+        if args.purpose != CONTROL or getattr(args, "batch", False) or getattr(args, "all_ready", False):
+            raise Invalid("--basic-sustained requires public-control and cannot be combined with batch options.")
+        ttl = BASIC_SUSTAINED_MAX_TTL if args.ttl is None else args.ttl
+        if not BASIC_SUSTAINED_MIN_TTL <= ttl <= BASIC_SUSTAINED_MAX_TTL:
+            raise Invalid("Basic sustained TTL must be 1860–2400 seconds.")
+        return ttl
+    ttl = 300 if args.ttl is None else args.ttl
+    if not MIN_TTL <= ttl <= MAX_TTL:
+        raise Invalid("TTL must be 180–600 seconds.")
+    if args.batch and args.purpose != CONTROL:
+        raise Invalid("A batch requires the explicit public-control purpose.")
+    if args.all_ready and not args.batch:
+        raise Invalid("--all-ready requires an explicit public-control batch.")
+    return ttl
+
+
 def normalize(args):
     args.wss = endpoint(args.wss, "--wss")
     args.turn = endpoint(args.turn, "--turn")
@@ -207,12 +232,7 @@ def normalize(args):
         setattr(args, attr, fingerprint(getattr(args, attr), "--" + attr.replace("_", "-")))
     if args.host_fingerprint == args.viewer_fingerprint:
         raise Invalid("Host and viewer must be two distinct verified devices.")
-    if not MIN_TTL <= args.ttl <= MAX_TTL:
-        raise Invalid("TTL must be 180–600 seconds.")
-    if args.batch and args.purpose != CONTROL:
-        raise Invalid("A batch requires the explicit public-control purpose.")
-    if args.all_ready and not args.batch:
-        raise Invalid("--all-ready requires an explicit public-control batch.")
+    args.ttl = invitation_lifetime(args)
     args.tls_cert, args.tls_key = server_path(args.tls_cert), server_path(args.tls_key)
     args.ca_der = read_ca(args.ca)
     digest = hashlib.sha256(args.ca_der).hexdigest()
@@ -307,7 +327,7 @@ def random_bytes(length, preceding=()):
             return value
 
 
-def make_kit(args, secret, now):
+def role_profiles(args, secret, now, ttl, version):
     room = uuid.uuid4()
     wire_nonce = uuid.uuid4()
     while wire_nonce == room:
@@ -327,10 +347,10 @@ def make_kit(args, secret, now):
     prefix = "rhctl1-" if control else ""
     host_bearer = prefix + host_token.hex()
     viewer_bearer = prefix + viewer_token.hex()
-    expires = now + args.ttl
+    expires = now + ttl
     username = f"{expires}:{room}"
     common = {
-        "version": 1,
+        "version": version,
         "room": str(room),
         "expires_at": expires,
         "wss": args.wss,
@@ -352,32 +372,46 @@ def make_kit(args, secret, now):
                 expected_peer_fingerprint=args.viewer_fingerprint, relay_token=host_bearer)
     viewer = dict(common, role="viewer", local_ipv4=args.viewer_local_ip,
                   expected_peer_fingerprint=args.host_fingerprint, relay_token=viewer_bearer)
+    return host, viewer, expires
+
+
+def encode_role(profile):
+    data = (json.dumps(profile, indent=2) + "\n").encode("ascii")
+    if len(data) > 32 * 1024:
+        raise Invalid("Profile would exceed the desktop parser's size limit.")
+    return data
+
+
+def make_kit(args, secret, now):
+    if getattr(args, "basic_sustained", False):
+        raise Invalid("Select the dedicated basic sustained invitation output.")
+    host, viewer, expires = role_profiles(args, secret, now, args.ttl, 1)
+    purpose = args.purpose
+    control = purpose == CONTROL
     profile_env = "REMOTEHUB_V2_PUBLIC_CONTROL" if control else "REMOTEHUB_V2_PUBLIC_VIDEO"
     env = {
         "REMOTEHUB_V2_MODE": purpose,
         "REMOTEHUB_V2_BIND": args.bind,
         "REMOTEHUB_V2_TLS_CERT": args.tls_cert,
         "REMOTEHUB_V2_TLS_KEY": args.tls_key,
-        f"{profile_env}_ROOM": room.hex,
+        f"{profile_env}_ROOM": uuid.UUID(host["room"]).hex,
         f"{profile_env}_HOST_IP": args.host_egress_ip,
         f"{profile_env}_VIEWER_IP": args.viewer_egress_ip,
-        f"{profile_env}_HOST_TOKEN": host_bearer,
-        f"{profile_env}_VIEWER_TOKEN": viewer_bearer,
+        f"{profile_env}_HOST_TOKEN": host["relay_token"],
+        f"{profile_env}_VIEWER_TOKEN": viewer["relay_token"],
         f"{profile_env}_EXPIRES_AT": str(expires),
     }
     encoded = {
-        "host.json": (json.dumps(host, indent=2) + "\n").encode("ascii"),
-        "viewer.json": (json.dumps(viewer, indent=2) + "\n").encode("ascii"),
+        "host.json": encode_role(host),
+        "viewer.json": encode_role(viewer),
         "wss.env": ("# Private one-room test credentials. Only source your own freshly generated file.\n"
                     + "".join(f"export {name}={shlex.quote(value)}\n" for name, value in env.items())).encode("utf-8"),
     }
-    if any(len(encoded[name]) > 32 * 1024 for name in ("host.json", "viewer.json")):
-        raise Invalid("Profile would exceed the desktop parser's size limit.")
     return encoded, expires
 
 
 def make_batch(args, secret, now, session_path):
-    if args.purpose != CONTROL:
+    if args.purpose != CONTROL or getattr(args, "basic_sustained", False):
         raise Invalid("A batch requires the explicit public-control purpose.")
     args = argparse.Namespace(**vars(args))
     all_ready = args.all_ready
@@ -422,6 +456,50 @@ def make_batch(args, secret, now, session_path):
         "wss.env": ("# Private batch reference. Transfer only the separate role archives.\n"
                     + "".join(f"export {name}={shlex.quote(value)}\n" for name, value in env.items())).encode("utf-8"),
     }, stop_at
+
+
+def make_basic_sustained(args, secret, now, session_path):
+    if not getattr(args, "basic_sustained", False):
+        raise Invalid("Basic sustained invitation output requires explicit opt-in.")
+    ttl = invitation_lifetime(args)
+    if not 0 < now <= (1 << 64) - 1 - ttl:
+        raise Invalid("Could not establish a valid invitation issuance time.")
+    if fingerprint(args.host_fingerprint, "--host-fingerprint") == fingerprint(
+        args.viewer_fingerprint, "--viewer-fingerprint"
+    ):
+        raise Invalid("Host and viewer must be two distinct verified devices.")
+    host, viewer, expires = role_profiles(args, secret, now, ttl, 3)
+    roster = {
+        "version": 3,
+        "expires_at": expires,
+        "host_ipv4": args.host_egress_ip,
+        "viewer_ipv4": args.viewer_egress_ip,
+        "rooms": [{
+            "room": uuid.UUID(host["room"]).hex,
+            "not_before": now,
+            "expires_at": expires,
+            "host_token": host["relay_token"],
+            "viewer_token": viewer["relay_token"],
+        }],
+    }
+    env = {
+        "REMOTEHUB_V2_MODE": CONTROL,
+        "REMOTEHUB_V2_BIND": args.bind,
+        "REMOTEHUB_V2_TLS_CERT": args.tls_cert,
+        "REMOTEHUB_V2_TLS_KEY": args.tls_key,
+        "REMOTEHUB_V2_PUBLIC_CONTROL_BATCH_FILE": str(Path(session_path).absolute() / "batch.json"),
+    }
+    files = {
+        "batch.json": json.dumps(roster, indent=2).encode("ascii") + b"\n",
+        "wss.env": ("# Private v3 roster reference. Transfer only each PC's own role archive.\n"
+                    + "".join(f"export {name}={shlex.quote(value)}\n" for name, value in env.items())).encode("utf-8"),
+    }
+    for role, profile in (("host", host), ("viewer", viewer)):
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr("round-01.json", encode_role(profile))
+        files[f"{role}-basic-sustained.zip"] = buffer.getvalue()
+    return files, expires
 
 
 def open_output_parent(path):
@@ -481,7 +559,8 @@ def write_private(directory, name, data):
 
 
 def publish(parent, name, files, move):
-    filenames = next((allowed for allowed in (FILES, BATCH_FILES) if files.keys() == set(allowed)), None)
+    filenames = next((allowed for allowed in (FILES, BATCH_FILES, BASIC_SUSTAINED_FILES)
+                      if files.keys() == set(allowed)), None)
     if filenames is None:
         raise Invalid("Unexpected private kit contents.")
     stage = ".remotehub-test-stage-" + secrets.token_hex(16)
@@ -531,8 +610,12 @@ def main(argv):
             secret = read_turn_config(args) if args.turn_config else read_turn_secret()
             try:
                 now = int(time.time())
-                files, expires = (make_batch(args, secret, now, args.out_dir) if args.batch
-                                  else make_kit(args, secret, now))
+                if args.basic_sustained:
+                    files, expires = make_basic_sustained(args, secret, now, args.out_dir)
+                elif args.batch:
+                    files, expires = make_batch(args, secret, now, args.out_dir)
+                else:
+                    files, expires = make_kit(args, secret, now)
             finally:
                 secret[:] = b"\0" * len(secret)
             publish(parent, name, files, move)
@@ -547,7 +630,10 @@ def main(argv):
     except (OSError, ValueError):
         print("Could not prepare a complete private kit. Check the output path and filesystem.", file=sys.stderr)
         return 2
-    if args.batch:
+    if args.basic_sustained:
+        print("Created host-basic-sustained.zip and viewer-basic-sustained.zip (no services started).")
+        print("Keep batch.json and wss.env on the server. Send each PC only its own role archive.")
+    elif args.batch:
         print("Created host-test-rounds.zip and viewer-test-rounds.zip (no services started).")
         if args.all_ready:
             print("All eight one-use rounds are open now (requires version 2 test clients).")
@@ -559,7 +645,8 @@ def main(argv):
     else:
         print("Created host.json, viewer.json and wss.env (no services started).")
     print(f"CA SHA-256: {args.ca_sha256}")
-    print(f"Expires at Unix UTC: {expires}; desktop startup requires 60 seconds remaining.")
+    required = BASIC_SUSTAINED_MIN_TTL if args.basic_sustained else 60
+    print(f"Expires at Unix UTC: {expires}; desktop startup requires {required} seconds remaining.")
     return 0
 
 
