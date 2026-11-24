@@ -10,7 +10,7 @@ use crate::{
     },
     public_fake_input_profile::{check_pair, Error as ProfileError, SyntheticProfile},
     public_fake_input_sdp_fixture::sanitize,
-    public_fake_input_wss_fixture::FixtureWss,
+    public_fake_input_wss_fixture::{FixtureSocket, FixtureWss},
     public_fake_input_wss_wire::{self as wire, Context as WireContext, Frame, Kind},
     public_video::PublicVideoScope,
     relay_runtime::RelayRuntime,
@@ -61,6 +61,8 @@ const LABEL: &str = "remotehub-turn-fiction";
 const PROTOCOL: &str = "remotehub.fixture";
 const WAIT: Duration = Duration::from_secs(12);
 const DENIED: QueueError = QueueError::Approval(ApprovalError::NotAllowed);
+const WSS_CLOSED: &str = "FAKE_INPUT_FIXTURE_WSS_CLOSED";
+const TEST_MODE: FakeInputTestMode = FakeInputTestMode::Enabled;
 
 #[derive(Debug)]
 struct FixtureRuntime {
@@ -419,24 +421,199 @@ async fn mismatched_profiles_stop_before_wss_frames_or_turn_allocation() {
     exercise(Case::MismatchedGeneration).await;
 }
 
+struct Negotiated<'a> {
+    peer: Peer,
+    proof: FakeInputProof<'a>,
+}
+
+enum HostNegotiation<'a> {
+    Ready(Box<Negotiated<'a>>),
+    RejectedOffer,
+}
+
+enum ViewerNegotiation<'a> {
+    Ready(Box<Negotiated<'a>>, Arc<dyn DataChannel>),
+    HostClosed(Peer),
+}
+
+async fn negotiate_host<'a>(
+    wss: &mut FixtureSocket,
+    turn: &FixtureTurn,
+    id: &'a Identity,
+    pinned_viewer: &VerifiedPeer,
+    scope: FakeInputProofScope,
+) -> HostNegotiation<'a> {
+    let mut proof = FakeInputProof::prepare(
+        id,
+        pinned_viewer,
+        SessionRole::Host,
+        scope,
+        TEST_MODE,
+        wall(),
+    )
+    .unwrap();
+    let ctx = WireContext {
+        room: scope.room,
+        generation: scope.generation,
+    };
+    let challenge = wire::encode(
+        ctx,
+        Kind::HostChallenge,
+        Frame::Challenge(proof.challenge(wall()).unwrap()),
+    )
+    .unwrap();
+    wss.send(&challenge).await.unwrap();
+
+    let inbound = wss.recv().await.unwrap();
+    let Frame::Challenge(viewer_challenge) =
+        wire::decode(ctx, Kind::ViewerChallenge, &inbound).unwrap()
+    else {
+        panic!("expected viewer challenge over WSS")
+    };
+    let inbound = wss.recv().await.unwrap();
+    let Frame::SignedSdp {
+        sdp: offer,
+        signature,
+    } = wire::decode(ctx, Kind::Offer, &inbound).unwrap()
+    else {
+        panic!("expected signed offer over WSS")
+    };
+    // Reuse the exact shape checker so this negative control cannot pass
+    // merely by delivering malformed SDP. A valid tuple alone authorizes nothing.
+    let viewer_relay = scope
+        .validate_relay_sctp_description(offer, SessionRole::Viewer, wall())
+        .unwrap();
+    match proof.verify(offer, &signature, wall()) {
+        Ok(()) => (),
+        Err(ProofError::Rejected) => {
+            assert!(proof.approved_relay_pair(wall()).is_none());
+            wss.disconnect().await.unwrap();
+            return HostNegotiation::RejectedOffer;
+        }
+        Err(error) => panic!("unexpected offer proof failure: {error:?}"),
+    }
+
+    // No host RTC, remote description or relay admission exists before proof.
+    let mut peer = Peer::start(turn).await;
+    peer.remote(offer, false, viewer_relay).await;
+    let answer = peer.local(true).await;
+    let signature = proof.seal(viewer_challenge, &answer, wall()).unwrap();
+    let answer_frame = wire::encode(
+        ctx,
+        Kind::Answer,
+        Frame::SignedSdp {
+            sdp: &answer,
+            signature,
+        },
+    )
+    .unwrap();
+    wss.send(&answer_frame).await.unwrap();
+    HostNegotiation::Ready(Box::new(Negotiated { peer, proof }))
+}
+
+async fn negotiate_viewer<'a>(
+    wss: &mut FixtureSocket,
+    turn: &FixtureTurn,
+    id: &'a Identity,
+    pinned_host: &VerifiedPeer,
+    scope: FakeInputProofScope,
+    tamper_offer: bool,
+) -> ViewerNegotiation<'a> {
+    let mut proof = FakeInputProof::prepare(
+        id,
+        pinned_host,
+        SessionRole::Viewer,
+        scope,
+        TEST_MODE,
+        wall(),
+    )
+    .unwrap();
+    let ctx = WireContext {
+        room: scope.room,
+        generation: scope.generation,
+    };
+    let inbound = wss.recv().await.unwrap();
+    let Frame::Challenge(host_challenge) =
+        wire::decode(ctx, Kind::HostChallenge, &inbound).unwrap()
+    else {
+        panic!("expected host challenge over WSS")
+    };
+    let challenge = wire::encode(
+        ctx,
+        Kind::ViewerChallenge,
+        Frame::Challenge(proof.challenge(wall()).unwrap()),
+    )
+    .unwrap();
+    wss.send(&challenge).await.unwrap();
+
+    let mut peer = Peer::start(turn).await;
+    let channel = peer
+        .pc
+        .create_data_channel(
+            LABEL,
+            Some(RTCDataChannelInit {
+                protocol: PROTOCOL.into(),
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap();
+    let offer = peer.local(false).await;
+    let mut signature = proof.seal(host_challenge, &offer, wall()).unwrap();
+    if tamper_offer {
+        signature[0] ^= 1;
+    }
+    let offer_frame = wire::encode(
+        ctx,
+        Kind::Offer,
+        Frame::SignedSdp {
+            sdp: &offer,
+            signature,
+        },
+    )
+    .unwrap();
+    wss.send(&offer_frame).await.unwrap();
+
+    let inbound = match wss.recv().await {
+        Ok(bytes) => bytes,
+        Err(WSS_CLOSED) => return ViewerNegotiation::HostClosed(peer),
+        Err(error) => panic!("unexpected answer receive failure: {error}"),
+    };
+    let Frame::SignedSdp {
+        sdp: answer,
+        signature,
+    } = wire::decode(ctx, Kind::Answer, &inbound).unwrap()
+    else {
+        panic!("expected signed answer over WSS")
+    };
+    proof.verify(answer, &signature, wall()).unwrap();
+    let pair = proof.approved_relay_pair(wall()).unwrap();
+    peer.remote(answer, true, pair.remote()).await;
+    ViewerNegotiation::Ready(Box::new(Negotiated { peer, proof }), channel)
+}
+
+async fn assert_rtc_revoked(peer: &Peer, turn: &FixtureTurn) {
+    let loopback = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+    loopback.set_nonblocking(true).unwrap();
+    let socket = peer.runtime.wrap_udp_socket(loopback).unwrap();
+    assert_eq!(
+        socket
+            .send_to(b"stopped fixture", turn.server().into())
+            .await
+            .unwrap_err()
+            .kind(),
+        io::ErrorKind::PermissionDenied
+    );
+}
+
 async fn close_rtc(host: &Peer, viewer: &Peer, turn: &FixtureTurn) {
     host.runtime.revoke();
     viewer.runtime.revoke();
     let (host_close, viewer_close) = tokio::join!(host.pc.close(), viewer.pc.close());
     host_close.unwrap();
     viewer_close.unwrap();
-    for runtime in [&host.runtime, &viewer.runtime] {
-        let loopback = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
-        loopback.set_nonblocking(true).unwrap();
-        let socket = runtime.wrap_udp_socket(loopback).unwrap();
-        assert_eq!(
-            socket
-                .send_to(b"stopped fixture", turn.server().into())
-                .await
-                .unwrap_err()
-                .kind(),
-            io::ErrorKind::PermissionDenied
-        );
+    for peer in [host, viewer] {
+        assert_rtc_revoked(peer, turn).await;
     }
 }
 
@@ -466,7 +643,6 @@ async fn exercise(case: Case) {
                 expires_at: wall() + 120,
             },
         };
-        let mode = FakeInputTestMode::Enabled;
         let mut viewer_scope = scope;
         if case == Case::MismatchedGeneration {
             viewer_scope.generation[0] ^= 1;
@@ -475,7 +651,7 @@ async fn exercise(case: Case) {
         let viewer_fp = viewer_id.public().fingerprint;
         let host_profile = SyntheticProfile {
             role: SessionRole::Host,
-            mode,
+            mode: TEST_MODE,
             scope,
             local_fingerprint: &host_fp,
             peer_fingerprint: &viewer_fp,
@@ -484,7 +660,7 @@ async fn exercise(case: Case) {
         .unwrap();
         let viewer_profile = SyntheticProfile {
             role: SessionRole::Viewer,
-            mode,
+            mode: TEST_MODE,
             scope: viewer_scope,
             local_fingerprint: &viewer_fp,
             peer_fingerprint: &host_fp,
@@ -527,142 +703,60 @@ async fn exercise(case: Case) {
         }
         preflight.unwrap();
 
-        let mut host_proof =
-            FakeInputProof::prepare(&host_id, &host_pin, SessionRole::Host, scope, mode, wall())
-                .unwrap();
-        let mut viewer_proof = FakeInputProof::prepare(
-            &viewer_id,
-            &viewer_pin,
-            SessionRole::Viewer,
-            viewer_scope,
-            mode,
-            wall(),
-        )
-        .unwrap();
-        let ctx = WireContext {
-            room: scope.room,
-            generation: scope.generation,
-        };
-        let host_challenge = wire::encode(
-            ctx,
-            Kind::HostChallenge,
-            Frame::Challenge(host_proof.challenge(wall()).unwrap()),
-        )
-        .unwrap();
-        wss.host.send(&host_challenge).await.unwrap();
-        let host_wire = wss.viewer.recv().await.unwrap();
-        let Frame::Challenge(host_challenge) =
-            wire::decode(ctx, Kind::HostChallenge, &host_wire).unwrap()
-        else {
-            panic!("expected host challenge over WSS")
-        };
-
-        let viewer_challenge = wire::encode(
-            ctx,
-            Kind::ViewerChallenge,
-            Frame::Challenge(viewer_proof.challenge(wall()).unwrap()),
-        )
-        .unwrap();
-        wss.viewer.send(&viewer_challenge).await.unwrap();
-        let viewer_wire = wss.host.recv().await.unwrap();
-        let Frame::Challenge(viewer_challenge) =
-            wire::decode(ctx, Kind::ViewerChallenge, &viewer_wire).unwrap()
-        else {
-            panic!("expected viewer challenge over WSS")
-        };
-
-        let mut host = Peer::start(&turn).await;
-        let mut viewer = Peer::start(&turn).await;
-        let viewer_channel = viewer
-            .pc
-            .create_data_channel(
-                LABEL,
-                Some(RTCDataChannelInit {
-                    protocol: PROTOCOL.into(),
-                    ..Default::default()
-                }),
-            )
-            .await
-            .unwrap();
-
-        let offer = viewer.local(false).await;
-        let mut signature = viewer_proof.seal(host_challenge, &offer, wall()).unwrap();
-        if case == Case::TamperedOffer {
-            signature[0] ^= 1;
-        }
-        let offer_frame = wire::encode(
-            ctx,
-            Kind::Offer,
-            Frame::SignedSdp {
-                sdp: &offer,
-                signature,
+        let (host_result, viewer_result) = tokio::join!(
+            negotiate_host(&mut wss.host, &turn, &host_id, &host_pin, scope),
+            negotiate_viewer(
+                &mut wss.viewer,
+                &turn,
+                &viewer_id,
+                &viewer_pin,
+                viewer_scope,
+                case == Case::TamperedOffer,
+            ),
+        );
+        let (
+            Negotiated {
+                peer: mut host,
+                proof: mut host_proof,
             },
-        )
-        .unwrap();
-        wss.viewer.send(&offer_frame).await.unwrap();
-        let offer_wire = wss.host.recv().await.unwrap();
-        let Frame::SignedSdp {
-            sdp: received_offer,
-            signature,
-        } = wire::decode(ctx, Kind::Offer, &offer_wire).unwrap()
-        else {
-            panic!("expected signed offer over WSS")
-        };
-        assert_eq!(received_offer.as_bytes(), offer.as_bytes());
-        let verified = host_proof.verify(received_offer, &signature, wall());
-        if case == Case::TamperedOffer {
-            assert_eq!(verified, Err(ProofError::Rejected));
-            assert!(host_proof.approved_relay_pair(wall()).is_none());
-            assert!(host.pc.remote_description().await.is_none());
-            for port in [RELAY_PORTS.0, RELAY_PORTS.1] {
-                assert!(!host
-                    .runtime
-                    .allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, port).into()));
+            Negotiated {
+                peer: viewer,
+                proof: mut viewer_proof,
+            },
+            viewer_channel,
+        ) = match (host_result, viewer_result) {
+            (HostNegotiation::Ready(host), ViewerNegotiation::Ready(viewer, channel))
+                if case != Case::TamperedOffer =>
+            {
+                (*host, *viewer, channel)
             }
-            assert_eq!(turn.stats().forwarded_packets, 0);
-            close_rtc(&host, &viewer, &turn).await;
-            wss.close().await.unwrap();
-            return;
-        }
-        verified.unwrap();
-
-        // The physical helper may start an allocation, but the logical
-        // peer does not enter the runtime until the exact WSS bytes verify.
-        let viewer_relay = scope
-            .validate_relay_sctp_description(received_offer, SessionRole::Viewer, wall())
-            .unwrap();
-        host.remote(received_offer, false, viewer_relay).await;
-        let answer = host.local(true).await;
-        let signature = host_proof.seal(viewer_challenge, &answer, wall()).unwrap();
-        let answer_frame = wire::encode(
-            ctx,
-            Kind::Answer,
-            Frame::SignedSdp {
-                sdp: &answer,
-                signature,
-            },
-        )
-        .unwrap();
-        wss.host.send(&answer_frame).await.unwrap();
-        let answer_wire = wss.viewer.recv().await.unwrap();
-        let Frame::SignedSdp {
-            sdp: received_answer,
-            signature,
-        } = wire::decode(ctx, Kind::Answer, &answer_wire).unwrap()
-        else {
-            panic!("expected signed answer over WSS")
+            (HostNegotiation::RejectedOffer, ViewerNegotiation::HostClosed(viewer))
+                if case == Case::TamperedOffer =>
+            {
+                // Only the gathering viewer ever had an RTC. It received real
+                // WSS Close, never an answer or a permitted relay destination.
+                assert!(viewer.pc.remote_description().await.is_none());
+                for port in [RELAY_PORTS.0, RELAY_PORTS.1] {
+                    assert!(!viewer
+                        .runtime
+                        .allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, port).into()));
+                }
+                let stats = turn.stats();
+                assert_eq!(stats.allocations_created, 1);
+                assert_eq!(stats.permissions_created, 0);
+                assert_eq!(stats.forwarded_packets, 0);
+                viewer.runtime.revoke();
+                viewer.pc.close().await.unwrap();
+                assert_rtc_revoked(&viewer, &turn).await;
+                wss.close().await.unwrap();
+                return;
+            }
+            _ => panic!("unexpected host/viewer negotiation outcomes"),
         };
-        assert_eq!(received_answer.as_bytes(), answer.as_bytes());
-        viewer_proof
-            .verify(received_answer, &signature, wall())
-            .unwrap();
         let viewer_pair = viewer_proof.approved_relay_pair(wall()).unwrap();
         let host_pair = host_proof.approved_relay_pair(wall()).unwrap();
         assert_eq!(host_pair.remote(), viewer_pair.local());
         assert_eq!(host_pair.local(), viewer_pair.remote());
-        viewer
-            .remote(received_answer, true, viewer_pair.remote())
-            .await;
 
         let host_channel = host.channels.recv().await.unwrap();
         tokio::join!(opened(&host_channel), opened(&viewer_channel));
@@ -711,7 +805,7 @@ async fn exercise(case: Case) {
             // Observe loss from the actual authenticated fixture socket.
             // The serialized owner processes it before the delayed reply.
             wss.viewer.disconnect().await.unwrap();
-            assert_eq!(wss.host.recv().await, Err("FAKE_INPUT_FIXTURE_WSS_CLOSED"));
+            assert_eq!(wss.host.recv().await, Err(WSS_CLOSED));
             assert_eq!(
                 input.advance(Control::TransportLost),
                 Ok(State::Ended(End::Disconnected))
@@ -773,7 +867,7 @@ async fn exercise(case: Case) {
             // Keep SCTP open through the no-ACK check so closing it cannot
             // mask an incorrectly emitted ACK.
             wss.viewer.disconnect().await.unwrap();
-            assert_eq!(wss.host.recv().await, Err("FAKE_INPUT_FIXTURE_WSS_CLOSED"));
+            assert_eq!(wss.host.recv().await, Err(WSS_CLOSED));
             assert_eq!(
                 input.dispatch_next(&input_scope, Control::TransportLost),
                 Ok(Dispatch::Closed)
