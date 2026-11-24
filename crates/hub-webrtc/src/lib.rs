@@ -113,6 +113,9 @@ pub use public_fake_input_turn_tests::run_wss_turn_loopback_check;
 #[cfg(all(target_os = "linux", feature = "v2-synthetic-admission-rtc-test"))]
 #[doc(hidden)]
 pub mod synthetic_admission_rtc;
+#[cfg(feature = "v2-synthetic-role-profile")]
+#[doc(hidden)]
+pub mod synthetic_role_profile;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
 #[cfg(feature = "v2-public-video-wss")]
