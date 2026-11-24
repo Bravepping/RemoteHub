@@ -174,11 +174,11 @@ async fn exchange_inner(batch: bool, automatic: bool, blocked: bool, sustained: 
         if sustained {
             assert!(host_channel.is_sustained());
             assert!(viewer_channel.is_sustained());
-            let earliest = Instant::now() + Duration::from_secs(1800);
+            let earliest = Instant::now() + Duration::from_secs(1860);
             let host_deadline = host_channel.begin_sustained_round().unwrap();
             let viewer_deadline = viewer_channel.begin_sustained_round().unwrap();
             assert!(host_deadline >= earliest);
-            assert!(viewer_deadline <= Instant::now() + Duration::from_secs(1800));
+            assert!(viewer_deadline <= Instant::now() + Duration::from_secs(1860));
             assert!(host_channel.begin_sustained_round().is_err());
             assert!(viewer_channel.begin_sustained_round().is_err());
             assert_eq!(host_deadline, host.runtime.effective_deadline());

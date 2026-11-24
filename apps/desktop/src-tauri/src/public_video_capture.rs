@@ -24,6 +24,9 @@ pub(crate) const CAPTURE_WINDOW: Duration =
 #[cfg(feature = "v2-public-control-desktop")]
 pub(crate) const CONTROL_WINDOW: Duration =
     Duration::from_secs(hub_encode_win::PUBLIC_VIDEO_TEST_SECONDS as u64);
+#[cfg(feature = "v2-session-window-sustained")]
+pub(crate) const SUSTAINED_WINDOW: Duration =
+    Duration::from_secs(hub_webrtc::public_video::SUSTAINED_CONTROL_MEDIA_BOUND_SECONDS);
 
 // Video-only runs keep their own existing startup clock. The control build
 // only accepts an actor-established deadline and never starts another clock.
@@ -31,6 +34,8 @@ pub(crate) enum CaptureTiming {
     VideoOnly(Duration),
     #[cfg(feature = "v2-public-control-desktop")]
     Control(watch::Receiver<Option<MonotonicInstant>>),
+    #[cfg(feature = "v2-session-window-sustained")]
+    Sustained(watch::Receiver<Option<MonotonicInstant>>),
 }
 
 impl From<Duration> for CaptureTiming {
@@ -45,7 +50,14 @@ impl CaptureTiming {
             Self::VideoOnly(window) => *window > STANDARD_WINDOW,
             #[cfg(feature = "v2-public-control-desktop")]
             Self::Control(_) => true,
+            #[cfg(feature = "v2-session-window-sustained")]
+            Self::Sustained(_) => true,
         }
+    }
+
+    #[cfg(feature = "v2-session-window-sustained")]
+    fn is_sustained(&self) -> bool {
+        matches!(self, Self::Sustained(_))
     }
 }
 
@@ -158,6 +170,8 @@ pub(crate) async fn run(
     use {hub_encode_win::EncoderConfig, std::sync::atomic::AtomicBool};
 
     let extended = timing.is_extended();
+    #[cfg(feature = "v2-session-window-sustained")]
+    let sustained = timing.is_sustained();
     run_with_source(sender, stop, phase, timing, move |handoff| {
         let mut handoff_error = None;
         let publish = |_: &StreamReport| handoff.mark_started();
@@ -167,6 +181,19 @@ pub(crate) async fn run(
                 EncodeError::Native(code.into())
             })
         };
+        #[cfg(feature = "v2-session-window-sustained")]
+        if sustained {
+            return stream::run_public_video_sustained(
+                true,
+                handoff.deadline,
+                handoff.cancel.clone(),
+                &AtomicBool::new(false),
+                publish,
+                sink,
+            )
+            .map(|_| ())
+            .map_err(|error| handoff_error.unwrap_or_else(|| safe_encoder_error(&error)));
+        }
         let standard = |sink| {
             stream::run(
                 true,
@@ -226,10 +253,18 @@ async fn run_with_source(
 
     let timing = timing.into();
     let extended = timing.is_extended();
+    #[cfg(feature = "v2-session-window-sustained")]
+    let sustained = timing.is_sustained();
     let deadline = match timing {
         CaptureTiming::VideoOnly(window) => Instant::now() + window,
         #[cfg(feature = "v2-public-control-desktop")]
-        CaptureTiming::Control(mut round) => {
+        timing => {
+            let (mut round, max_window) = match timing {
+                CaptureTiming::Control(round) => (round, CONTROL_WINDOW),
+                #[cfg(feature = "v2-session-window-sustained")]
+                CaptureTiming::Sustained(round) => (round, SUSTAINED_WINDOW),
+                CaptureTiming::VideoOnly(_) => unreachable!(),
+            };
             let candidate = tokio::select! {
                 biased;
                 _ = stop.wait_for(|&stop| stop) => return CaptureOutcome::before_start(Ok(CaptureEnd::LocalStop)),
@@ -244,7 +279,7 @@ async fn run_with_source(
             if candidate <= now {
                 return CaptureOutcome::before_start(Ok(CaptureEnd::Limit));
             }
-            if candidate - now > CONTROL_WINDOW {
+            if candidate - now > max_window {
                 return CaptureOutcome::before_start(Err("PUBLIC_CONTROL_ROUND_DEADLINE"));
             }
             Instant::from_std(candidate)
@@ -289,6 +324,10 @@ async fn run_with_source(
         let _ = extended;
         Packetizer::default()
     };
+    #[cfg(feature = "v2-session-window-sustained")]
+    if sustained {
+        packetizer = Packetizer::public_video_sustained();
+    }
     let end = tokio::select! {
         biased;
         _ = stop.wait_for(|&stop| stop) => Ok(CaptureEnd::LocalStop),

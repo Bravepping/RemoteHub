@@ -71,6 +71,7 @@ pub struct Approval<S: SessionSink> {
     scope: Binding,
     session_until: Instant,
     permission_until: Option<Instant>,
+    max_approval: Duration,
     pending_decision: Option<Arc<()>>,
     state: State,
     release_unconfirmed: bool,
@@ -83,10 +84,25 @@ impl<S: SessionSink> Approval<S> {
     }
 
     pub(super) fn view_only_bound(scope: Binding, session_until: Instant, sink: S) -> Self {
+        Self::with_max(scope, session_until, sink, MAX_APPROVAL)
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(super) fn view_only_sustained(scope: InputScope, session_until: Instant, sink: S) -> Self {
+        Self::with_max(
+            Binding::Device(scope),
+            session_until,
+            sink,
+            Duration::from_secs(crate::public_video::SUSTAINED_CONTROL_SESSION_SECONDS),
+        )
+    }
+
+    fn with_max(scope: Binding, session_until: Instant, sink: S, max_approval: Duration) -> Self {
         Self {
             scope,
             session_until,
             permission_until: None,
+            max_approval,
             pending_decision: None,
             state: State::ViewOnly,
             release_unconfirmed: false,
@@ -153,7 +169,7 @@ impl<S: SessionSink> Approval<S> {
             return self.end(End::Declined);
         }
         let until = now
-            .checked_add(MAX_APPROVAL)
+            .checked_add(self.max_approval)
             .map_or(self.session_until, |max| max.min(self.session_until));
         self.permission_until = Some(until);
         self.state = State::Allowed;

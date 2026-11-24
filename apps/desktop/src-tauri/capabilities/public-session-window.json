@@ -9,6 +9,7 @@
     "allow-public-session-window-attach",
     "allow-public-session-window-arm-input",
     "allow-public-session-window-display",
+    "allow-public-session-window-revoke-input",
     "allow-public-session-window-snapshot",
     "allow-public-video-status",
     "allow-public-video-next-frame",

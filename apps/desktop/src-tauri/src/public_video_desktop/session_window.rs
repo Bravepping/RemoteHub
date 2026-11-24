@@ -294,6 +294,24 @@ pub(crate) fn public_session_window_arm_input(
     Ok(())
 }
 
+#[cfg(feature = "v2-session-window-sustained")]
+#[tauri::command]
+pub(crate) fn public_session_window_revoke_input(
+    window: WebviewWindow,
+    generation: String,
+) -> Result<(), String> {
+    let session = find(&window, &generation)?;
+    if session.owner == "main"
+        || session.role != Role::Host
+        || !session.input_wheel.load(Ordering::Acquire)
+        || *session.input_state.borrow() != InputState::Allowed
+    {
+        return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
+    }
+    session.revoke_input.send_replace(true);
+    Ok(())
+}
+
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DisplayAction {

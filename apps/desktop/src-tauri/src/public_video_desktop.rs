@@ -131,6 +131,9 @@ pub(crate) struct Status {
     #[cfg(feature = "v2-public-control-desktop")]
     #[serde(skip_serializing_if = "Option::is_none")]
     input_state: Option<InputState>,
+    #[cfg(feature = "v2-session-window-sustained")]
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    input_wheel: bool,
     #[cfg(feature = "v2-public-control-desktop")]
     #[serde(skip_serializing_if = "Option::is_none")]
     round_seconds: Option<u16>,
@@ -197,6 +200,8 @@ impl Status {
             connection_path: None,
             #[cfg(feature = "v2-public-control-desktop")]
             input_state: None,
+            #[cfg(feature = "v2-session-window-sustained")]
+            input_wheel: false,
             #[cfg(feature = "v2-public-control-desktop")]
             round_seconds: None,
             end_reason: Some(reason),
@@ -251,6 +256,10 @@ pub(crate) struct Session {
     control: bool,
     #[cfg(feature = "v2-public-control-desktop")]
     input_state: watch::Sender<InputState>,
+    #[cfg(feature = "v2-session-window-sustained")]
+    input_wheel: AtomicBool,
+    #[cfg(feature = "v2-session-window-sustained")]
+    revoke_input: watch::Sender<bool>,
     #[cfg(feature = "v2-public-control-desktop")]
     round_deadline: watch::Sender<Option<std::time::Instant>>,
     #[cfg(feature = "v2-public-control-desktop")]
@@ -287,6 +296,8 @@ impl Session {
                 connection_path: None,
                 #[cfg(feature = "v2-public-control-desktop")]
                 input_state: None,
+                #[cfg(feature = "v2-session-window-sustained")]
+                input_wheel: false,
                 #[cfg(feature = "v2-public-control-desktop")]
                 round_seconds: None,
                 end_reason: None,
@@ -298,6 +309,10 @@ impl Session {
             control: control_launch,
             #[cfg(feature = "v2-public-control-desktop")]
             input_state: watch::channel(InputState::ViewOnly).0,
+            #[cfg(feature = "v2-session-window-sustained")]
+            input_wheel: AtomicBool::new(false),
+            #[cfg(feature = "v2-session-window-sustained")]
+            revoke_input: watch::channel(false).0,
             #[cfg(feature = "v2-public-control-desktop")]
             round_deadline: watch::channel(None).0,
             #[cfg(feature = "v2-public-control-desktop")]
@@ -379,6 +394,11 @@ impl Session {
         #[cfg(feature = "v2-public-control-desktop")]
         if self.control {
             status.round_seconds = self.round_seconds.get().copied();
+            #[cfg(feature = "v2-session-window-sustained")]
+            {
+                status.input_wheel =
+                    status.phase == Phase::Ready && self.input_wheel.load(Ordering::Acquire);
+            }
             status.input_state = Some(if status.phase == Phase::Closed {
                 InputState::Closed
             } else {
@@ -606,6 +626,12 @@ pub(crate) fn public_control_send_input(
     event: String,
 ) -> Result<(), String> {
     let session = find(&window, &generation)?;
+    #[cfg(feature = "v2-session-window-sustained")]
+    if session.input_wheel.load(Ordering::Acquire)
+        && *session.input_state.borrow() == InputState::Ended
+    {
+        return Err("PUBLIC_CONTROL_GRANT_ENDED".into());
+    }
     if !session.input_ready() {
         return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
     }
@@ -615,10 +641,23 @@ pub(crate) fn public_control_send_input(
         return Err("PUBLIC_CONTROL_EVENT_REJECTED".into());
     }
     let parsed = serde_json::from_str::<Event>(&event);
-    if !matches!(
-        &parsed,
-        Ok(Event::Move { .. } | Event::Button { .. } | Event::Key { .. } | Event::Release { .. })
-    ) {
+    let wheel = false;
+    #[cfg(feature = "v2-session-window-sustained")]
+    let wheel = wheel
+        || matches!(
+            &parsed,
+            Ok(Event::Wheel { delta }) if session.input_wheel.load(Ordering::Acquire)
+                && [-120, 120].contains(delta)
+        );
+    if !wheel
+        && !matches!(
+            &parsed,
+            Ok(Event::Move { .. }
+                | Event::Button { .. }
+                | Event::Key { .. }
+                | Event::Release { .. })
+        )
+    {
         session.request_stop();
         return Err("PUBLIC_CONTROL_EVENT_REJECTED".into());
     }
@@ -776,6 +815,12 @@ async fn run(
     if *stop.borrow() {
         return Err(CANCELLED);
     }
+    #[cfg(feature = "v2-session-window-sustained")]
+    let sustained = profile.is_sustained_control();
+    #[cfg(feature = "v2-session-window-sustained")]
+    if sustained && (!control_launch || session.owner == "main") {
+        return Err("PUBLIC_SESSION_WINDOW_REQUIRED");
+    }
     #[cfg(feature = "v2-public-control-desktop")]
     let input_timing = if control_launch && profile.is_control_batch() {
         ControlTiming::Batch
@@ -786,7 +831,20 @@ async fn run(
     #[cfg(feature = "v2-public-control-desktop")]
     let approved_window = if control_launch {
         let window = input_timing.window();
-        let _ = session.round_seconds.set(window.as_secs() as u16);
+        #[cfg(feature = "v2-session-window-sustained")]
+        let window = if sustained {
+            public_video_capture::SUSTAINED_WINDOW
+        } else {
+            window
+        };
+        let configured = window.as_secs() as u16;
+        #[cfg(feature = "v2-session-window-sustained")]
+        let configured = if sustained {
+            hub_webrtc::public_video::SUSTAINED_CONTROL_SESSION_SECONDS as u16
+        } else {
+            configured
+        };
+        let _ = session.round_seconds.set(configured);
         window
     } else {
         approved_window
@@ -807,11 +865,19 @@ async fn run(
     } else {
         "只允许中继。"
     };
+    let setup_notice = "";
+    #[cfg(feature = "v2-session-window-sustained")]
+    let setup_notice = if sustained {
+        "目标是首帧之后可使用 30 分钟，这个硬上限包含最多 60 秒启动余量。"
+    } else {
+        setup_notice
+    };
     let message = format!(
-        "本次仅{action}，共享最多 {} 秒。{route_notice}{input_notice}点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
+        "本次仅{action}，共享最多 {} 秒。{setup_notice}{route_notice}{input_notice}点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
         approved_window.as_secs(),
         approval.scope.wss, approval.scope.turn, peer.fingerprint(),
     );
+    let sustained_title = "RemoteHub · 画面授权";
     let title = if control_launch {
         "RemoteHub · 公网短时会话：画面授权"
     } else if cfg!(feature = "v2-public-video-60s-test") {
@@ -819,6 +885,10 @@ async fn run(
     } else {
         "RemoteHub · 公网短时仅视频"
     };
+    #[cfg(feature = "v2-session-window-sustained")]
+    let title = if sustained { sustained_title } else { title };
+    #[cfg(not(feature = "v2-session-window-sustained"))]
+    let _ = sustained_title;
     let confirmed = tauri::async_runtime::spawn_blocking(move || unsafe {
         MessageBoxW(
             Some(HWND(hwnd as *mut _)),
@@ -894,8 +964,28 @@ async fn run(
         let run_input = {
             let owner = session.clone();
             let fingerprint = peer.fingerprint().to_owned();
-            move |transport, input_stop| async move {
+            move |transport: hub_webrtc::public_video::PublicControlTransport, input_stop| async move {
+                #[cfg(feature = "v2-session-window-sustained")]
+                {
+                    if transport.is_sustained() != sustained {
+                        return Err("PUBLIC_CONTROL_ROLE");
+                    }
+                    owner.input_wheel.store(sustained, Ordering::Release);
+                }
                 if owner.role == Role::Host {
+                    #[cfg(feature = "v2-session-window-sustained")]
+                    if sustained {
+                        return public_control_desktop::sustained::run_host(
+                            transport,
+                            input_stop,
+                            hwnd,
+                            fingerprint,
+                            first_video,
+                            owner.input_state.clone(),
+                            owner.revoke_input.subscribe(),
+                        )
+                        .await;
+                    }
                     public_control_desktop::run_host(
                         transport,
                         input_stop,
@@ -913,6 +1003,16 @@ async fn run(
                         .map_err(|_| "PUBLIC_CONTROL_STATE")?
                         .take()
                         .ok_or("PUBLIC_CONTROL_STATE")?;
+                    #[cfg(feature = "v2-session-window-sustained")]
+                    if sustained {
+                        return public_control_desktop::sustained::run_viewer(
+                            transport,
+                            input_stop,
+                            input_receiver,
+                            owner.input_state.clone(),
+                        )
+                        .await;
+                    }
                     public_control_desktop::run_viewer(
                         transport,
                         input_stop,
@@ -943,7 +1043,25 @@ async fn run(
             } else {
                 capture_timing
             };
+            #[cfg(feature = "v2-session-window-sustained")]
+            let capture_timing = if sustained {
+                CaptureTiming::Sustained(session.round_deadline.subscribe())
+            } else {
+                capture_timing
+            };
             let run_actor = async {
+                #[cfg(feature = "v2-session-window-sustained")]
+                if sustained {
+                    return actor
+                        .run_with_media_and_control_sustained(
+                            actor_stop,
+                            phase_tx,
+                            media,
+                            session.round_deadline.clone(),
+                            run_input,
+                        )
+                        .await;
+                }
                 #[cfg(feature = "v2-public-control-desktop")]
                 if control_launch {
                     if matches!(input_timing, ControlTiming::Batch) {
@@ -973,6 +1091,18 @@ async fn run(
             let (media, receiver) = ScopedVideoMedia::viewer();
             *session.receiver.lock().await = Some(receiver);
             let actor = async {
+                #[cfg(feature = "v2-session-window-sustained")]
+                if sustained {
+                    return actor
+                        .run_with_media_and_control_sustained(
+                            stop,
+                            phase_tx,
+                            media,
+                            session.round_deadline.clone(),
+                            run_input,
+                        )
+                        .await;
+                }
                 #[cfg(feature = "v2-public-control-desktop")]
                 if control_launch {
                     if matches!(input_timing, ControlTiming::Batch) {

@@ -64,25 +64,73 @@ pub struct PublicControlInput<S: SessionSink<Event = Event>> {
     queue: InputQueue<S>,
     protocol: Protocol,
     pending_seq: Option<u64>,
+    wheel: bool,
 }
 
 impl<S: SessionSink<Event = Event>> PublicControlInput<S> {
     /// `scope` must be established by the exact session and live device
     /// transport, never by the v1 envelope. `until` is not renewable.
     pub fn view_only(scope: InputScope, until: Instant, sink: S) -> Result<Self, Error> {
+        Self::view_only_inner(scope, until, sink, false)
+    }
+
+    /// This remains view-only, requires fresh native approval, has the
+    /// distinct fixed input ceiling, and never owns/closes the media
+    /// transport. Only a verified sustained-purpose host may enable wheel.
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub fn for_sustained_host(
+        transport: &crate::public_video::PublicControlTransport,
+        until: Instant,
+        sink: S,
+    ) -> Result<Self, Error> {
+        if transport.role() != hub_identity::session::SessionRole::Host || !transport.is_sustained()
+        {
+            return Err(Error::InvalidScope);
+        }
+        if until > transport.deadline() {
+            return Err(Error::InvalidWindow);
+        }
+        Self::view_only_inner(transport.scope(), until, sink, true)
+    }
+
+    fn view_only_inner(
+        scope: InputScope,
+        until: Instant,
+        sink: S,
+        sustained: bool,
+    ) -> Result<Self, Error> {
         let room = Uuid::from_bytes(scope.room);
         if room.is_nil() || scope.generation == [0; 32] || scope.viewer_key == [0; 32] {
             return Err(Error::InvalidScope);
         }
         let now = Instant::now();
-        if until <= now || until.duration_since(now) > MAX_WINDOW {
+        let max = MAX_WINDOW;
+        #[cfg(feature = "v2-public-control-sustained")]
+        let max = if sustained {
+            Duration::from_secs(crate::public_video::SUSTAINED_CONTROL_SESSION_SECONDS)
+        } else {
+            max
+        };
+        if until <= now || until.duration_since(now) > max {
             return Err(Error::InvalidWindow);
         }
+        #[cfg(feature = "v2-public-control-sustained")]
+        if sustained {
+            return Ok(Self {
+                scope,
+                queue: InputQueue::view_only_sustained(scope, until, sink),
+                protocol: Protocol::with_sustained_deadline(room.to_string(), now, until),
+                pending_seq: None,
+                wheel: true,
+            });
+        }
+        debug_assert!(!sustained);
         Ok(Self {
             scope,
             queue: InputQueue::view_only(scope, until, sink),
             protocol: Protocol::with_deadline(room.to_string(), now, until),
             pending_seq: None,
+            wheel: false,
         })
     }
 
@@ -125,7 +173,7 @@ impl<S: SessionSink<Event = Event>> PublicControlInput<S> {
     /// `ingress` is the scope captured at the registered transport callback,
     /// not relabeled as the currently displayed session. Early bytes are
     /// ignored before the v1 parser, so they neither queue nor spend sequence.
-    /// The first public lane does not enable the LAN wheel event.
+    /// Wheel is enabled only by the distinct verified sustained purpose.
     pub fn enqueue_v1(
         &mut self,
         ingress: &InputScope,
@@ -146,7 +194,7 @@ impl<S: SessionSink<Event = Event>> PublicControlInput<S> {
             .protocol
             .validate_event(bytes, text, true, Instant::now())
         {
-            Ok((seq, event)) if !matches!(event, Event::Wheel { .. }) => (seq, event),
+            Ok((seq, event)) if self.wheel || !matches!(event, Event::Wheel { .. }) => (seq, event),
             _ => {
                 // A truncated/replayed invalid input must not leave a
                 // possibly incomplete held-key sequence with the grant open.
@@ -415,7 +463,9 @@ mod tests {
             sink.clone(),
         )
         .unwrap();
-        let next_prompt = next.begin_local_decision(&scope, Control::Continue).unwrap();
+        let next_prompt = next
+            .begin_local_decision(&scope, Control::Continue)
+            .unwrap();
         // An identical sequence number in the new round cannot inherit the
         // previous approval, even with the same verified viewer.
         let previous = v1(1, true);
@@ -457,6 +507,41 @@ mod tests {
         assert_eq!(overflow.state(), State::Ended(End::QueueOverflow));
         assert_eq!(overflow.dispatch_next(&SCOPE, Control::Continue), Ok(None));
         assert_eq!(fake.borrow().attempts, 0);
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    #[test]
+    fn sustained_wheel_requires_separate_approval_and_exact_discrete_delta() {
+        let fake = Rc::new(RefCell::new(Fake::default()));
+        let mut owner = Owner::view_only_inner(
+            SCOPE,
+            Instant::now() + Duration::from_secs(10),
+            fake.clone(),
+            true,
+        )
+        .unwrap();
+        let wire = |seq, delta| {
+            format!(
+                r#"{{"v":1,"seq":{seq},"session_id":"{}","event":{{"kind":"wheel","delta":{delta}}}}}"#,
+                Uuid::from_bytes(SCOPE.room),
+            )
+        };
+        assert_eq!(
+            owner.enqueue_v1(&SCOPE, wire(1, -120).as_bytes(), true, Control::Continue),
+            Err(Error::NotAllowed),
+        );
+        approve(&mut owner);
+        owner
+            .enqueue_v1(&SCOPE, wire(1, -120).as_bytes(), true, Control::Continue)
+            .unwrap();
+        assert_eq!(owner.dispatch_next(&SCOPE, Control::Continue), Ok(Some(1)));
+        assert_eq!(fake.borrow().attempts, 1);
+        assert_eq!(
+            owner.enqueue_v1(&SCOPE, wire(2, 150).as_bytes(), true, Control::Continue),
+            Err(Error::Protocol),
+        );
+        assert_eq!(owner.dispatch_next(&SCOPE, Control::Continue), Ok(None));
+        assert_eq!(fake.borrow().attempts, 1);
     }
 
     #[test]

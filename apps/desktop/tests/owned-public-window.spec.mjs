@@ -130,7 +130,10 @@ test('owned viewer attaches once; control center and blur pause input without en
           if (command === 'public_video_status')
             return {
               phase: 'ready',
-              input_state: 'allowed',
+              input_state: window.inputEndedFixture ? 'ended' : 'allowed',
+              ...(window.sustainedFixture
+                ? { input_wheel: true, round_seconds: 1800 }
+                : {}),
               connection_path: 'direct',
             };
           if (command === 'public_video_next_frame') {
@@ -223,6 +226,35 @@ test('owned viewer attaches once; control center and blur pause input without en
     .poll(() => input.slice(beforeNativePause))
     .toEqual([{ kind: 'release_all' }]);
   await expect(enable).toBeEnabled();
+
+  await enable.click();
+  const surface = panel.locator('.public-video-surface');
+  const box = await surface.boundingBox();
+  const wheel = () =>
+    surface.dispatchEvent('wheel', {
+      clientX: box.x + box.width / 2,
+      clientY: box.y + box.height / 2,
+      deltaX: 0,
+      deltaY: 300,
+    });
+  await wheel();
+  expect(input.some((event) => event.kind === 'wheel')).toBe(false);
+  await page.evaluate(() => {
+    window.sustainedFixture = true;
+  });
+  await expect
+    .poll(async () => {
+      await wheel();
+      return input.find((event) => event.kind === 'wheel')?.delta;
+    })
+    .toBe(-120);
+  await page.evaluate(() => {
+    window.inputEndedFixture = true;
+  });
+  await expect(
+    panel.getByText('本次键鼠权限已结束，画面会继续显示。'),
+  ).toBeVisible();
+  await expect(panel.getByRole('status')).toContainText('正在显示');
   const calls = await page.evaluate(() => window.ownedWindowCalls);
   expect(
     calls.filter((command) => command === 'public_session_window_attach'),

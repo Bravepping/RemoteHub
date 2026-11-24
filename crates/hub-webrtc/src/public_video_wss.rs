@@ -125,6 +125,15 @@ pub struct PublicVideoNetworkConfig<'a> {
     pub ice_config: IceConfig,
 }
 
+#[cfg(feature = "v2-public-control")]
+#[derive(Clone, Copy)]
+enum ControlRevision {
+    Legacy,
+    ImmediateBatch,
+    #[cfg(feature = "v2-public-control-sustained")]
+    Sustained,
+}
+
 /// The one-use signaling bearer for the control-only route. Neither this
 /// bearer nor the body of a profile grants host input permission.
 #[cfg(feature = "v2-public-control")]
@@ -133,7 +142,7 @@ pub struct PublicControlWssInvitation {
     role: Role,
     expires_at: u64,
     token: PublicControlToken,
-    immediate_batch: bool,
+    revision: ControlRevision,
 }
 
 #[cfg(feature = "v2-public-control")]
@@ -152,7 +161,7 @@ impl PublicControlWssInvitation {
             role,
             expires_at,
             token,
-            immediate_batch: false,
+            revision: ControlRevision::Legacy,
         })
     }
     pub fn new_immediate_batch(
@@ -166,7 +175,28 @@ impl PublicControlWssInvitation {
         if !(1..=1800).contains(&expires_at.saturating_sub(now)) {
             return Err("PUBLIC_CONTROL_WSS_INVITATION");
         }
-        invitation.immediate_batch = true;
+        invitation.revision = ControlRevision::ImmediateBatch;
+        Ok(invitation)
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub fn new_basic_sustained(
+        room: Uuid,
+        role: Role,
+        expires_at: u64,
+        token: PublicControlToken,
+        now: u64,
+    ) -> Result<Self, &'static str> {
+        use crate::public_video::{
+            SUSTAINED_CONTROL_BOOTSTRAP_MIN_SECONDS, SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
+        };
+        let mut invitation = Self::new(room, role, expires_at, token)?;
+        if !(SUSTAINED_CONTROL_BOOTSTRAP_MIN_SECONDS..=SUSTAINED_CONTROL_SCOPE_TTL_SECONDS)
+            .contains(&expires_at.saturating_sub(now))
+        {
+            return Err("PUBLIC_CONTROL_WSS_INVITATION");
+        }
+        invitation.revision = ControlRevision::Sustained;
         Ok(invitation)
     }
 }
@@ -281,7 +311,7 @@ struct ProofContext<'a> {
     #[cfg(feature = "v2-public-control")]
     control: bool,
     #[cfg(feature = "v2-public-control")]
-    immediate_batch: bool,
+    revision: ControlRevision,
 }
 
 pub struct PendingPublicVideoWss<'a> {
@@ -423,7 +453,7 @@ impl<'a> PublicVideoWss<'a> {
                     #[cfg(feature = "v2-public-control")]
                     control: false,
                     #[cfg(feature = "v2-public-control")]
-                    immediate_batch: false,
+                    revision: ControlRevision::Legacy,
                 },
                 host_registered: false,
             },
@@ -445,12 +475,13 @@ impl<'a> PublicVideoWss<'a> {
         if cfg.invitation.expires_at != scope.expires_at {
             return Err("PUBLIC_CONTROL_WSS_SCOPE");
         }
-        let immediate_batch = cfg.invitation.immediate_batch;
-        if immediate_batch {
-            scope.checked_control_batch(now)?;
-        } else {
-            scope.checked_mode(now)?;
-        }
+        let revision = cfg.invitation.revision;
+        match revision {
+            ControlRevision::Legacy => scope.checked_mode(now)?,
+            ControlRevision::ImmediateBatch => scope.checked_control_batch(now)?,
+            #[cfg(feature = "v2-public-control-sustained")]
+            ControlRevision::Sustained => scope.checked_control_sustained(now)?,
+        };
         cfg.peer
             .session_binding(
                 &cfg.local_identity.public(),
@@ -467,34 +498,24 @@ impl<'a> PublicVideoWss<'a> {
         }
         let trust =
             LoopbackTlsTrust::from_ca_der(cfg.ca_der).map_err(|_| "PUBLIC_CONTROL_WSS_CA_PIN")?;
-        let plan = if immediate_batch {
-            PublicVideoIcePlan::prepare_control_batch(
-                scope,
-                room,
-                cfg.relay_grant,
-                cfg.ice_config,
-                now,
-            )?
-        } else {
-            PublicVideoIcePlan::prepare(scope, room, cfg.relay_grant, cfg.ice_config, now)?
+        let prepare = match revision {
+            ControlRevision::Legacy => PublicVideoIcePlan::prepare,
+            ControlRevision::ImmediateBatch => PublicVideoIcePlan::prepare_control_batch,
+            #[cfg(feature = "v2-public-control-sustained")]
+            ControlRevision::Sustained => PublicVideoIcePlan::prepare_control_sustained,
         };
+        let plan = prepare(scope, room, cfg.relay_grant, cfg.ice_config, now)?;
         let deadline = Instant::now() + Duration::from_secs(plan.expires_at() - now);
-        let endpoint = if immediate_batch {
-            hub_signal_v2::PublicControlEndpoint::new_immediate_batch(
-                plan.local_ip(),
-                scope.wss,
-                plan.expires_at(),
-                now,
-            )
-        } else {
-            hub_signal_v2::PublicControlEndpoint::new(
-                plan.local_ip(),
-                scope.wss,
-                plan.expires_at(),
-                now,
-            )
-        }
-        .map_err(|_| "PUBLIC_CONTROL_WSS_ENDPOINT")?;
+        let new_endpoint = match revision {
+            ControlRevision::Legacy => hub_signal_v2::PublicControlEndpoint::new,
+            ControlRevision::ImmediateBatch => {
+                hub_signal_v2::PublicControlEndpoint::new_immediate_batch
+            }
+            #[cfg(feature = "v2-public-control-sustained")]
+            ControlRevision::Sustained => hub_signal_v2::PublicControlEndpoint::new_basic_sustained,
+        };
+        let endpoint = new_endpoint(plan.local_ip(), scope.wss, plan.expires_at(), now)
+            .map_err(|_| "PUBLIC_CONTROL_WSS_ENDPOINT")?;
         let room_id = RoomId::new(room.simple().to_string()).map_err(relay_error)?;
         let relay = timeout_at(
             deadline,
@@ -523,7 +544,7 @@ impl<'a> PublicVideoWss<'a> {
                     scope,
                     scope_deadline: deadline,
                     control: true,
-                    immediate_batch,
+                    revision,
                 },
                 host_registered: false,
             },
@@ -577,7 +598,7 @@ impl<'a> PublicVideoWss<'a> {
                 #[cfg(feature = "v2-public-control")]
                 control: false,
                 #[cfg(feature = "v2-public-control")]
-                immediate_batch: false,
+                revision: ControlRevision::Legacy,
             },
             host_registered: false,
         })
@@ -1006,10 +1027,12 @@ impl<'a> PendingPublicVideoWss<'a> {
         let proof = prepare_video()?;
         #[cfg(feature = "v2-public-control")]
         let proof = if ctx.control {
-            let prepare = if ctx.immediate_batch {
-                crate::public_video::PublicControlProof::prepare_immediate_batch
-            } else {
-                crate::public_video::PublicControlProof::prepare
+            use crate::public_video::PublicControlProof;
+            let prepare = match ctx.revision {
+                ControlRevision::Legacy => PublicControlProof::prepare,
+                ControlRevision::ImmediateBatch => PublicControlProof::prepare_immediate_batch,
+                #[cfg(feature = "v2-public-control-sustained")]
+                ControlRevision::Sustained => PublicControlProof::prepare_sustained,
             };
             prepare(
                 ctx.identity,

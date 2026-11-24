@@ -1154,7 +1154,7 @@ impl PublicControlTransport {
             return Err(CONTROL_INVALID);
         }
         let until = Instant::now()
-            + Duration::from_secs(crate::public_video::SUSTAINED_CONTROL_SESSION_SECONDS);
+            + Duration::from_secs(crate::public_video::SUSTAINED_CONTROL_MEDIA_BOUND_SECONDS);
         // Do not advertise a complete run from a partial capability; no
         // fallback and no TURN or socket lease extension.
         if until > self.runtime.deadline {

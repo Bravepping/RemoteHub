@@ -48,6 +48,7 @@ interface Invitation {
   id: string;
   role: PublicVideoRole;
   expires_at: number;
+  starts_by?: number;
   round: number | null;
 }
 const invitations = ref<Invitation[]>([]);
@@ -55,7 +56,9 @@ const selectedId = ref('');
 const nowSeconds = ref(Math.floor(Date.now() / 1000));
 // The public control client requires at least 60 seconds on its TURN lease at start.
 const availableRounds = computed(() =>
-  invitations.value.filter((item) => item.expires_at - nowSeconds.value >= 60),
+  invitations.value.filter(
+    (item) => nowSeconds.value <= (item.starts_by ?? item.expires_at - 60),
+  ),
 );
 const selected = computed(() =>
   availableRounds.value.find((item) => item.id === selectedId.value),
@@ -80,8 +83,15 @@ const selectionError = ref('');
 function validInvitation(value: unknown): value is Invitation {
   if (!value || typeof value !== 'object') return false;
   const item = value as Partial<Invitation>;
+  const keys = Object.keys(item).sort().join(',');
   return (
-    Object.keys(item).sort().join(',') === 'expires_at,id,role,round' &&
+    (keys === 'expires_at,id,role,round' ||
+      (keys === 'expires_at,id,role,round,starts_by' &&
+        typeof item.starts_by === 'number' &&
+        Number.isSafeInteger(item.starts_by) &&
+        item.starts_by > 0 &&
+        typeof item.expires_at === 'number' &&
+        item.expires_at - item.starts_by === 1860)) &&
     (item.round === null ||
       (typeof item.round === 'number' &&
         Number.isInteger(item.round) &&
@@ -150,6 +160,7 @@ let inputPauseGeneration = 0;
 const pressedKeys = new Set<string>();
 const pressedButtons = new Set<number>();
 let lastMove = -Infinity;
+let lastWheel = -Infinity;
 watch(
   () => props.profileConsumed,
   (used) => {
@@ -306,12 +317,30 @@ const controlText = computed(() => {
         : '共享端已单独批准。看到画面后仍须在本机主动启用。';
     case 'denied':
       return '共享端没有批准键鼠，不能操作。';
+    case 'ended':
+      return '本次键鼠权限已结束，画面会继续显示。';
     case 'closed':
       return '本次键鼠权限已关闭。';
     default:
       return '键鼠尚未获批，不能操作。';
   }
 });
+
+async function revokeHostInput() {
+  const generation = props.windowOwner?.generation;
+  if (
+    !generation ||
+    role.value !== 'host' ||
+    roundSeconds.value !== 1800 ||
+    inputState.value !== 'allowed'
+  )
+    return;
+  try {
+    await invoke('public_session_window_revoke_input', { generation });
+  } catch {
+    // Native status remains authoritative; emergency revoke is also available.
+  }
+}
 
 function pauseInput() {
   inputPauseGeneration++;
@@ -325,6 +354,7 @@ async function toggleInput() {
   if (generation === undefined) {
     if (session?.enableInput()) {
       lastMove = -Infinity;
+      lastWheel = -Infinity;
       surface.value?.focus();
       if (document.activeElement !== surface.value) pauseInput();
     }
@@ -345,6 +375,7 @@ async function toggleInput() {
       session?.enableInput()
     ) {
       lastMove = -Infinity;
+      lastWheel = -Infinity;
       return;
     }
     // Undo a late arm without forwarding any desktop events.
@@ -398,6 +429,33 @@ function button(e: MouseEvent, down: boolean) {
     if (down) pressedButtons.add(e.button);
     else pressedButtons.delete(e.button);
     lastMove = performance.now();
+  }
+}
+
+function wheel(e: WheelEvent) {
+  if (
+    !session?.canSendWheel() ||
+    e.altKey ||
+    e.ctrlKey ||
+    e.metaKey ||
+    e.shiftKey ||
+    !Number.isFinite(e.deltaY) ||
+    !Number.isFinite(e.deltaX) ||
+    e.deltaY === 0 ||
+    Math.abs(e.deltaX) > Math.abs(e.deltaY)
+  )
+    return;
+  const normalized = inputPointOrPause(e);
+  if (!normalized) return;
+  e.preventDefault();
+  const now = performance.now();
+  if (now - lastWheel < 100) return;
+  if (
+    session.sendInput({ kind: 'mouse_move', ...normalized }) &&
+    session.sendInput({ kind: 'wheel', delta: e.deltaY > 0 ? -120 : 120 })
+  ) {
+    lastWheel = now;
+    lastMove = now;
   }
 }
 
@@ -551,7 +609,11 @@ function start() {
     <h2 v-else>{{ controlAvailable ? '公网远控测试' : '公网仅视频会话' }}</h2>
     <p v-if="!windowOwner && controlAvailable">
       双方须先核验完整指纹并批准视频。键鼠需共享端另行原生批准，只在本轮剩余时间内有效，默认拒绝。不提供滚轮或无人值守控制。
-      <span v-if="roundSeconds !== undefined"
+      <span v-if="roundSeconds === 1800"
+        >目标 30 分钟（含启动余量最长 31 分钟）；键鼠必须另行批准，最长 30
+        分钟。</span
+      >
+      <span v-else-if="roundSeconds !== undefined"
         >本轮会话最多 {{ roundSeconds }} 秒。</span
       >
       <span v-else>本轮为短时会话，时限以原生配置为准。</span>
@@ -610,7 +672,16 @@ function start() {
       <p v-else-if="archiveOpen && canChoose">本包当前没有可用轮次。</p>
       <p v-if="selected">
         本机{{ selected.role === 'host' ? '共享屏幕' : '观看屏幕' }} ·
-        邀请有效至 {{ new Date(selected.expires_at * 1000).toLocaleString() }}
+        {{
+          selected.starts_by === undefined
+            ? '邀请有效至'
+            : '30 分钟会话可开始至'
+        }}
+        {{
+          new Date(
+            (selected.starts_by ?? selected.expires_at) * 1000,
+          ).toLocaleString()
+        }}
       </p>
       <p v-if="selectionError" role="alert">{{ selectionError }}</p>
     </div>
@@ -704,6 +775,7 @@ function start() {
       @blur="pauseInput"
       @mouseleave="pauseInput"
       @mousemove="move"
+      @wheel="wheel"
       @mousedown="button($event, true)"
       @mouseup="button($event, false)"
       @keydown="key($event, true)"
@@ -745,6 +817,15 @@ function start() {
       </p>
       <h3>输入控制</h3>
       <p>{{ controlText }}</p>
+      <button
+        v-if="
+          role === 'host' && roundSeconds === 1800 && inputState === 'allowed'
+        "
+        type="button"
+        @click="revokeHostInput"
+      >
+        撤回键鼠授权
+      </button>
       <p>关闭控制中心不会恢复键鼠。恢复时需明确点击「启用本次键鼠」。</p>
       <h3>连接信息</h3>
       <p v-if="connectionPath">

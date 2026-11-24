@@ -61,6 +61,14 @@ impl<S: SessionSink> InputQueue<S> {
         Self::view_only_bound(Binding::Device(scope), session_until, sink)
     }
 
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(super) fn view_only_sustained(scope: InputScope, session_until: Instant, sink: S) -> Self {
+        Self {
+            approval: Approval::view_only_sustained(scope, session_until, sink),
+            pending: VecDeque::new(),
+        }
+    }
+
     pub(super) fn view_only_bound(scope: Binding, session_until: Instant, sink: S) -> Self {
         Self {
             approval: Approval::view_only_bound(scope, session_until, sink),

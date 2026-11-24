@@ -33,7 +33,7 @@ export type PublicVideoState =
   | 'cleanup_unconfirmed';
 
 type NativePhase = 'starting' | 'ready' | 'stopping' | 'closed';
-export type PublicControlRoundSeconds = 15 | 60;
+export type PublicControlRoundSeconds = 15 | 60 | 1800;
 export type PublicVideoEndReason =
   'local_stop' | 'peer_left' | 'capture_limit' | 'capture_ended' | 'failed';
 export interface PublicVideoEndDetail {
@@ -151,6 +151,7 @@ interface Run {
   generationId?: string;
   inputState: PublicInputState;
   inputEnabled: boolean;
+  inputWheel: boolean;
   inputInFlight: boolean;
   releasePending: boolean;
   inputQueue: { movement: boolean; event: string }[];
@@ -210,6 +211,7 @@ interface NativeStatus {
   end?: PublicVideoEndDetail;
   profileConsumed?: boolean;
   inputState?: PublicInputState;
+  inputWheel?: boolean;
   roundSeconds?: PublicControlRoundSeconds;
   connectionPath?: PublicConnectionPath;
 }
@@ -223,6 +225,7 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
     elapsed_ms?: unknown;
     profile_consumed?: unknown;
     input_state?: unknown;
+    input_wheel?: unknown;
     round_seconds?: unknown;
     connection_path?: unknown;
   };
@@ -263,12 +266,19 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
   const seconds = Object.hasOwn(parsed, 'round_seconds')
     ? parsed.round_seconds
     : undefined;
-  if (seconds === 15 || seconds === 60) result.roundSeconds = seconds;
+  if (seconds === 15 || seconds === 60 || seconds === 1800)
+    result.roundSeconds = seconds;
+  result.inputWheel =
+    parsed.phase === 'ready' &&
+    result.roundSeconds === 1800 &&
+    Object.hasOwn(parsed, 'input_wheel') &&
+    parsed.input_wheel === true;
   if (
     input === 'view_only' ||
     input === 'pending' ||
     input === 'allowed' ||
     input === 'denied' ||
+    (input === 'ended' && result.roundSeconds === 1800) ||
     input === 'closed'
   )
     result.inputState = input;
@@ -378,6 +388,7 @@ export class PublicVideoSession {
       controlLaunch: controlLaunch === true,
       inputState: 'view_only',
       inputEnabled: false,
+      inputWheel: false,
       inputInFlight: false,
       releasePending: false,
       inputQueue: [],
@@ -435,6 +446,17 @@ export class PublicVideoSession {
     this.driveInput(run);
   }
 
+  canSendWheel(): boolean {
+    const run = this.run;
+    return (
+      !!run &&
+      this.active(run) &&
+      run.inputEnabled &&
+      run.inputState === 'allowed' &&
+      run.inputWheel
+    );
+  }
+
   sendInput(value: PublicControlEvent): boolean {
     const run = this.run;
     if (
@@ -444,6 +466,7 @@ export class PublicVideoSession {
       run.inputState !== 'allowed'
     )
       return false;
+    if (value.kind === 'wheel' && !this.canSendWheel()) return false;
     const event = publicControlEvent(value);
     if (!event) return false;
     const movement = value.kind === 'mouse_move';
@@ -467,7 +490,8 @@ export class PublicVideoSession {
     if (
       !run.controlLaunch ||
       run.inputState === 'closed' ||
-      run.inputState === 'denied'
+      run.inputState === 'denied' ||
+      run.inputState === 'ended'
     )
       return true;
     const current = status.inputState ?? 'view_only';
@@ -481,7 +505,7 @@ export class PublicVideoSession {
       return false;
     }
     run.inputState = current;
-    if (current === 'closed' || current === 'denied') {
+    if (current === 'closed' || current === 'denied' || current === 'ended') {
       run.inputEnabled = false;
       run.releasePending = false;
       run.inputQueue.length = 0;
@@ -535,6 +559,14 @@ export class PublicVideoSession {
             else this.driveInput(run);
             return;
           }
+          if (run.inputWheel && cause === 'PUBLIC_CONTROL_GRANT_ENDED') {
+            run.inputState = 'ended';
+            run.inputEnabled = false;
+            run.releasePending = false;
+            run.inputQueue.length = 0;
+            this.reportInput(run);
+            return;
+          }
           // Only the exact native rejection codes are safe to expose.
           const code =
             cause === 'PUBLIC_CONTROL_NOT_ALLOWED' ||
@@ -568,6 +600,7 @@ export class PublicVideoSession {
           if (!this.active(run)) return;
           const current = parseStatus(nativeStatus, run.role);
           this.onPath(current.connectionPath);
+          run.inputWheel = current.inputWheel === true;
           if (run.controlLaunch && current.roundSeconds !== undefined)
             this.onRound(current.roundSeconds);
           this.observeProfile(run, current);

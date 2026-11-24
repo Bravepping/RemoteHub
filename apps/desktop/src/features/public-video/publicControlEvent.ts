@@ -1,9 +1,10 @@
 export type PublicInputState =
-  'view_only' | 'pending' | 'allowed' | 'denied' | 'closed';
+  'view_only' | 'pending' | 'allowed' | 'denied' | 'ended' | 'closed';
 
 export type PublicControlEvent =
   | { kind: 'mouse_move'; x_norm: number; y_norm: number }
   | { kind: 'mouse_button'; button: number; down: boolean }
+  | { kind: 'wheel'; delta: -120 | 120 }
   | { kind: 'key'; key: string; down: boolean };
 
 const physicalKey =
@@ -37,6 +38,11 @@ export function publicControlEvent(
       )
         return undefined;
       return JSON.stringify({ kind: 'mouse_button', button, down });
+    }
+    case 'wheel': {
+      const { delta } = value;
+      if (delta !== -120 && delta !== 120) return undefined;
+      return JSON.stringify({ kind: 'wheel', delta });
     }
     case 'key': {
       const { key, down } = value;

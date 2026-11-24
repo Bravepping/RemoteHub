@@ -38,6 +38,7 @@ fn main() {
             "public_session_window_attach",
             "public_session_window_arm_input",
             "public_session_window_display",
+            "public_session_window_revoke_input",
             "public_session_window_snapshot",
             "public_session_window_focus",
             "public_session_window_stop",

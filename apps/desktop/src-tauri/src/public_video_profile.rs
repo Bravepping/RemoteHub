@@ -59,7 +59,15 @@ pub(crate) struct PublicVideoProfile {
     expected_peer_fingerprint: String,
     ca_der: Vec<u8>,
     credentials: Option<SessionInputs>,
-    immediate_batch: bool,
+    revision: ProfileRevision,
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ProfileRevision {
+    Legacy,
+    ImmediateBatch,
+    #[cfg(feature = "v2-session-window-sustained")]
+    Sustained,
 }
 
 enum Invitation {
@@ -157,16 +165,23 @@ impl PublicVideoProfile {
         let ca_sha256 = parse_hex::<32>(&input.ca_sha256)?;
         let fingerprint = parse_hex::<32>(&input.expected_peer_fingerprint)?;
         let pair_bytes = Zeroizing::new(parse_pairing_key(&input.pairing_key.0)?);
-        let immediate_batch = control && input.version == 2;
+        let revision = match input.version {
+            1 => ProfileRevision::Legacy,
+            2 if control => ProfileRevision::ImmediateBatch,
+            #[cfg(feature = "v2-session-window-sustained")]
+            3 if control && !cfg!(feature = "v2-public-video-60s-test") => {
+                ProfileRevision::Sustained
+            }
+            _ => return Err(INVALID),
+        };
         let purpose_ok = if control {
             cfg!(feature = "v2-public-control-desktop")
                 && input.purpose.as_deref() == Some("public-control")
         } else {
             input.purpose.is_none()
         };
-        if (input.version != 1 && !immediate_batch)
-            || !purpose_ok
-            || (immediate_batch
+        if !purpose_ok
+            || (revision != ProfileRevision::Legacy
                 && (cfg!(feature = "v2-public-video-60s-test")
                     || room.get_version() != Some(uuid::Version::Random)
                     || room.get_variant() != uuid::Variant::RFC4122))
@@ -191,12 +206,7 @@ impl PublicVideoProfile {
         {
             return Err(INVALID);
         }
-        ensure_profile_fresh(
-            input.expires_at,
-            input.turn_expires_at,
-            now,
-            immediate_batch,
-        )?;
+        ensure_profile_fresh(input.expires_at, input.turn_expires_at, now, revision)?;
 
         let ca_der = STANDARD.decode(input.ca_der_base64).map_err(|_| PIN)?;
         if ca_der.is_empty()
@@ -236,16 +246,27 @@ impl PublicVideoProfile {
             {
                 let token = PublicControlToken::new(input.relay_token.into_string())
                     .map_err(|_| INVALID)?;
-                let invitation = if immediate_batch {
-                    PublicControlWssInvitation::new_immediate_batch(
+                let invitation = match revision {
+                    ProfileRevision::Legacy => {
+                        PublicControlWssInvitation::new(room, input.role, input.expires_at, token)
+                    }
+                    ProfileRevision::ImmediateBatch => {
+                        PublicControlWssInvitation::new_immediate_batch(
+                            room,
+                            input.role,
+                            input.expires_at,
+                            token,
+                        )
+                    }
+                    #[cfg(feature = "v2-session-window-sustained")]
+                    ProfileRevision::Sustained => PublicControlWssInvitation::new_basic_sustained(
                         room,
                         input.role,
                         input.expires_at,
                         token,
-                    )?
-                } else {
-                    PublicControlWssInvitation::new(room, input.role, input.expires_at, token)?
-                };
+                        now,
+                    ),
+                }?;
                 Invitation::Control(invitation)
             }
             #[cfg(not(feature = "v2-public-control-desktop"))]
@@ -288,7 +309,7 @@ impl PublicVideoProfile {
             },
             expected_peer_fingerprint: input.expected_peer_fingerprint,
             ca_der,
-            immediate_batch,
+            revision,
             credentials: Some(SessionInputs {
                 invitation,
                 pairing_key,
@@ -305,7 +326,12 @@ impl PublicVideoProfile {
 
     #[cfg(feature = "v2-public-control-desktop")]
     pub(crate) fn is_control_batch(&self) -> bool {
-        self.immediate_batch
+        self.revision == ProfileRevision::ImmediateBatch
+    }
+
+    #[cfg(feature = "v2-session-window-sustained")]
+    pub(crate) fn is_sustained_control(&self) -> bool {
+        self.revision == ProfileRevision::Sustained
     }
 
     #[cfg(feature = "v2-control-invitations")]
@@ -318,7 +344,7 @@ impl PublicVideoProfile {
                 .ice_config
                 .expires_at,
             now,
-            self.immediate_batch,
+            self.revision,
         )
     }
 
@@ -421,7 +447,7 @@ impl PublicVideoProfile {
             approval.scope.expires_at,
             credentials.ice_config.expires_at,
             now,
-            self.immediate_batch,
+            self.revision,
         )?;
         let grant = RelayGrant::new(
             RelayTarget {
@@ -444,14 +470,18 @@ fn ensure_profile_fresh(
     scope_expires: u64,
     turn_expires: u64,
     now: u64,
-    immediate_batch: bool,
+    revision: ProfileRevision,
 ) -> Result<(), &'static str> {
-    if !immediate_batch {
-        return ensure_fresh(scope_expires, turn_expires, now);
-    }
-    if turn_expires != scope_expires
-        || !(MIN_TURN_TTL..=MAX_IMMEDIATE_BATCH_TTL).contains(&scope_expires.saturating_sub(now))
-    {
+    let remaining = match revision {
+        ProfileRevision::Legacy => return ensure_fresh(scope_expires, turn_expires, now),
+        ProfileRevision::ImmediateBatch => MIN_TURN_TTL..=MAX_IMMEDIATE_BATCH_TTL,
+        #[cfg(feature = "v2-session-window-sustained")]
+        ProfileRevision::Sustained => {
+            hub_webrtc::public_video::SUSTAINED_CONTROL_BOOTSTRAP_MIN_SECONDS
+                ..=hub_webrtc::public_video::SUSTAINED_CONTROL_SCOPE_TTL_SECONDS
+        }
+    };
+    if turn_expires != scope_expires || !remaining.contains(&scope_expires.saturating_sub(now)) {
         return Err(EXPIRED);
     }
     Ok(())
@@ -874,6 +904,32 @@ mod tests {
             wrong[key] = value;
             assert!(parse(&wrong, now).is_err(), "{key}");
         }
+    }
+
+    #[cfg(feature = "v2-session-window-sustained")]
+    #[test]
+    fn sustained_role_profile_requires_v3_exact_expiry_and_no_legacy_fallback() {
+        let mut value = fixture();
+        let scope = NOW + 2400;
+        value["version"] = json!(3);
+        value["purpose"] = json!("public-control");
+        value["expires_at"] = json!(scope);
+        value["turn_expires_at"] = json!(scope);
+        value["turn_username"] = json!(format!("{scope}:{ROOM}"));
+        value["relay_token"] = json!(format!("rhctl1-{}", "7a".repeat(32)));
+        let read = |value: &Value, now, control| {
+            PublicVideoProfile::parse_with_purpose(&serde_json::to_vec(value).unwrap(), now, control)
+        };
+        let good = read(&value, NOW, true).unwrap();
+        assert!(good.is_sustained_control());
+        assert!(!good.is_control_batch());
+        assert!(read(&value, NOW, false).is_err());
+        assert!(read(&value, NOW + 541, true).is_err());
+        let mut old = value.clone();
+        old["version"] = json!(2);
+        assert!(read(&old, NOW, true).is_err());
+        value["turn_expires_at"] = json!(scope - 1);
+        assert!(read(&value, NOW, true).is_err());
     }
 
     #[test]

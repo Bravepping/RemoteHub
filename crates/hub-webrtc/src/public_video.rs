@@ -21,6 +21,11 @@ const MAX_SCOPE_TTL: u64 = 600;
 #[cfg(feature = "v2-public-control-sustained")]
 pub const SUSTAINED_CONTROL_SESSION_SECONDS: u64 = 1800;
 #[cfg(feature = "v2-public-control-sustained")]
+pub const SUSTAINED_CONTROL_STARTUP_ALLOWANCE_SECONDS: u64 = 60;
+#[cfg(feature = "v2-public-control-sustained")]
+pub const SUSTAINED_CONTROL_MEDIA_BOUND_SECONDS: u64 =
+    SUSTAINED_CONTROL_SESSION_SECONDS + SUSTAINED_CONTROL_STARTUP_ALLOWANCE_SECONDS;
+#[cfg(feature = "v2-public-control-sustained")]
 pub const SUSTAINED_CONTROL_SCOPE_TTL_SECONDS: u64 = 2400;
 #[cfg(feature = "v2-public-control-sustained")]
 pub const SUSTAINED_CONTROL_BOOTSTRAP_MIN_SECONDS: u64 = 1860;

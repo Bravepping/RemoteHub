@@ -2,6 +2,9 @@
 //! has already authenticated the peer, TURN route and data channel. This
 //! module still requires a separate local host decision before any input.
 
+#[cfg(feature = "v2-session-window-sustained")]
+pub(crate) mod sustained;
+
 use hub_identity::session::SessionRole;
 use hub_webrtc::{
     input_approval::{SessionSink, SinkError, State},
@@ -74,6 +77,8 @@ pub(crate) enum InputState {
     Pending,
     Allowed,
     Denied,
+    #[cfg(feature = "v2-session-window-sustained")]
+    Ended,
     Closed,
 }
 
@@ -99,9 +104,22 @@ impl SessionSink for DeferredInjector {
 #[derive(Deserialize, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 enum Reply {
-    InputGranted { v: u8, grant_id: String },
-    InputDenied { v: u8 },
-    InputAck { v: u8, ack_seq: u64 },
+    InputGranted {
+        v: u8,
+        grant_id: String,
+    },
+    InputDenied {
+        v: u8,
+    },
+    InputAck {
+        v: u8,
+        ack_seq: u64,
+    },
+    #[cfg(feature = "v2-session-window-sustained")]
+    InputEnded {
+        v: u8,
+        grant_id: String,
+    },
 }
 
 #[derive(Deserialize, Serialize)]
@@ -201,7 +219,16 @@ fn approval_dialog(
     fingerprint: String,
     timing: Timing,
 ) -> Result<oneshot::Receiver<bool>, &'static str> {
-    if hwnd == 0
+    approval_dialog_seconds(hwnd, fingerprint, timing.window().as_secs())
+}
+
+fn approval_dialog_seconds(
+    hwnd: usize,
+    fingerprint: String,
+    seconds: u64,
+) -> Result<oneshot::Receiver<bool>, &'static str> {
+    if seconds == 0
+        || hwnd == 0
         || fingerprint.len() != 64
         || !fingerprint
             .bytes()
@@ -213,7 +240,7 @@ fn approval_dialog(
     tauri::async_runtime::spawn_blocking(move || {
         let message = format!(
             "此窗口单独批准对方在本台 Windows 操作键鼠，只持续到本轮结束（整轮最长 {} 秒）。不批准则只观看。\n\n已核验对方指纹：\n{fingerprint}\n\n允许后可点「停止」或关窗；也可按 Ctrl+Alt+F12 立即撤销。超时后本次回答失效。\n\n是否允许本次操作？",
-            timing.window().as_secs(),
+            seconds,
         );
         let accepted = unsafe {
             MessageBoxW(
@@ -239,8 +266,15 @@ fn valid_grant(value: &str) -> bool {
 }
 
 fn approved_message(bytes: &[u8], grant_id: &str) -> Result<InputMessage, &'static str> {
+    approved_message_version(bytes, grant_id, VERSION)
+}
+fn approved_message_version(
+    bytes: &[u8],
+    grant_id: &str,
+    version: u8,
+) -> Result<InputMessage, &'static str> {
     let payload: InputMessage = serde_json::from_slice(bytes).map_err(|_| WIRE)?;
-    if payload.v != VERSION
+    if payload.v != version
         || payload.grant_id != grant_id
         || payload.event_v1.is_empty()
         || payload.event_v1.len() > INNER_BYTES
@@ -386,11 +420,29 @@ fn discard_pending(events: &mut mpsc::Receiver<String>) -> Flow<()> {
 }
 
 fn wrap_event(raw: &str, room: Uuid, seq: u64, grant_id: &str) -> Result<String, &'static str> {
-    if raw.is_empty() || raw.len() > EVENT_BYTES || !(1..=MAX_SEQUENCE).contains(&seq) {
+    wrap_event_version(raw, room, seq, grant_id, VERSION, false)
+}
+
+fn wrap_event_version(
+    raw: &str,
+    room: Uuid,
+    seq: u64,
+    grant_id: &str,
+    version: u8,
+    wheel: bool,
+) -> Result<String, &'static str> {
+    let max_sequence = MAX_SEQUENCE;
+    #[cfg(feature = "v2-session-window-sustained")]
+    let max_sequence = if wheel {
+        hub_webrtc::remote_input::MAX_SUSTAINED_EVENTS
+    } else {
+        max_sequence
+    };
+    if raw.is_empty() || raw.len() > EVENT_BYTES || !(1..=max_sequence).contains(&seq) {
         return Err(WIRE);
     }
     let parsed: Event = serde_json::from_str(raw).map_err(|_| WIRE)?;
-    if matches!(parsed, Event::Wheel { .. }) {
+    if matches!(parsed, Event::Wheel { delta } if !wheel || ![-120, 120].contains(&delta)) {
         return Err(WIRE);
     }
     // Keep the original event JSON; the host's bounded v1 parser validates
@@ -400,7 +452,7 @@ fn wrap_event(raw: &str, room: Uuid, seq: u64, grant_id: &str) -> Result<String,
         return Err(WIRE);
     }
     encode(&InputMessage {
-        v: VERSION,
+        v: version,
         grant_id: grant_id.to_owned(),
         event_v1,
     })

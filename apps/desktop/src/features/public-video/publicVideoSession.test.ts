@@ -250,6 +250,60 @@ describe('public video viewer controller', () => {
     await session.stop();
   });
 
+  it.each([
+    [60, true, false],
+    [1800, undefined, false],
+    [1800, false, false],
+    [1800, 'true', false],
+    [1800, true, true],
+  ] as const)(
+    'wheel requires an approved native sustained scope (%s/%s)',
+    async (round_seconds, input_wheel, expected) => {
+      const { bridge, session, draw } = harness();
+      bridge.status.mockResolvedValue({
+        ...allowed,
+        input_wheel,
+        round_seconds,
+      });
+      const event = { kind: 'wheel', delta: -120 } as const;
+      session.start('viewer', true);
+      await vi.advanceTimersByTimeAsync(0);
+      draw();
+      expect(session.sendInput(event)).toBe(false);
+      expect(session.enableInput()).toBe(true);
+      expect(session.sendInput(event)).toBe(expected);
+      await vi.advanceTimersByTimeAsync(0);
+      if (expected)
+        expect(bridge.sendInput).toHaveBeenCalledExactlyOnceWith(
+          first,
+          '{"kind":"wheel","delta":-120}',
+        );
+      else expect(bridge.sendInput).not.toHaveBeenCalled();
+      await session.stop();
+    },
+  );
+
+  it('ends only approved sustained input when expiry races a native event', async () => {
+    const { bridge, session, input, draw, update } = harness();
+    bridge.status.mockResolvedValue({
+      ...allowed,
+      input_wheel: true,
+      round_seconds: 1800,
+    });
+    bridge.sendInput.mockRejectedValueOnce('PUBLIC_CONTROL_GRANT_ENDED');
+    session.start('viewer', true);
+    await vi.advanceTimersByTimeAsync(0);
+    draw();
+    expect(session.enableInput()).toBe(true);
+    expect(session.sendInput(keyA)).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(input).toHaveBeenLastCalledWith('ended', false, false);
+    expect(session.enableInput()).toBe(false);
+    expect(update).toHaveBeenLastCalledWith('watching');
+    expect(bridge.stop).not.toHaveBeenCalled();
+    await session.stop();
+  });
+
   it.each([false, true])(
     'honors native pause even when the focus notification arrived first (%s)',
     async (localPause) => {

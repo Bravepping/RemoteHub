@@ -54,6 +54,9 @@ pub(crate) struct Preview {
     round: Option<u8>,
     role: &'static str,
     expires_at: u64,
+    #[cfg(feature = "v2-session-window-sustained")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    starts_by: Option<u64>,
 }
 
 #[derive(Default)]
@@ -78,6 +81,12 @@ impl Invitations {
             }
             profile.verify_invitation_time(now)?;
             let id = Uuid::new_v4().simple().to_string();
+            #[cfg(feature = "v2-session-window-sustained")]
+            let starts_by = profile.is_sustained_control().then(|| {
+                approval.scope.expires_at.saturating_sub(
+                    hub_webrtc::public_video::SUSTAINED_CONTROL_BOOTSTRAP_MIN_SECONDS,
+                )
+            });
             candidates.insert(id.clone(), profile);
             previews.push(Preview {
                 id,
@@ -87,6 +96,8 @@ impl Invitations {
                     Role::Viewer => "viewer",
                 },
                 expires_at: approval.scope.expires_at,
+                #[cfg(feature = "v2-session-window-sustained")]
+                starts_by,
             });
         }
         if previews.is_empty() {

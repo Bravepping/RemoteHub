@@ -4,6 +4,11 @@ use serde::Deserialize;
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 pub const LABEL: &str = "remote-input.v1";
+const MAX_RATE: u32 = 120;
+const MAX_LEGACY_EVENTS: u64 = 1000;
+#[cfg(feature = "v2-public-control-sustained")]
+pub const MAX_SUSTAINED_EVENTS: u64 =
+    crate::public_video::SUSTAINED_CONTROL_SESSION_SECONDS * MAX_RATE as u64;
 #[derive(Deserialize, Clone)]
 #[serde(tag = "kind", deny_unknown_fields)]
 pub enum Event {
@@ -35,6 +40,7 @@ pub struct Protocol {
     window: Instant,
     count: u32,
     seq: u64,
+    max_events: u64,
 }
 impl Protocol {
     pub fn new(session: String, seconds: u32) -> Self {
@@ -43,12 +49,22 @@ impl Protocol {
     }
 
     pub(super) fn with_deadline(session: String, now: Instant, expires: Instant) -> Self {
+        Self::with_max(session, now, expires, MAX_LEGACY_EVENTS)
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(super) fn with_sustained_deadline(session: String, now: Instant, expires: Instant) -> Self {
+        Self::with_max(session, now, expires, MAX_SUSTAINED_EVENTS)
+    }
+
+    fn with_max(session: String, now: Instant, expires: Instant, max_events: u64) -> Self {
         Self {
             session,
             expires,
             window: now,
             count: 0,
             seq: 0,
+            max_events,
         }
     }
     pub fn process(
@@ -82,7 +98,7 @@ impl Protocol {
             self.count = 0;
         }
         self.count += 1;
-        if self.count > 120 || self.seq >= 1000 {
+        if self.count > MAX_RATE || self.seq >= self.max_events {
             return Err("INPUT_RATE_LIMIT".into());
         }
         let m: Envelope = serde_json::from_slice(bytes).map_err(|_| "INPUT_SCHEMA")?;

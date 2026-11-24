@@ -54,7 +54,7 @@ impl Packetizer {
         if self.public_video_sustained {
             return timestamp_with_limit(
                 pts,
-                (crate::public_video::SUSTAINED_CONTROL_SESSION_SECONDS as i64) * 10_000_000,
+                (crate::public_video::SUSTAINED_CONTROL_MEDIA_BOUND_SECONDS as i64) * 10_000_000,
             );
         }
         #[cfg(feature = "v2-public-video-60s-test")]
@@ -187,9 +187,9 @@ mod tests {
         assert_eq!(first[0].header.sequence_number, u16::MAX - 1);
         assert_eq!(first[1].header.sequence_number, u16::MAX);
         assert_eq!(first[2].header.sequence_number, 0);
-        let last = p.packets(frame(18_000_000_000), 102).unwrap();
-        assert_eq!(last[0].header.timestamp, 162_000_000);
-        assert!(p.packets(frame(18_000_000_001), 102).is_err());
+        let last = p.packets(frame(18_600_000_000), 102).unwrap();
+        assert_eq!(last[0].header.timestamp, 167_400_000);
+        assert!(p.packets(frame(18_600_000_001), 102).is_err());
     }
 
     #[test]

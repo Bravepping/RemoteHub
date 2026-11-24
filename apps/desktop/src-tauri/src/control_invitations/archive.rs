@@ -28,6 +28,7 @@ pub(crate) fn load(path: &Path, now: u64) -> Result<Rounds, &'static str> {
 
 #[derive(Deserialize)]
 struct RoundIdentity {
+    version: u8,
     role: Role,
     room: String,
 }
@@ -47,6 +48,7 @@ pub(super) fn read(mut reader: impl Read + Seek, now: u64) -> Result<Rounds, &'s
         return Err(INVALID);
     }
     let mut role = None;
+    let mut sustained = None;
     let mut rooms = HashSet::new();
     let mut rounds = Vec::new();
     for i in 0..zip.len() {
@@ -90,6 +92,9 @@ pub(super) fn read(mut reader: impl Read + Seek, now: u64) -> Result<Rounds, &'s
         if role
             .replace(identity.role)
             .is_some_and(|previous| previous != identity.role)
+            || sustained
+                .replace(identity.version == 3)
+                .is_some_and(|previous| previous || identity.version == 3)
             || !rooms.insert(identity.room)
         {
             return Err(INVALID);
