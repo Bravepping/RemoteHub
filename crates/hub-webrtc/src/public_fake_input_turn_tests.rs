@@ -372,16 +372,29 @@ enum Case {
     TamperedOffer,
 }
 
+#[cfg(feature = "v2-public-fake-input-loopback-check")]
+pub async fn run_wss_turn_loopback_check() {
+    exercise(Case::Approved).await;
+    println!("WSS_TURN_SYNTHETIC_ACK_PASS");
+    exercise(Case::StopBeforeConsent).await;
+    println!("WSS_TURN_DISCONNECT_PENDING_PASS");
+    exercise(Case::TamperedOffer).await;
+    println!("WSS_TURN_TAMPER_REJECTED_PASS");
+}
+
+#[cfg(test)]
 #[tokio::test]
 async fn signed_wss_turn_sctp_applies_only_one_approved_fixture_marker() {
     exercise(Case::Approved).await;
 }
 
+#[cfg(test)]
 #[tokio::test]
 async fn wss_loss_before_consent_prevents_late_yes_and_ack() {
     exercise(Case::StopBeforeConsent).await;
 }
 
+#[cfg(test)]
 #[tokio::test]
 async fn wss_delivered_tampered_offer_never_admits_a_relay_peer() {
     exercise(Case::TamperedOffer).await;

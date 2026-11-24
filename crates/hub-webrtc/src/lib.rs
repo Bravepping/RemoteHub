@@ -38,14 +38,30 @@ pub mod public_fake_input;
 mod public_fake_input_pair;
 #[cfg(feature = "v2-public-fake-input-proof")]
 mod public_fake_input_sdp;
-#[cfg(all(test, feature = "v2-public-fake-input-proof"))]
+#[cfg(any(
+    all(test, feature = "v2-public-fake-input-proof"),
+    feature = "v2-public-fake-input-loopback-check"
+))]
 mod public_fake_input_sdp_fixture;
-#[cfg(all(test, feature = "v2-public-fake-input-proof"))]
+#[cfg(any(
+    all(test, feature = "v2-public-fake-input-proof"),
+    feature = "v2-public-fake-input-loopback-check"
+))]
 mod public_fake_input_turn_tests;
-#[cfg(all(test, feature = "v2-public-fake-input-proof"))]
+#[cfg(any(
+    all(test, feature = "v2-public-fake-input-proof"),
+    feature = "v2-public-fake-input-loopback-check"
+))]
 mod public_fake_input_wss_fixture;
-#[cfg(all(test, feature = "v2-public-fake-input-proof"))]
+#[cfg(any(
+    all(test, feature = "v2-public-fake-input-proof"),
+    feature = "v2-public-fake-input-loopback-check"
+))]
 mod public_fake_input_wss_wire;
+// Only the opt-in, harness-less loopback diagnostic calls this entry point.
+#[cfg(feature = "v2-public-fake-input-loopback-check")]
+#[doc(hidden)]
+pub use public_fake_input_turn_tests::run_wss_turn_loopback_check;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
 #[cfg(feature = "v2-public-video-wss")]
