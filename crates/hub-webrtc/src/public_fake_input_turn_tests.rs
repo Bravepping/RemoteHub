@@ -348,6 +348,7 @@ struct Fake {
     applied: Cell<u8>,
     pressed: Cell<bool>,
     released: Cell<u8>,
+    release_calls: Cell<u8>,
 }
 
 impl SessionSink for Rc<Fake> {
@@ -358,6 +359,7 @@ impl SessionSink for Rc<Fake> {
         Ok(())
     }
     fn release_owned(&mut self) -> Result<(), SinkError> {
+        self.release_calls.set(self.release_calls.get() + 1);
         if self.pressed.replace(false) {
             self.released.set(self.released.get() + 1);
         }
@@ -370,6 +372,7 @@ enum Case {
     Approved,
     StopBeforeConsent,
     TamperedOffer,
+    DisconnectWhilePressed,
 }
 
 #[cfg(feature = "v2-public-fake-input-loopback-check")]
@@ -380,6 +383,8 @@ pub async fn run_wss_turn_loopback_check() {
     println!("WSS_TURN_DISCONNECT_PENDING_PASS");
     exercise(Case::TamperedOffer).await;
     println!("WSS_TURN_TAMPER_REJECTED_PASS");
+    exercise(Case::DisconnectWhilePressed).await;
+    println!("WSS_TURN_DISCONNECT_ACTIVE_PASS");
 }
 
 #[cfg(test)]
@@ -398,6 +403,12 @@ async fn wss_loss_before_consent_prevents_late_yes_and_ack() {
 #[tokio::test]
 async fn wss_delivered_tampered_offer_never_admits_a_relay_peer() {
     exercise(Case::TamperedOffer).await;
+}
+
+#[cfg(test)]
+#[tokio::test]
+async fn wss_loss_after_ack_releases_press_and_prevents_queued_dispatch() {
+    exercise(Case::DisconnectWhilePressed).await;
 }
 
 async fn close_rtc(host: &Peer, viewer: &Peer, turn: &FixtureTurn) {
@@ -646,6 +657,7 @@ async fn exercise(case: Case) {
             );
             assert_eq!(fake.applied.get(), 0);
             assert_eq!(fake.released.get(), 0);
+            assert_eq!(fake.release_calls.get(), 0);
             no_ack(&viewer_channel).await;
             close_rtc(&host, &viewer, &turn).await;
             wss.close().await.unwrap();
@@ -675,15 +687,39 @@ async fn exercise(case: Case) {
         text(&viewer_channel, "fixture:applied-ack").await;
         assert_eq!(fake.applied.get(), 1);
         assert!(fake.pressed.get());
+        assert_eq!(fake.released.get(), 0);
+        assert_eq!(fake.release_calls.get(), 0);
 
-        input.enqueue(&input_scope, ()).unwrap();
-        assert_eq!(
-            input.dispatch_next(&input_scope, Control::Revoke),
-            Ok(Dispatch::Closed)
-        );
-        assert_eq!(input.state(), State::Ended(End::Revoked));
-        viewer_channel.try_send_text("fixture:after").await.unwrap();
-        text(&host_channel, "fixture:after").await;
+        let (end, replay) = if case == Case::DisconnectWhilePressed {
+            viewer_channel
+                .try_send_text("fixture:queued")
+                .await
+                .unwrap();
+            text(&host_channel, "fixture:queued").await;
+            input.enqueue(&input_scope, ()).unwrap();
+            assert!(fake.pressed.get());
+
+            // Authenticated WSS loss is processed before the queued marker.
+            // Keep SCTP open through the no-ACK check so closing it cannot
+            // mask an incorrectly emitted ACK.
+            wss.viewer.disconnect().await.unwrap();
+            assert_eq!(wss.host.recv().await, Err("FAKE_INPUT_FIXTURE_WSS_CLOSED"));
+            assert_eq!(
+                input.dispatch_next(&input_scope, Control::TransportLost),
+                Ok(Dispatch::Closed)
+            );
+            (End::Disconnected, "fixture:queued")
+        } else {
+            input.enqueue(&input_scope, ()).unwrap();
+            assert_eq!(
+                input.dispatch_next(&input_scope, Control::Revoke),
+                Ok(Dispatch::Closed)
+            );
+            (End::Revoked, "fixture:after")
+        };
+        assert_eq!(input.state(), State::Ended(end));
+        viewer_channel.try_send_text(replay).await.unwrap();
+        text(&host_channel, replay).await;
         assert_eq!(input.enqueue(&input_scope, ()), Err(DENIED));
         assert_eq!(
             input.dispatch_next(&input_scope, Control::Continue),
@@ -691,6 +727,7 @@ async fn exercise(case: Case) {
         );
         assert_eq!(fake.applied.get(), 1);
         assert_eq!(fake.released.get(), 1);
+        assert_eq!(fake.release_calls.get(), 1);
         assert!(!fake.pressed.get());
         no_ack(&viewer_channel).await;
         assert!(turn.stats().forwarded_packets > connected.forwarded_packets);
@@ -700,6 +737,9 @@ async fn exercise(case: Case) {
         wss.close().await.unwrap();
         assert!(!host.runtime.allows_turn_peer(host_pair.remote().into()));
         assert!(!viewer.runtime.allows_turn_peer(viewer_pair.remote().into()));
+        drop(input);
+        assert_eq!(fake.released.get(), 1);
+        assert_eq!(fake.release_calls.get(), 1);
     })
     .await
     .expect("bounded TURN fixture SCTP round trip");
