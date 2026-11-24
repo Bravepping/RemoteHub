@@ -1,0 +1,543 @@
+//! Real ICE/DTLS/SCTP plus a fake input sink. Only fixture loopback UDP
+//! can leave the driver; the relay's public-looking tuples are labels.
+use crate::{
+    ice_policy::IceMode,
+    input_approval::{End, Error as ApprovalError, InputScope, SessionSink, SinkError, State},
+    input_queue::{Control, Dispatch, Error as QueueError, InputQueue},
+    pinned_runtime::PinnedRuntime,
+    public_fake_input::{FakeInputProof, FakeInputProofScope, FakeInputTestMode},
+    public_fake_input_sdp_fixture::sanitize,
+    public_video::PublicVideoScope,
+    relay_runtime::RelayRuntime,
+};
+use hub_identity::{
+    pairing::{PairingCandidate, VerifiedPeer},
+    session::SessionRole,
+    Identity,
+};
+use rtc::{
+    ice::{mdns::MulticastDnsMode, network_type::NetworkType},
+    peer_connection::transport::{
+        RTCDtlsTransportState, RTCIceTransportState, RTCSctpTransportState,
+    },
+};
+use std::{
+    cell::Cell,
+    future::Future,
+    io,
+    net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, UdpSocket},
+    pin::Pin,
+    rc::Rc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+use tokio::sync::{mpsc, watch};
+use uuid::Uuid;
+use webrtc::{
+    data_channel::{DataChannel, DataChannelEvent, RTCDataChannelInit},
+    peer_connection::{
+        PeerConnection, PeerConnectionBuilder, PeerConnectionEventHandler, RTCConfigurationBuilder,
+        RTCIceGatheringState, RTCIceTransportPolicy, RTCSessionDescription, SettingEngineBuilder,
+    },
+    runtime::{
+        AsyncInterval, AsyncTcpListener, AsyncTcpStream, AsyncUdpSocket, JoinHandle, Runtime,
+    },
+};
+
+#[path = "public_video_turn_fixture_net.rs"]
+#[allow(dead_code)]
+mod turn_fixture_net;
+use turn_fixture_net::{FixtureTurn, RELAY_LABEL, RELAY_PORTS};
+
+const LABEL: &str = "remotehub-turn-fiction";
+const PROTOCOL: &str = "remotehub.fixture";
+const WAIT: Duration = Duration::from_secs(12);
+const DENIED: QueueError = QueueError::Approval(ApprovalError::NotAllowed);
+
+#[derive(Debug)]
+struct FixtureRuntime {
+    physical: RelayRuntime,
+    peer: Mutex<Option<SocketAddrV4>>,
+}
+
+impl FixtureRuntime {
+    fn new(turn: &FixtureTurn) -> Self {
+        Self {
+            physical: RelayRuntime {
+                base: PinnedRuntime {
+                    inner: webrtc::runtime::default_runtime().unwrap(),
+                    local: Ipv4Addr::LOCALHOST.into(),
+                    peer: Ipv4Addr::LOCALHOST.into(),
+                    counters: Arc::default(),
+                },
+                endpoint: turn.server().into(),
+                deadline: Instant::now() + WAIT,
+                stopped: Arc::new(AtomicBool::new(false)),
+            },
+            peer: Mutex::new(None),
+        }
+    }
+
+    fn admit(&self, peer: SocketAddrV4) {
+        assert_eq!(*peer.ip(), RELAY_LABEL);
+        assert!((RELAY_PORTS.0..=RELAY_PORTS.1).contains(&peer.port()));
+        assert!(self.peer.lock().unwrap().replace(peer).is_none());
+    }
+
+    fn revoke(&self) {
+        self.physical.stopped.store(true, Ordering::Release);
+        if let Ok(mut peer) = self.peer.lock() {
+            peer.take();
+        }
+    }
+}
+
+impl Runtime for FixtureRuntime {
+    fn spawn(&self, task: Pin<Box<dyn Future<Output = ()> + Send>>) -> Box<dyn JoinHandle> {
+        self.physical.spawn(task)
+    }
+    fn wrap_udp_socket(&self, socket: UdpSocket) -> io::Result<Arc<dyn AsyncUdpSocket>> {
+        self.physical.wrap_udp_socket(socket)
+    }
+    fn wrap_tcp_listener(&self, socket: TcpListener) -> io::Result<Arc<dyn AsyncTcpListener>> {
+        self.physical.wrap_tcp_listener(socket)
+    }
+    fn connect_tcp(
+        &self,
+        address: SocketAddr,
+    ) -> Pin<Box<dyn Future<Output = io::Result<Arc<dyn AsyncTcpStream>>> + Send + '_>> {
+        self.physical.connect_tcp(address)
+    }
+    fn resolve_host<'a>(
+        &'a self,
+        name: &'a str,
+    ) -> Pin<Box<dyn Future<Output = io::Result<Vec<SocketAddr>>> + Send + 'a>> {
+        self.physical.resolve_host(name)
+    }
+    fn interval(&self, delay: Duration) -> Box<dyn AsyncInterval> {
+        self.physical.interval(delay)
+    }
+    fn sleep(&self, delay: Duration) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+        self.physical.sleep(delay)
+    }
+    fn block_on(&self, task: Pin<Box<dyn Future<Output = ()> + '_>>) {
+        self.physical.block_on(task)
+    }
+    fn requires_exact_turn_source(&self) -> bool {
+        true
+    }
+    fn allows_turn_peer(&self, peer: SocketAddr) -> bool {
+        !self.physical.stopped.load(Ordering::Acquire)
+            && Instant::now() < self.physical.deadline
+            && self
+                .peer
+                .lock()
+                .ok()
+                .and_then(|admitted| *admitted)
+                .map(SocketAddr::V4)
+                == Some(peer)
+    }
+}
+
+struct Events {
+    gathered: watch::Sender<bool>,
+    channels: mpsc::Sender<Arc<dyn DataChannel>>,
+}
+
+#[async_trait::async_trait]
+impl PeerConnectionEventHandler for Events {
+    async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
+        if state == RTCIceGatheringState::Complete {
+            self.gathered.send_replace(true);
+        }
+    }
+
+    async fn on_data_channel(&self, channel: Arc<dyn DataChannel>) {
+        self.channels
+            .try_send(channel)
+            .expect("one fixture channel");
+    }
+}
+
+struct Peer {
+    pc: Box<dyn PeerConnection>,
+    runtime: Arc<FixtureRuntime>,
+    gathered: watch::Receiver<bool>,
+    channels: mpsc::Receiver<Arc<dyn DataChannel>>,
+}
+
+impl Drop for Peer {
+    fn drop(&mut self) {
+        self.runtime.revoke();
+    }
+}
+
+impl Peer {
+    async fn start(turn: &FixtureTurn) -> Self {
+        let runtime = Arc::new(FixtureRuntime::new(turn));
+        let (gather_tx, gathered) = watch::channel(false);
+        let (channel_tx, channels) = mpsc::channel(1);
+        let pc = PeerConnectionBuilder::new()
+            .with_configuration(
+                RTCConfigurationBuilder::default()
+                    .with_ice_servers(vec![turn.ice_server()])
+                    .with_ice_transport_policy(RTCIceTransportPolicy::Relay)
+                    .build(),
+            )
+            .with_host_candidates(false)
+            .with_udp_addrs(vec![SocketAddrV4::new(Ipv4Addr::LOCALHOST, 0)])
+            .with_setting_engine(
+                SettingEngineBuilder::new()
+                    .with_multicast_dns_mode(MulticastDnsMode::Disabled)
+                    .with_network_types(vec![NetworkType::Udp4])
+                    .build(),
+            )
+            .with_runtime(runtime.clone())
+            .with_handler(Arc::new(Events {
+                gathered: gather_tx,
+                channels: channel_tx,
+            }))
+            .build()
+            .await
+            .unwrap();
+        Self {
+            pc: Box::new(pc),
+            runtime,
+            gathered,
+            channels,
+        }
+    }
+
+    async fn local(&mut self, answer: bool) -> String {
+        let initial = if answer {
+            self.pc.create_answer(None).await
+        } else {
+            self.pc.create_offer(None).await
+        }
+        .unwrap();
+        self.pc.set_local_description(initial).await.unwrap();
+        self.gathered.wait_for(|gathered| *gathered).await.unwrap();
+        let actual = self.pc.local_description().await.unwrap();
+        sanitize(
+            &actual.sdp,
+            RELAY_LABEL,
+            RELAY_PORTS.0,
+            RELAY_PORTS.1,
+            answer,
+        )
+        .unwrap_or_else(|error| panic!("native candidate policy rejected fixture SDP: {error}"))
+    }
+
+    async fn remote(&self, sdp: &str, answer: bool, verified_peer: SocketAddrV4) {
+        self.runtime.admit(verified_peer);
+        let desc = if answer {
+            RTCSessionDescription::answer(sdp.to_owned())
+        } else {
+            RTCSessionDescription::offer(sdp.to_owned())
+        }
+        .unwrap();
+        self.pc.set_remote_description(desc).await.unwrap();
+    }
+
+    async fn verify_pair(&self, proof: &mut FakeInputProof<'_>) {
+        let sctp = self.pc.sctp().await.unwrap();
+        let dtls = sctp.transport();
+        let ice = dtls.ice_transport();
+        assert_eq!(
+            sctp.state().await.unwrap(),
+            RTCSctpTransportState::Connected
+        );
+        assert_eq!(
+            dtls.state().await.unwrap(),
+            RTCDtlsTransportState::Connected
+        );
+        assert!(matches!(
+            ice.state().await.unwrap(),
+            RTCIceTransportState::Connected | RTCIceTransportState::Completed
+        ));
+        let actual = ice.get_selected_candidate_pair().await.unwrap();
+        assert_eq!(
+            sctp.state().await.unwrap(),
+            RTCSctpTransportState::Connected
+        );
+        assert_eq!(
+            dtls.state().await.unwrap(),
+            RTCDtlsTransportState::Connected
+        );
+        assert!(matches!(
+            ice.state().await.unwrap(),
+            RTCIceTransportState::Connected | RTCIceTransportState::Completed
+        ));
+        proof
+            .verify_selected_relay_pair(actual.as_ref(), wall())
+            .unwrap();
+    }
+}
+
+fn pin(local: &Identity, peer: &Identity) -> VerifiedPeer {
+    let expected = peer.public();
+    local
+        .verify_peer(
+            &PairingCandidate::parse(&expected.pairing_code()).unwrap(),
+            &expected.fingerprint,
+        )
+        .unwrap()
+}
+
+fn wall() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+async fn opened(channel: &Arc<dyn DataChannel>) {
+    while let Some(event) = channel.poll().await {
+        match event {
+            DataChannelEvent::OnOpen => return,
+            DataChannelEvent::OnClose | DataChannelEvent::OnError => break,
+            _ => (),
+        }
+    }
+    panic!("sealed fixture channel did not open");
+}
+
+async fn text(channel: &Arc<dyn DataChannel>, next: &str) {
+    loop {
+        match channel.poll().await {
+            Some(DataChannelEvent::OnMessage(message)) => {
+                assert!(message.is_string);
+                assert_eq!(message.data.as_ref(), next.as_bytes());
+                return;
+            }
+            Some(
+                DataChannelEvent::OnBufferedAmountHigh | DataChannelEvent::OnBufferedAmountLow,
+            ) => (),
+            _ => panic!("sealed fixture channel closed before marker: {next}"),
+        }
+    }
+}
+
+async fn no_ack(channel: &Arc<dyn DataChannel>) {
+    let unexpected = tokio::time::timeout(Duration::from_millis(80), async {
+        loop {
+            match channel.poll().await {
+                Some(
+                    DataChannelEvent::OnBufferedAmountHigh | DataChannelEvent::OnBufferedAmountLow,
+                ) => (),
+                other => return other,
+            }
+        }
+    })
+    .await;
+    assert!(
+        unexpected.is_err(),
+        "denied marker produced an ACK or terminal event"
+    );
+}
+
+#[derive(Default)]
+struct Fake {
+    applied: Cell<u8>,
+    pressed: Cell<bool>,
+    released: Cell<u8>,
+}
+
+impl SessionSink for Rc<Fake> {
+    type Event = ();
+    fn apply(&mut self, _: &()) -> Result<(), SinkError> {
+        self.applied.set(self.applied.get() + 1);
+        assert!(!self.pressed.replace(true));
+        Ok(())
+    }
+    fn release_owned(&mut self) -> Result<(), SinkError> {
+        if self.pressed.replace(false) {
+            self.released.set(self.released.get() + 1);
+        }
+        Ok(())
+    }
+}
+
+#[tokio::test]
+async fn signed_relay_only_sctp_applies_only_one_approved_fixture_marker() {
+    tokio::time::timeout(WAIT, async {
+        let turn = FixtureTurn::start(20).await.unwrap();
+        turn.block_direct(true);
+        assert_eq!(*turn.server().ip(), Ipv4Addr::LOCALHOST);
+        let host_id = Identity::generate_ephemeral().unwrap();
+        let viewer_id = Identity::generate_ephemeral().unwrap();
+        let host_pin = pin(&host_id, &viewer_id);
+        let viewer_pin = pin(&viewer_id, &host_id);
+        let scope = FakeInputProofScope {
+            room: Uuid::new_v4(),
+            generation: [9; 32],
+            route: PublicVideoScope {
+                wss: SocketAddrV4::new(RELAY_LABEL, 8443), // signed label, never dialed
+                ca_sha256: [7; 32],
+                turn: SocketAddrV4::new(RELAY_LABEL, 3478),
+                relay_ports: RELAY_PORTS,
+                mode: IceMode::RelayOnly,
+                expires_at: wall() + 120,
+            },
+        };
+        let mode = FakeInputTestMode::Enabled;
+        let mut host_proof =
+            FakeInputProof::prepare(&host_id, &host_pin, SessionRole::Host, scope, mode, wall())
+                .unwrap();
+        let mut viewer_proof = FakeInputProof::prepare(
+            &viewer_id,
+            &viewer_pin,
+            SessionRole::Viewer,
+            scope,
+            mode,
+            wall(),
+        )
+        .unwrap();
+        let mut host = Peer::start(&turn).await;
+        let mut viewer = Peer::start(&turn).await;
+        let viewer_channel = viewer
+            .pc
+            .create_data_channel(
+                LABEL,
+                Some(RTCDataChannelInit {
+                    protocol: PROTOCOL.into(),
+                    ..Default::default()
+                }),
+            )
+            .await
+            .unwrap();
+
+        let offer = viewer.local(false).await;
+        let sig = viewer_proof
+            .seal(host_proof.challenge(wall()).unwrap(), &offer, wall())
+            .unwrap();
+        host_proof.verify(&offer, &sig, wall()).unwrap();
+        let viewer_relay = scope
+            .validate_relay_sctp_description(&offer, SessionRole::Viewer, wall())
+            .unwrap();
+        host.remote(&offer, false, viewer_relay).await;
+        let answer = host.local(true).await;
+        let sig = host_proof
+            .seal(viewer_proof.challenge(wall()).unwrap(), &answer, wall())
+            .unwrap();
+        viewer_proof.verify(&answer, &sig, wall()).unwrap();
+        let viewer_pair = viewer_proof.approved_relay_pair(wall()).unwrap();
+        let host_pair = host_proof.approved_relay_pair(wall()).unwrap();
+        assert_eq!(host_pair.remote(), viewer_pair.local());
+        assert_eq!(host_pair.local(), viewer_pair.remote());
+        viewer.remote(&answer, true, viewer_pair.remote()).await;
+
+        let host_channel = host.channels.recv().await.unwrap();
+        tokio::join!(opened(&host_channel), opened(&viewer_channel));
+        assert_eq!(host_channel.label().await.unwrap(), LABEL);
+        assert_eq!(host_channel.protocol().await.unwrap(), PROTOCOL);
+        assert!(host_channel.ordered().await.unwrap());
+        assert!(!host_channel.negotiated().await.unwrap());
+        assert!(host_channel.max_retransmits().await.unwrap().is_none());
+        assert!(host_channel.max_packet_life_time().await.unwrap().is_none());
+        host.verify_pair(&mut host_proof).await;
+        viewer.verify_pair(&mut viewer_proof).await;
+        for peer in [&host, &viewer] {
+            assert!(peer
+                .runtime
+                .resolve_host(&scope.route.turn.to_string())
+                .await
+                .is_err());
+            assert!(!peer
+                .runtime
+                .allows_turn_peer(SocketAddrV4::new(RELAY_LABEL, 49154).into()));
+        }
+        let connected = turn.stats();
+        assert_eq!(connected.allocations_created, 2);
+        assert_eq!(connected.active, 2);
+        assert!(connected.permissions_created >= 2);
+        assert_eq!(connected.direct_forwarded, 0);
+
+        let input_scope = InputScope {
+            room: *scope.room.as_bytes(),
+            generation: scope.generation,
+            viewer_key: *host_pin.public_key(),
+        };
+        let fake = Rc::new(Fake::default());
+        let mut input = InputQueue::view_only(input_scope, Instant::now() + WAIT, fake.clone());
+        let pending = input.begin_local_decision(&input_scope).unwrap();
+        viewer_channel
+            .try_send_text("fixture:before")
+            .await
+            .unwrap();
+        text(&host_channel, "fixture:before").await;
+        assert_eq!(input.enqueue(&input_scope, ()), Err(DENIED));
+        assert_eq!(fake.applied.get(), 0);
+        no_ack(&viewer_channel).await;
+
+        // Test owner's separate consent. Nothing read from SCTP can grant it.
+        input
+            .complete_local_decision(pending, &input_scope, true, Control::Continue)
+            .unwrap();
+        viewer_channel
+            .try_send_text("fixture:approved")
+            .await
+            .unwrap();
+        text(&host_channel, "fixture:approved").await;
+        host.verify_pair(&mut host_proof).await;
+        viewer.verify_pair(&mut viewer_proof).await;
+        input.enqueue(&input_scope, ()).unwrap();
+        assert_eq!(
+            input.dispatch_next(&input_scope, Control::Continue),
+            Ok(Dispatch::Applied)
+        );
+        host_channel
+            .try_send_text("fixture:applied-ack")
+            .await
+            .unwrap();
+        text(&viewer_channel, "fixture:applied-ack").await;
+        assert_eq!(fake.applied.get(), 1);
+        assert!(fake.pressed.get());
+
+        input.enqueue(&input_scope, ()).unwrap();
+        assert_eq!(
+            input.dispatch_next(&input_scope, Control::Revoke),
+            Ok(Dispatch::Closed)
+        );
+        assert_eq!(input.state(), State::Ended(End::Revoked));
+        viewer_channel.try_send_text("fixture:after").await.unwrap();
+        text(&host_channel, "fixture:after").await;
+        assert_eq!(input.enqueue(&input_scope, ()), Err(DENIED));
+        assert_eq!(
+            input.dispatch_next(&input_scope, Control::Continue),
+            Ok(Dispatch::Closed)
+        );
+        assert_eq!(fake.applied.get(), 1);
+        assert_eq!(fake.released.get(), 1);
+        assert!(!fake.pressed.get());
+        no_ack(&viewer_channel).await;
+        assert!(turn.stats().forwarded_packets > connected.forwarded_packets);
+        assert_eq!(turn.stats().direct_forwarded, 0);
+
+        host.runtime.revoke();
+        viewer.runtime.revoke();
+        let (host_close, viewer_close) = tokio::join!(host.pc.close(), viewer.pc.close());
+        host_close.unwrap();
+        viewer_close.unwrap();
+        for runtime in [&host.runtime, &viewer.runtime] {
+            let loopback = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+            loopback.set_nonblocking(true).unwrap();
+            let socket = runtime.wrap_udp_socket(loopback).unwrap();
+            assert_eq!(
+                socket
+                    .send_to(b"stopped fixture", turn.server().into())
+                    .await
+                    .unwrap_err()
+                    .kind(),
+                io::ErrorKind::PermissionDenied
+            );
+        }
+        assert!(!host.runtime.allows_turn_peer(host_pair.remote().into()));
+        assert!(!viewer.runtime.allows_turn_peer(viewer_pair.remote().into()));
+    })
+    .await
+    .expect("bounded TURN fixture SCTP round trip");
+}
