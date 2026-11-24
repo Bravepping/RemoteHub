@@ -204,24 +204,38 @@ describe('public video viewer controller', () => {
     await session.stop();
   });
 
-  it('clears and stops on rejected release without exposing its error', async () => {
-    const { bridge, renderer, session, draw, update } = harness();
-    bridge.status.mockResolvedValue(allowed);
-    bridge.sendInput.mockRejectedValueOnce('secret');
-    session.start('viewer', true);
-    await vi.advanceTimersByTimeAsync(0);
-    draw();
-    expect(session.enableInput()).toBe(true);
-    session.pauseInput();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(renderer.stop).toHaveBeenCalledBefore(bridge.stop);
-    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
-    expect(update).toHaveBeenLastCalledWith(
-      'failed',
+  it.each([
+    ['PUBLIC_CONTROL_NOT_ALLOWED', 'PUBLIC_CONTROL_NOT_ALLOWED'],
+    ['PUBLIC_CONTROL_EVENT_REJECTED', 'PUBLIC_CONTROL_EVENT_REJECTED'],
+    ['PUBLIC_CONTROL_BACKPRESSURE', 'PUBLIC_CONTROL_BACKPRESSURE'],
+    [
+      'PUBLIC_CONTROL_NOT_ALLOWED raw-secret',
       'PUBLIC_CONTROL_INPUT_IPC_FAILED',
-      { playbackMs: 0 },
-    );
-  });
+    ],
+    [
+      new Error('PUBLIC_CONTROL_BACKPRESSURE'),
+      'PUBLIC_CONTROL_INPUT_IPC_FAILED',
+    ],
+  ] as const)(
+    'clears and stops on input rejection with only the safe code (%s)',
+    async (cause, expected) => {
+      const { bridge, renderer, session, draw, update } = harness();
+      bridge.status.mockResolvedValue(allowed);
+      bridge.sendInput.mockRejectedValueOnce(cause);
+      session.start('viewer', true);
+      await vi.advanceTimersByTimeAsync(0);
+      draw();
+      expect(session.enableInput()).toBe(true);
+      session.pauseInput();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(renderer.stop).toHaveBeenCalledBefore(bridge.stop);
+      expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+      expect(update).toHaveBeenLastCalledWith('failed', expected, {
+        playbackMs: 0,
+      });
+      expect(JSON.stringify(update.mock.calls)).not.toContain('raw-secret');
+    },
+  );
 
   it('clears immediately and invalidates queued input even when native input is still pending', async () => {
     const { bridge, renderer, session, draw } = harness();

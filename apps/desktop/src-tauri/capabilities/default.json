@@ -41,6 +41,7 @@
     "allow-public-video-start",
     "allow-public-video-status",
     "allow-public-video-next-frame",
-    "allow-public-video-stop"
+    "allow-public-video-stop",
+    "allow-public-control-send-input"
   ]
 }

@@ -114,6 +114,9 @@ const NATIVE_DIAGNOSTICS = [
 type NativeDiagnostic = (typeof NATIVE_DIAGNOSTICS)[number];
 const nativeDiagnostics: ReadonlySet<string> = new Set(NATIVE_DIAGNOSTICS);
 type PublicVideoError =
+  | 'PUBLIC_CONTROL_NOT_ALLOWED'
+  | 'PUBLIC_CONTROL_EVENT_REJECTED'
+  | 'PUBLIC_CONTROL_BACKPRESSURE'
   | 'PUBLIC_CONTROL_INPUT_IPC_FAILED'
   | 'PUBLIC_CONTROL_INPUT_QUEUE_FULL'
   | 'PUBLIC_CONTROL_INPUT_STATE_LOST'
@@ -495,10 +498,18 @@ export class PublicVideoSession {
         }
         this.driveInput(run);
       },
-      () => {
+      (cause: unknown) => {
         run.inputInFlight = false;
-        if (this.active(run))
-          void this.retire(run, 'failed', 'PUBLIC_CONTROL_INPUT_IPC_FAILED');
+        if (this.active(run)) {
+          // Only the exact native rejection codes are safe to expose.
+          const code =
+            cause === 'PUBLIC_CONTROL_NOT_ALLOWED' ||
+            cause === 'PUBLIC_CONTROL_EVENT_REJECTED' ||
+            cause === 'PUBLIC_CONTROL_BACKPRESSURE'
+              ? cause
+              : 'PUBLIC_CONTROL_INPUT_IPC_FAILED';
+          void this.retire(run, 'failed', code);
+        }
       },
     );
   }

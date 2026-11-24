@@ -32,6 +32,7 @@ fn main() {
             "public_video_status",
             "public_video_next_frame",
             "public_video_stop",
+            "public_control_send_input",
         ]),
     ))
     .expect("RemoteHub build configuration failed");
