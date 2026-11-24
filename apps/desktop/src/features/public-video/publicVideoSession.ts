@@ -31,6 +31,8 @@ export interface PublicVideoEndDetail {
   readonly playbackMs?: number;
   readonly captureMs?: number;
 }
+export type PublicVideoProfileDisposition =
+  'available' | 'consumed' | 'unconfirmed';
 // Fixed native diagnostics only. Never render arbitrary IPC text, even when
 // it starts with a recognized prefix.
 const NATIVE_DIAGNOSTICS = [
@@ -61,6 +63,7 @@ const NATIVE_DIAGNOSTICS = [
   'PUBLIC_VIDEO_MEDIA_INVALID_AU',
   'PUBLIC_VIDEO_PEER_MISMATCH',
   'PUBLIC_VIDEO_PROFILE_CA_PIN',
+  'PUBLIC_VIDEO_PROFILE_CONSUMED',
   'PUBLIC_VIDEO_PROFILE_EXPIRED',
   'PUBLIC_VIDEO_PROFILE_FILE',
   'PUBLIC_VIDEO_PROFILE_INVALID',
@@ -111,6 +114,8 @@ interface Run {
   renderer?: PublicVideoRenderer;
   ingress?: VideoFrameIngress;
   firstPresentedAt?: number;
+  profileConsumed?: boolean;
+  closedProfile?: { consumed?: boolean };
   cancelled: boolean;
   revoke?: Promise<void>;
   delay?: () => void;
@@ -160,6 +165,7 @@ interface NativeStatus {
   phase: NativePhase;
   error?: string;
   end?: PublicVideoEndDetail;
+  profileConsumed?: boolean;
 }
 
 function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
@@ -169,6 +175,7 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
     error?: unknown;
     end_reason?: unknown;
     elapsed_ms?: unknown;
+    profile_consumed?: unknown;
   };
   if (
     !Object.hasOwn(parsed, 'phase') ||
@@ -181,7 +188,14 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
       typeof parsed.error !== 'string')
   )
     throw new InvalidResponse();
-  const result: NativeStatus = { phase: parsed.phase };
+  const result: NativeStatus = {
+    phase: parsed.phase,
+    profileConsumed:
+      Object.hasOwn(parsed, 'profile_consumed') &&
+      typeof parsed.profile_consumed === 'boolean'
+        ? parsed.profile_consumed
+        : undefined,
+  };
   if (typeof parsed.error === 'string') result.error = parsed.error;
   if (
     result.error !== undefined ||
@@ -264,6 +278,9 @@ export class PublicVideoSession {
       error?: PublicVideoError,
       detail?: PublicVideoEndDetail,
     ) => void,
+    private readonly onProfileDisposition: (
+      state: PublicVideoProfileDisposition,
+    ) => void = () => {},
   ) {}
 
   start(role: PublicVideoRole): void {
@@ -312,6 +329,7 @@ export class PublicVideoSession {
           );
           if (!this.active(run)) return;
           const current = parseStatus(nativeStatus, run.role);
+          this.observeProfile(run, current);
           statusAt = performance.now();
           if (current.error !== undefined || current.end?.reason === 'failed') {
             await this.retire(
@@ -384,8 +402,47 @@ export class PublicVideoSession {
         }
       }
     } catch (cause) {
-      if (this.active(run))
+      if (this.active(run)) {
+        if (cause === 'PUBLIC_VIDEO_PROFILE_CONSUMED')
+          this.profileConsumed(run);
         await this.retire(run, 'failed', errorCode(cause, diagnosticPhase));
+      }
+    }
+  }
+
+  private profileConsumed(run: Run): void {
+    if (run.profileConsumed) return;
+    run.profileConsumed = true;
+    this.onProfileDisposition('consumed');
+  }
+
+  private observeProfile(run: Run, current: NativeStatus): void {
+    if (
+      current.profileConsumed ||
+      current.error === 'PUBLIC_VIDEO_PROFILE_CONSUMED'
+    )
+      this.profileConsumed(run);
+    if (current.phase === 'closed')
+      run.closedProfile = { consumed: current.profileConsumed };
+  }
+
+  private async confirmClosedProfile(run: Run, generation: string) {
+    if (run.profileConsumed || this.disposed) return;
+    // Native stop already acknowledged shutdown. One bounded read covers Stop
+    // racing profile consumption, with no further polling.
+    if (!run.closedProfile) {
+      try {
+        const raw = await withDeadline(this.bridge.status(generation));
+        if (this.disposed) return;
+        this.observeProfile(run, parseStatus(raw, run.role));
+      } catch {
+        // No fresh terminal proof: do not permit reuse of this profile.
+      }
+    }
+    if (!this.disposed && !run.profileConsumed) {
+      this.onProfileDisposition(
+        run.closedProfile?.consumed === false ? 'available' : 'unconfirmed',
+      );
     }
   }
 
@@ -432,10 +489,12 @@ export class PublicVideoSession {
         return undefined;
       });
       if (generation) await this.bridge.stop(generation);
+      return generation;
     };
     // Even if this expires, cleanup remains attached to any late generation.
     run.revoke = withDeadline(cleanup()).then(
-      () => {
+      async (generation) => {
+        if (generation) await this.confirmClosedProfile(run, generation);
         if (this.run === run) this.run = undefined;
         if (!this.disposed) {
           if (detail) this.update(state, code, detail);

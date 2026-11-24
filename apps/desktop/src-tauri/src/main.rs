@@ -97,6 +97,8 @@ struct RuntimeInfo {
     v2_private_wss_lan_enabled: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     public_video_available: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    public_video_profile_consumed: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
     p005_enabled: bool,
@@ -165,6 +167,19 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
                 window
                     .state::<std::sync::Arc<public_video_desktop::DesktopVideoState>>()
                     .available()
+            }
+            #[cfg(not(all(feature = "v2-public-video-desktop", not(feature = "p006-relay"))))]
+            {
+                false
+            }
+        },
+        public_video_profile_consumed: {
+            #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
+            {
+                use tauri::Manager;
+                window
+                    .state::<std::sync::Arc<public_video_desktop::DesktopVideoState>>()
+                    .profile_consumed()
             }
             #[cfg(not(all(feature = "v2-public-video-desktop", not(feature = "p006-relay"))))]
             {

@@ -195,7 +195,8 @@ describe('public video viewer controller', () => {
     pending.resolve(first);
     await stopping;
     expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
-    expect(bridge.status).not.toHaveBeenCalled();
+    expect(bridge.status).toHaveBeenCalledExactlyOnceWith(first);
+    expect(bridge.stop).toHaveBeenCalledBefore(bridge.status);
     expect(bridge.nextFrame).not.toHaveBeenCalled();
     expect(update).toHaveBeenLastCalledWith('stopped', undefined, {
       reason: 'local_stop',

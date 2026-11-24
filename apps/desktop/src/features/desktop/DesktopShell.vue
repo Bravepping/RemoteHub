@@ -16,7 +16,7 @@ import RemoteWorkspace from './RemoteWorkspace.vue';
 import PublicVideoPanel from '../public-video/PublicVideoPanel.vue';
 import type { ReadStatus } from '../../state/desktop';
 
-defineProps<{
+const props = defineProps<{
   runtime?: RuntimeInfo;
   loading: boolean;
   readStatus: ReadStatus;
@@ -28,6 +28,16 @@ const current = computed(() => pages.find((p) => p.id === active.value)!);
 const heading = ref<HTMLElement>();
 const originalTitle = document.title;
 const remoteState = ref('idle');
+// Runtime refresh deliberately clears the displayed runtime snapshot. Keep
+// this launch-mode panel alive so refresh cannot dispose an active session.
+const publicPanelMounted = ref(false);
+watch(
+  () => props.runtime?.public_video_available,
+  (available) => {
+    if (available === true) publicPanelMounted.value = true;
+  },
+  { immediate: true },
+);
 const remoteBusy = computed(() =>
   [
     'waiting',
@@ -118,7 +128,11 @@ onUnmounted(() => {
         @cancel="$emit('cancelRead')"
         @retry="$emit('refresh')"
       />
-      <PublicVideoPanel v-if="runtime?.public_video_available" />
+      <PublicVideoPanel
+        v-if="publicPanelMounted"
+        :available="runtime?.public_video_available === true"
+        :profile-consumed="runtime?.public_video_profile_consumed === true"
+      />
       <RemoteWorkspace
         v-else-if="runtime?.p3_enabled"
         :lan-input-queue-test="runtime?.lan_input_queue_test === true"

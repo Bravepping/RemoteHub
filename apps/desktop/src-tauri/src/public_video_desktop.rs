@@ -53,6 +53,9 @@ impl DesktopVideoState {
     pub(crate) fn available(&self) -> bool {
         self.launch.is_public_video()
     }
+    pub(crate) fn profile_consumed(&self) -> bool {
+        self.used.load(Ordering::Acquire)
+    }
 }
 
 pub(crate) fn require_lan(window: &WebviewWindow) -> Result<(), String> {
@@ -87,6 +90,7 @@ enum EndReason {
 pub(crate) struct Status {
     phase: Phase,
     error: Option<&'static str>,
+    profile_consumed: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     end_reason: Option<EndReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -117,6 +121,7 @@ impl Status {
         Self {
             phase: Phase::Closed,
             error,
+            profile_consumed: false,
             end_reason: Some(reason),
             elapsed_ms,
         }
@@ -167,6 +172,7 @@ impl Session {
             status: watch::channel(Status {
                 phase: Phase::Starting,
                 error: None,
+                profile_consumed: false,
                 end_reason: None,
                 elapsed_ms: None,
             })
@@ -298,7 +304,8 @@ pub(crate) fn public_video_status(
     generation: String,
 ) -> Result<Status, String> {
     let session = find(&window, &generation)?;
-    let status = session.status.borrow().clone();
+    let mut status = session.status.borrow().clone();
+    status.profile_consumed = window.state::<Arc<DesktopVideoState>>().profile_consumed();
     Ok(status)
 }
 

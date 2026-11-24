@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { CanvasVideoAdapter } from './canvasVideoAdapter';
 import {
   PublicVideoSession,
@@ -10,11 +10,21 @@ import {
   type PublicVideoState,
 } from './publicVideoSession';
 
+const props = defineProps<{ available: boolean; profileConsumed?: boolean }>();
 const canvas = ref<HTMLCanvasElement>();
 const role = ref<PublicVideoRole>();
 const state = ref<PublicVideoState>('idle');
 const error = ref('');
 const endDetail = ref<PublicVideoEndDetail>();
+const consumed = ref(false);
+const profileUnconfirmed = ref(false);
+watch(
+  () => props.profileConsumed,
+  (used) => {
+    if (used === true) consumed.value = true;
+  },
+  { immediate: true, flush: 'sync' },
+);
 let session: PublicVideoSession | undefined;
 
 const statusText: Record<PublicVideoState, string> = {
@@ -39,9 +49,12 @@ const endText: Record<PublicVideoEndReason, string> = {
 const formatSeconds = (ms: number) => (ms / 1000).toFixed(1);
 const canStart = computed(
   () =>
-    state.value === 'idle' ||
-    state.value === 'stopped' ||
-    state.value === 'failed',
+    props.available &&
+    !consumed.value &&
+    !profileUnconfirmed.value &&
+    (state.value === 'idle' ||
+      state.value === 'stopped' ||
+      state.value === 'failed'),
 );
 const canStop = computed(
   () =>
@@ -79,6 +92,10 @@ onMounted(() => {
       state.value = next;
       error.value = code ?? '';
       endDetail.value = detail;
+    },
+    (profile) => {
+      if (profile === 'consumed') consumed.value = true;
+      profileUnconfirmed.value = profile === 'unconfirmed';
     },
   );
 });
@@ -122,6 +139,12 @@ function start() {
       <span v-if="endDetail?.playbackMs !== undefined">
         · 本机观看（首帧到清屏）{{ formatSeconds(endDetail.playbackMs) }} 秒
       </span>
+    </p>
+    <p v-if="consumed && !canStop && state !== 'stopping'">
+      本次启动配置已使用，不能重新连接。请为下一次会话准备新的配置并重新启动应用。
+    </p>
+    <p v-else-if="profileUnconfirmed">
+      无法确认本次启动配置是否仍可用。不会使用旧配置重连。
     </p>
     <canvas
       v-show="role === 'viewer'"

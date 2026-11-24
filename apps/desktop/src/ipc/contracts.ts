@@ -24,6 +24,7 @@ export interface RuntimeInfo {
   v2_verified_lan_enabled?: boolean;
   v2_private_wss_lan_enabled?: boolean;
   public_video_available?: boolean;
+  public_video_profile_consumed?: boolean;
   lan_input_queue_test?: boolean;
   app_version: string;
   os: string;
@@ -78,6 +79,7 @@ const flags = [
   'v2_verified_lan_enabled',
   'v2_private_wss_lan_enabled',
   'public_video_available',
+  'public_video_profile_consumed',
   'lan_input_queue_test',
   'p004_enabled',
   'p004_lan_enabled',
