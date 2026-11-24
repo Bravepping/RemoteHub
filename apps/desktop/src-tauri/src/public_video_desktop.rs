@@ -33,6 +33,9 @@ use windows::{
     },
 };
 
+#[cfg(feature = "v2-session-window")]
+pub(crate) mod session_window;
+
 const CANCELLED: &str = "PUBLIC_VIDEO_CANCELLED";
 const UNEXPECTED_CLOSE: &str = "PUBLIC_VIDEO_CLOSED_UNEXPECTEDLY";
 const PULL_TIMEOUT: Duration = Duration::from_millis(500);
@@ -43,6 +46,8 @@ pub(crate) struct DesktopVideoState {
     #[cfg(feature = "v2-control-invitations")]
     invitations: Mutex<crate::control_invitations::Invitations>,
     active: Mutex<Option<Arc<Session>>>,
+    #[cfg(feature = "v2-session-window")]
+    remote_window: Mutex<Option<session_window::Slot>>,
     used: AtomicBool,
     closing: AtomicBool,
 }
@@ -54,6 +59,8 @@ impl DesktopVideoState {
             #[cfg(feature = "v2-control-invitations")]
             invitations: Mutex::default(),
             active: Mutex::new(None),
+            #[cfg(feature = "v2-session-window")]
+            remote_window: Mutex::new(None),
             used: AtomicBool::new(false),
             closing: AtomicBool::new(false),
         }
@@ -227,6 +234,7 @@ fn host_outcome(
 
 pub(crate) struct Session {
     id: String,
+    owner: String,
     profile_consumed: AtomicBool,
     role: Role,
     stop: watch::Sender<bool>,
@@ -247,13 +255,19 @@ pub(crate) struct Session {
 }
 
 impl Session {
+    #[cfg(test)]
     fn new(role: Role, control_launch: bool) -> Self {
+        Self::owned(role, control_launch, "main")
+    }
+
+    fn owned(role: Role, control_launch: bool, owner: &str) -> Self {
         #[cfg(feature = "v2-public-control-desktop")]
         let (input_events, input_receiver) = mpsc::channel(24);
         #[cfg(not(feature = "v2-public-control-desktop"))]
         let _ = control_launch;
         Self {
             id: uuid::Uuid::new_v4().simple().to_string(),
+            owner: owner.to_owned(),
             profile_consumed: AtomicBool::new(false),
             role,
             stop: watch::channel(false).0,
@@ -314,6 +328,20 @@ impl Session {
             .await
             .is_ok_and(|r| r.is_ok())
     }
+    fn snapshot(&self) -> Status {
+        let mut status = self.status.borrow().clone();
+        status.profile_consumed = self.profile_consumed.load(Ordering::Acquire);
+        #[cfg(feature = "v2-public-control-desktop")]
+        if self.control {
+            status.round_seconds = self.round_seconds.get().copied();
+            status.input_state = Some(if status.phase == Phase::Closed {
+                InputState::Closed
+            } else {
+                *self.input_state.borrow()
+            });
+        }
+        status
+    }
 }
 
 struct CaptureLease(Arc<AtomicBool>);
@@ -337,13 +365,25 @@ impl Drop for CloseSession {
     }
 }
 
-fn find(window: &WebviewWindow, generation: &str) -> Result<Arc<Session>, String> {
-    crate::experiment_origin::origin(window)?;
-    if generation.len() != 32
-        || !generation
+fn valid_generation(generation: &str) -> bool {
+    generation.len() == 32
+        && generation
             .bytes()
             .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+}
+
+fn session_origin(window: &WebviewWindow, owner: &str) -> Result<(), String> {
+    #[cfg(feature = "v2-session-window")]
+    return crate::experiment_origin::origin_for(window, owner);
+    #[cfg(not(feature = "v2-session-window"))]
     {
+        let _ = owner;
+        crate::experiment_origin::origin(window)
+    }
+}
+
+fn find(window: &WebviewWindow, generation: &str) -> Result<Arc<Session>, String> {
+    if !valid_generation(generation) {
         return Err("PUBLIC_VIDEO_GENERATION".into());
     }
     let state = window.state::<Arc<DesktopVideoState>>();
@@ -352,9 +392,10 @@ fn find(window: &WebviewWindow, generation: &str) -> Result<Arc<Session>, String
         .lock()
         .map_err(|_| "PUBLIC_VIDEO_STATE")?
         .as_ref()
-        .filter(|s| s.id == generation)
+        .filter(|s| s.id == generation && s.owner == window.label())
         .cloned()
         .ok_or("PUBLIC_VIDEO_GENERATION")?;
+    session_origin(window, &session.owner)?;
     Ok(session)
 }
 
@@ -373,6 +414,10 @@ pub(crate) async fn select_control_invitation(
     let state = window.state::<Arc<DesktopVideoState>>().inner().clone();
     if !state.picker_available() || state.closing.load(Ordering::Acquire) {
         return Err("PUBLIC_VIDEO_PROFILE_UNAVAILABLE".into());
+    }
+    #[cfg(feature = "v2-session-window")]
+    if session_window::reservation_busy(&state) {
+        return Err("PUBLIC_VIDEO_BUSY".into());
     }
     let gate = window.state::<Arc<crate::ProbeState>>().0.clone();
     if gate.swap(true, Ordering::AcqRel) {
@@ -414,6 +459,19 @@ pub(crate) fn public_video_start(
     invitation_id: Option<String>,
 ) -> Result<String, String> {
     crate::experiment_origin::origin(&window)?;
+    #[cfg(feature = "v2-session-window")]
+    if window.state::<Arc<DesktopVideoState>>().picker_available() {
+        return Err("PUBLIC_SESSION_WINDOW_REQUIRED".into());
+    }
+    start_session(window, role, invitation_id)
+}
+
+fn start_session(
+    window: WebviewWindow,
+    role: String,
+    invitation_id: Option<String>,
+) -> Result<String, String> {
+    session_origin(&window, window.label())?;
     let role = match role.as_str() {
         "host" => Role::Host,
         "viewer" => Role::Viewer,
@@ -424,6 +482,10 @@ pub(crate) fn public_video_start(
         return Err("PUBLIC_VIDEO_PROFILE_REQUIRED".into());
     }
     let mut active = state.active.lock().map_err(|_| "PUBLIC_VIDEO_STATE")?;
+    #[cfg(feature = "v2-session-window")]
+    if state.picker_available() && !session_window::still_open(&state, window.label()) {
+        return Err("PUBLIC_SESSION_WINDOW_REQUIRED".into());
+    }
     if state.closing.load(Ordering::Acquire) || state.used.load(Ordering::Acquire) {
         return Err("PUBLIC_VIDEO_PROFILE_UNAVAILABLE".into());
     }
@@ -462,7 +524,11 @@ pub(crate) fn public_video_start(
                 .to_path_buf(),
         ),
     };
-    let session = Arc::new(Session::new(role, state.launch.is_control()));
+    let session = Arc::new(Session::owned(
+        role,
+        state.launch.is_control(),
+        window.label(),
+    ));
     let id = session.id.clone();
     *active = Some(session.clone());
     drop(active);
@@ -484,18 +550,7 @@ pub(crate) fn public_video_status(
     generation: String,
 ) -> Result<Status, String> {
     let session = find(&window, &generation)?;
-    let mut status = session.status.borrow().clone();
-    status.profile_consumed = session.profile_consumed.load(Ordering::Acquire);
-    #[cfg(feature = "v2-public-control-desktop")]
-    if session.control {
-        status.round_seconds = session.round_seconds.get().copied();
-        status.input_state = Some(if status.phase == Phase::Closed {
-            InputState::Closed
-        } else {
-            *session.input_state.borrow()
-        });
-    }
-    Ok(status)
+    Ok(session.snapshot())
 }
 
 #[cfg(feature = "v2-public-control-desktop")]
@@ -516,18 +571,26 @@ pub(crate) fn public_control_send_input(
         return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
     }
     use hub_webrtc::remote_input::Event;
-    if event.is_empty()
-        || event.len() > 256
-        || !matches!(
-            serde_json::from_str::<Event>(&event),
-            Ok(Event::Move { .. }
-                | Event::Button { .. }
-                | Event::Key { .. }
-                | Event::Release { .. })
-        )
-    {
+    if event.is_empty() || event.len() > 256 {
         session.request_stop();
         return Err("PUBLIC_CONTROL_EVENT_REJECTED".into());
+    }
+    let parsed = serde_json::from_str::<Event>(&event);
+    if !matches!(
+        &parsed,
+        Ok(Event::Move { .. } | Event::Button { .. } | Event::Key { .. } | Event::Release { .. })
+    ) {
+        session.request_stop();
+        return Err("PUBLIC_CONTROL_EVENT_REJECTED".into());
+    }
+    #[cfg(feature = "v2-session-window")]
+    if session.owner != "main"
+        && (!window.is_focused().unwrap_or(false) || window.is_minimized().unwrap_or(true))
+        && !matches!(parsed, Ok(Event::Release { .. }))
+    {
+        // The dedicated UI also queues Release; non-release input cannot
+        // leave an obscured/minimized window, and video remains alive.
+        return Ok(());
     }
     session.input_events.try_send(event).map_err(|_| {
         session.request_stop();
@@ -581,7 +644,7 @@ pub(crate) async fn public_video_next_frame(
         _ = stopped(&mut stop) => return Ok(Response::new(Vec::<u8>::new())),
         result = tokio::time::timeout(PULL_TIMEOUT, receiver.next_frame()) => result,
     };
-    crate::experiment_origin::origin(&window)?;
+    session_origin(&window, &session.owner)?;
     if *stop.borrow() {
         return Ok(Response::new(Vec::<u8>::new()));
     }
@@ -727,14 +790,14 @@ async fn run(
     if *stop.borrow() || state.closing.load(Ordering::Acquire) {
         return Err(CANCELLED);
     }
-    crate::experiment_origin::origin(&window).map_err(|_| "PUBLIC_VIDEO_ORIGIN")?;
+    session_origin(&window, &session.owner).map_err(|_| "PUBLIC_VIDEO_ORIGIN")?;
     let (phase_tx, mut phase_rx) = watch::channel(ScopedWssState::Negotiating);
     let watch_session = session.clone();
     let monitor = async move {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(200)) => {
-                    if crate::experiment_origin::origin(&window).is_err() {
+                    if session_origin(&window, &watch_session.owner).is_err() {
                         watch_session.request_stop();
                         return;
                     }

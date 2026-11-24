@@ -34,6 +34,11 @@ fn main() {
             "public_video_next_frame",
             "public_video_stop",
             "public_control_send_input",
+            "public_session_window_open",
+            "public_session_window_attach",
+            "public_session_window_snapshot",
+            "public_session_window_focus",
+            "public_session_window_stop",
         ]),
     ))
     .expect("RemoteHub build configuration failed");

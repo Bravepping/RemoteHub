@@ -43,6 +43,10 @@
     "allow-public-video-status",
     "allow-public-video-next-frame",
     "allow-public-video-stop",
-    "allow-public-control-send-input"
+    "allow-public-control-send-input",
+    "allow-public-session-window-open",
+    "allow-public-session-window-snapshot",
+    "allow-public-session-window-focus",
+    "allow-public-session-window-stop"
   ]
 }

@@ -1,7 +1,13 @@
 <script setup lang="ts">
 import { invoke } from '@tauri-apps/api/core';
+import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { CanvasVideoAdapter } from './canvasVideoAdapter';
+import {
+  observerSnapshot,
+  type WindowAttachment,
+  type WindowState,
+} from './publicSessionWindow';
 import {
   normalizedPublicPoint,
   validPublicKey,
@@ -21,10 +27,12 @@ const props = defineProps<{
   profileConsumed?: boolean;
   controlAvailable?: boolean;
   invitationPicker?: boolean;
+  mainObserver?: boolean;
+  windowOwner?: WindowAttachment;
 }>();
 const canvas = ref<HTMLCanvasElement>();
 const surface = ref<HTMLDivElement>();
-const role = ref<PublicVideoRole>();
+const role = ref<PublicVideoRole | undefined>(props.windowOwner?.role);
 const state = ref<PublicVideoState>('idle');
 const error = ref('');
 const endDetail = ref<PublicVideoEndDetail>();
@@ -141,6 +149,65 @@ watch(
   { immediate: true, flush: 'sync' },
 );
 let session: PublicVideoSession | undefined;
+const observed = ref<WindowState>();
+const opening = ref(false);
+const centerOpen = ref(false);
+const measuredResolution = ref<string>();
+let unlistenPause: UnlistenFn | undefined;
+let alive = true;
+let observerTimer: ReturnType<typeof setTimeout> | undefined;
+const observedActive = computed(
+  () => observed.value !== undefined && observed.value.phase !== 'closed',
+);
+
+async function pollOwnedWindow() {
+  try {
+    const raw = await invoke('public_session_window_snapshot');
+    if (alive) observed.value = observerSnapshot(raw);
+  } catch {
+    // Report no live facts when the native snapshot cannot be checked.
+    if (alive) observed.value = undefined;
+  } finally {
+    if (alive) observerTimer = setTimeout(pollOwnedWindow, 350);
+  }
+}
+async function ownerAction(
+  command: 'public_session_window_stop' | 'public_session_window_focus',
+) {
+  try {
+    await invoke(command);
+  } catch {
+    if (alive) selectionError.value = '未能确认远控窗口操作，请检查窗口状态。';
+  }
+}
+async function openOwnedWindow() {
+  const choice = selected.value;
+  if (!choice || opening.value) return;
+  opening.value = true;
+  selectionError.value = '';
+  try {
+    const result = await invoke('public_session_window_open', {
+      role: choice.role,
+      invitationId: choice.id,
+    });
+    if (result !== 'opened' && result !== 'existing') throw new Error();
+    if (result === 'opened') {
+      invitations.value = invitations.value.filter(
+        (item) => item.id !== choice.id,
+      );
+      selectedId.value = '';
+    }
+  } catch {
+    if (alive)
+      selectionError.value = '未能打开远控窗口，请检查邀请或现有会话。';
+  } finally {
+    if (alive) opening.value = false;
+  }
+}
+function toggleCenter() {
+  if (!centerOpen.value) pauseInput();
+  centerOpen.value = !centerOpen.value;
+}
 
 const statusText: Record<PublicVideoState, string> = {
   idle: '请选择本机角色。',
@@ -166,6 +233,8 @@ const canChoose = computed(
   () =>
     props.available &&
     !selecting.value &&
+    !opening.value &&
+    !observedActive.value &&
     (state.value === 'idle' ||
       state.value === 'stopped' ||
       state.value === 'failed'),
@@ -190,7 +259,8 @@ const canEnableInput = computed(
     role.value === 'viewer' &&
     state.value === 'watching' &&
     inputState.value === 'allowed' &&
-    !releasingInput.value,
+    !releasingInput.value &&
+    !centerOpen.value,
 );
 const controlText = computed(() => {
   if (inputEnabled.value) return '键鼠已在本机启用。按 Esc 或移出画面可暂停。';
@@ -291,12 +361,26 @@ function stopShortcut(event: KeyboardEvent) {
   }
 }
 onMounted(() => {
+  if (props.mainObserver) {
+    void pollOwnedWindow();
+    return;
+  }
+  if (props.windowOwner) {
+    void listen('remotehub-session-input-pause', pauseInput)
+      .then((unsubscribe) => {
+        if (alive) unlistenPause = unsubscribe;
+        else unsubscribe();
+      })
+      .catch(() => {});
+  }
   window.addEventListener('keydown', stopShortcut);
   window.addEventListener('blur', pauseInput);
   document.addEventListener('visibilitychange', pauseInput);
   session = new PublicVideoSession(
     {
       start: (role) => {
+        if (props.windowOwner)
+          return Promise.resolve(props.windowOwner.generation);
         if (!props.invitationPicker)
           return invoke('public_video_start', { role });
         const invitationId = selected.value?.id;
@@ -321,7 +405,12 @@ onMounted(() => {
         undefined,
         failed,
         undefined,
-        presented,
+        () => {
+          const frame = canvas.value;
+          if (props.windowOwner && frame && frame.width && frame.height)
+            measuredResolution.value = `${frame.width} × ${frame.height}`;
+          presented();
+        },
       ),
     (next, code, detail) => {
       state.value = next;
@@ -349,8 +438,12 @@ onMounted(() => {
       connectionPath.value = path;
     },
   );
+  if (props.windowOwner) session.start(props.windowOwner.role, true);
 });
 onBeforeUnmount(() => {
+  alive = false;
+  unlistenPause?.();
+  clearTimeout(observerTimer);
   clearInterval(expiryTimer);
   window.removeEventListener('keydown', stopShortcut);
   window.removeEventListener('blur', pauseInput);
@@ -361,7 +454,8 @@ onBeforeUnmount(() => {
 function start() {
   if (role.value && canStart.value) {
     roundSeconds.value = undefined;
-    session?.start(role.value, props.controlAvailable === true);
+    if (props.mainObserver) void openOwnedWindow();
+    else session?.start(role.value, props.controlAvailable === true);
   }
 }
 </script>
@@ -369,20 +463,60 @@ function start() {
 <template>
   <section
     class="public-video-panel"
+    :class="{ 'owned-session-panel': windowOwner }"
     :aria-label="controlAvailable ? '公网远控测试' : '公网仅视频会话'"
   >
-    <h2>{{ controlAvailable ? '公网远控测试' : '公网仅视频会话' }}</h2>
-    <p v-if="controlAvailable">
+    <header v-if="windowOwner" class="owned-session-header">
+      <h2>
+        远控窗口 · {{ windowOwner.role === 'viewer' ? '观看方' : '共享方' }}
+      </h2>
+      <button
+        type="button"
+        :aria-expanded="centerOpen"
+        aria-controls="owned-control-center"
+        @click="toggleCenter"
+      >
+        控制中心
+      </button>
+    </header>
+    <h2 v-else>{{ controlAvailable ? '公网远控测试' : '公网仅视频会话' }}</h2>
+    <p v-if="!windowOwner && controlAvailable">
       双方须先核验完整指纹并批准视频。键鼠需共享端另行原生批准，只在本轮剩余时间内有效，默认拒绝。不提供滚轮或无人值守控制。
       <span v-if="roundSeconds !== undefined"
         >本轮会话最多 {{ roundSeconds }} 秒。</span
       >
       <span v-else>本轮为短时会话，时限以原生配置为准。</span>
     </p>
-    <p v-else>
+    <p v-else-if="!windowOwner">
       使用应用启动时指定的本机配置。请先到「设备」核验对方的完整指纹。两端均须明确批准，不提供鼠标或键盘控制。
     </p>
-    <div v-if="invitationPicker">
+    <div
+      v-if="mainObserver && observedActive"
+      class="public-window-observer"
+      role="status"
+    >
+      <strong>{{
+        observed?.phase === 'ready'
+          ? '已建立远程连接'
+          : observed?.phase === 'stopping'
+            ? '正在断开远程连接'
+            : '正在建立远程连接'
+      }}</strong>
+      <span v-if="observed?.path">{{
+        observed.path === 'direct' ? '直连' : 'TURN 中继'
+      }}</span>
+      <button type="button" @click="ownerAction('public_session_window_focus')">
+        显示远控窗口
+      </button>
+      <button
+        type="button"
+        :disabled="observed?.phase === 'stopping'"
+        @click="ownerAction('public_session_window_stop')"
+      >
+        断开连接
+      </button>
+    </div>
+    <div v-if="!windowOwner && invitationPicker">
       <button type="button" :disabled="!canChoose" @click="selectInvitation">
         {{ selecting ? '正在选择邀请…' : '打开邀请 ZIP 或 JSON' }}
       </button>
@@ -411,7 +545,7 @@ function start() {
       </p>
       <p v-if="selectionError" role="alert">{{ selectionError }}</p>
     </div>
-    <fieldset v-else :disabled="!canStart">
+    <fieldset v-else-if="!windowOwner" :disabled="!canStart">
       <legend>本机角色</legend>
       <label><input v-model="role" type="radio" value="host" /> 共享屏幕</label>
       <label
@@ -419,10 +553,20 @@ function start() {
       >
     </fieldset>
     <div class="public-video-actions">
-      <button type="button" :disabled="!role || !canStart" @click="start">
+      <button
+        v-if="!windowOwner"
+        type="button"
+        :disabled="!role || !canStart"
+        @click="start"
+      >
         开始本次会话
       </button>
-      <button type="button" :disabled="!canStop" @click="session?.stop()">
+      <button
+        v-if="!mainObserver"
+        type="button"
+        :disabled="!canStop"
+        @click="session?.stop()"
+      >
         停止并清屏
       </button>
     </div>
@@ -456,7 +600,15 @@ function start() {
         · 本机观看（首帧到清屏）{{ formatSeconds(endDetail.playbackMs) }} 秒
       </span>
     </p>
-    <p v-if="!invitationPicker && consumed && !canStop && state !== 'stopping'">
+    <p
+      v-if="
+        !windowOwner &&
+        !invitationPicker &&
+        consumed &&
+        !canStop &&
+        state !== 'stopping'
+      "
+    >
       本次启动配置已使用，不能重新连接。请用下一轮未使用的配置重新启动应用。
     </p>
     <p v-else-if="profileUnconfirmed">
@@ -474,6 +626,7 @@ function start() {
       </button>
     </div>
     <div
+      v-if="!mainObserver"
       v-show="role === 'viewer'"
       ref="surface"
       class="public-video-surface"
@@ -494,10 +647,73 @@ function start() {
         aria-label="仅显示已验证的当前会话画面"
       />
     </div>
+    <div
+      v-if="windowOwner && state === 'watching' && measuredResolution"
+      class="owned-session-metrics"
+    >
+      播放分辨率 {{ measuredResolution }}
+    </div>
+    <aside
+      v-if="windowOwner && centerOpen"
+      id="owned-control-center"
+      class="owned-control-center"
+      aria-label="控制中心"
+    >
+      <button type="button" @click="toggleCenter">关闭控制中心</button>
+      <h3>窗口与显示</h3>
+      <p>画面在远控窗口中显示。</p>
+      <h3>输入控制</h3>
+      <p>{{ controlText }}</p>
+      <p>关闭控制中心不会恢复键鼠。恢复时需明确点击「启用本次键鼠」。</p>
+      <h3>连接信息</h3>
+      <p v-if="connectionPath">
+        {{ connectionPath === 'direct' ? '直连' : 'TURN 中继' }}
+      </p>
+      <h3>退出远控</h3>
+      <button type="button" :disabled="!canStop" @click="session?.stop()">
+        断开本次会话
+      </button>
+    </aside>
   </section>
 </template>
 
 <style scoped>
+.public-window-observer,
+.owned-session-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.7rem;
+}
+.owned-session-header {
+  justify-content: space-between;
+}
+.owned-session-panel {
+  position: relative;
+  min-height: calc(100dvh - 1.5rem);
+  color: #edf5ff;
+  border-color: #344c65;
+}
+.owned-session-panel .public-video-surface {
+  max-height: calc(100dvh - 13rem);
+  margin: 0 auto;
+}
+.owned-session-panel .public-video-surface canvas {
+  max-height: inherit;
+}
+.owned-control-center {
+  position: absolute;
+  inset: 2.5rem 0 0 auto;
+  width: min(22rem, 90%);
+  padding: 1rem;
+  background: #142638;
+  border-left: 1px solid #344c65;
+  z-index: 1;
+}
+.owned-session-metrics {
+  margin-top: 0.35rem;
+  font-size: 0.9rem;
+}
 .public-video-panel {
   padding: 1rem;
   border: 1px solid currentColor;

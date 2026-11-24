@@ -623,6 +623,10 @@ fn write_report_with_final(
     ))
 }
 pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
+    #[cfg(feature = "v2-session-window")]
+    if crate::public_video_desktop::session_window::own_window_event(window, event) {
+        return;
+    }
     if let tauri::WindowEvent::CloseRequested { api, .. } = event {
         api.prevent_close();
         let state = window.state::<Arc<LanState>>();
@@ -662,6 +666,8 @@ pub fn on_window_event(window: &tauri::Window, event: &tauri::WindowEvent) {
             #[cfg(not(feature = "v2-public-video-desktop"))]
             let public_clean = true;
             if clean && old_clean && public_clean {
+                #[cfg(feature = "v2-session-window")]
+                crate::public_video_desktop::session_window::destroy_after_main_close(&window);
                 let _ = window.destroy();
             } else {
                 shared.closing.store(false, Ordering::Release);

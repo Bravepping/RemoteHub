@@ -106,6 +106,8 @@ struct RuntimeInfo {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     public_invitation_picker: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    public_dedicated_session: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     public_video_profile_consumed: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
@@ -203,6 +205,19 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
                     .control_available()
             }
             #[cfg(not(all(feature = "v2-public-control-desktop", not(feature = "p006-relay"))))]
+            {
+                false
+            }
+        },
+        public_dedicated_session: {
+            #[cfg(all(feature = "v2-session-window", not(feature = "p006-relay")))]
+            {
+                use tauri::Manager;
+                window
+                    .state::<std::sync::Arc<public_video_desktop::DesktopVideoState>>()
+                    .picker_available()
+            }
+            #[cfg(not(all(feature = "v2-session-window", not(feature = "p006-relay"))))]
             {
                 false
             }
@@ -388,7 +403,17 @@ fn main() {
             #[cfg(feature = "v2-public-control-desktop")]
             public_video_desktop::public_control_send_input,
             #[cfg(feature = "v2-control-invitations")]
-            public_video_desktop::select_control_invitation
+            public_video_desktop::select_control_invitation,
+            #[cfg(feature = "v2-session-window")]
+            public_video_desktop::session_window::public_session_window_open,
+            #[cfg(feature = "v2-session-window")]
+            public_video_desktop::session_window::public_session_window_attach,
+            #[cfg(feature = "v2-session-window")]
+            public_video_desktop::session_window::public_session_window_snapshot,
+            #[cfg(feature = "v2-session-window")]
+            public_video_desktop::session_window::public_session_window_focus,
+            #[cfg(feature = "v2-session-window")]
+            public_video_desktop::session_window::public_session_window_stop
         ])
         .on_window_event(p004_lan::on_window_event);
     #[cfg(feature = "p006-relay")]

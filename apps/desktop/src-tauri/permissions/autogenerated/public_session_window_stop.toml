@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-public-session-window-stop"
+description = "Enables the public_session_window_stop command without any pre-configured scope."
+commands.allow = ["public_session_window_stop"]
+
+[[permission]]
+identifier = "deny-public-session-window-stop"
+description = "Denies the public_session_window_stop command without any pre-configured scope."
+commands.deny = ["public_session_window_stop"]

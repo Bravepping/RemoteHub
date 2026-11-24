@@ -33,6 +33,14 @@ const remoteState = ref('idle');
 const publicPanelMounted = ref(false);
 const publicControlLaunch = ref(false);
 const invitationPicker = ref(false);
+const dedicatedSession = ref(false);
+watch(
+  () => props.runtime?.public_dedicated_session,
+  (value) => {
+    if (value === true) dedicatedSession.value = true;
+  },
+  { immediate: true },
+);
 watch(
   () => props.runtime?.public_invitation_picker,
   (available) => {
@@ -146,9 +154,11 @@ onUnmounted(() => {
       />
       <PublicVideoPanel
         v-if="publicPanelMounted"
+        :key="dedicatedSession ? 'observer' : 'legacy'"
         :available="runtime?.public_video_available === true"
         :control-available="publicControlLaunch"
         :invitation-picker="invitationPicker && publicControlLaunch"
+        :main-observer="dedicatedSession"
         :profile-consumed="runtime?.public_video_profile_consumed === true"
       />
       <RemoteWorkspace

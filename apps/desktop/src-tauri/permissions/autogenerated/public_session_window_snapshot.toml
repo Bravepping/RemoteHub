@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-public-session-window-snapshot"
+description = "Enables the public_session_window_snapshot command without any pre-configured scope."
+commands.allow = ["public_session_window_snapshot"]
+
+[[permission]]
+identifier = "deny-public-session-window-snapshot"
+description = "Denies the public_session_window_snapshot command without any pre-configured scope."
+commands.deny = ["public_session_window_snapshot"]

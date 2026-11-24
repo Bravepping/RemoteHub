@@ -1,0 +1,359 @@
+//! The main window requests a visible dedicated view or observes/stops it.
+//! Only the exact owned native window can attach (media and input use Session::owner).
+use super::*;
+
+const LABEL_PREFIX: &str = "remote-session-";
+const MISSING: &str = "PUBLIC_SESSION_WINDOW_MISSING";
+const STATE: &str = "PUBLIC_SESSION_WINDOW_STATE";
+
+struct Intent {
+    role: String,
+    invitation_id: String,
+}
+
+pub(super) struct Slot {
+    label: String,
+    intent: Option<Intent>,
+    closing: bool,
+}
+
+#[derive(Serialize)]
+pub(crate) struct Snapshot {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    role: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    status: Option<Status>,
+}
+
+fn verified(window: &WebviewWindow) -> Result<Arc<DesktopVideoState>, String> {
+    let state = window.state::<Arc<DesktopVideoState>>().inner().clone();
+    if !state.picker_available() {
+        return Err(MISSING.into());
+    }
+    let label = window.label();
+    if label == "main" {
+        crate::experiment_origin::origin(window)?;
+    } else {
+        let is_owner = state
+            .remote_window
+            .lock()
+            .map_err(|_| STATE)?
+            .as_ref()
+            .is_some_and(|slot| slot.label == label);
+        if !is_owner {
+            return Err(MISSING.into());
+        }
+        crate::experiment_origin::origin_for(window, label)?;
+    }
+    Ok(state)
+}
+
+fn active_for(state: &DesktopVideoState, label: &str) -> Result<Option<Arc<Session>>, String> {
+    Ok(state
+        .active
+        .lock()
+        .map_err(|_| STATE)?
+        .as_ref()
+        .filter(|s| s.owner == label)
+        .cloned())
+}
+
+fn current_label(state: &DesktopVideoState) -> Result<Option<String>, String> {
+    Ok(state
+        .remote_window
+        .lock()
+        .map_err(|_| STATE)?
+        .as_ref()
+        .map(|s| s.label.clone()))
+}
+
+fn focus(window: &WebviewWindow) -> Result<(), String> {
+    window
+        .show()
+        .and_then(|_| window.unminimize())
+        .and_then(|_| window.set_focus())
+        .map_err(|_| MISSING.to_owned())
+}
+
+fn clear_slot(state: &DesktopVideoState, label: &str) {
+    if let Ok(mut slot) = state.remote_window.lock() {
+        if slot.as_ref().is_some_and(|entry| entry.label == label) {
+            *slot = None;
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) async fn public_session_window_open(
+    window: WebviewWindow,
+    role: String,
+    invitation_id: String,
+) -> Result<&'static str, String> {
+    crate::experiment_origin::origin(&window)?;
+    let state = verified(&window)?;
+    if state.closing.load(Ordering::Acquire)
+        || !matches!(role.as_str(), "host" | "viewer")
+        || !valid_generation(&invitation_id)
+    {
+        return Err(MISSING.into());
+    }
+
+    let (label, newly_reserved) = {
+        let mut slot = state.remote_window.lock().map_err(|_| STATE)?;
+        if let Some(current) = slot.as_ref() {
+            (current.label.clone(), false)
+        } else {
+            let label = format!("{LABEL_PREFIX}{}", uuid::Uuid::new_v4().simple());
+            *slot = Some(Slot {
+                label: label.clone(),
+                intent: Some(Intent {
+                    role,
+                    invitation_id,
+                }),
+                closing: false,
+            });
+            (label, true)
+        }
+    };
+
+    if !newly_reserved {
+        if let Some(existing) = window.get_webview_window(&label) {
+            focus(&existing)?;
+        }
+        return Ok("existing");
+    }
+
+    let view = tauri::WebviewWindowBuilder::new(
+        window.app_handle(),
+        &label,
+        tauri::WebviewUrl::App("index.html".into()),
+    )
+    .title("RemoteHub · 远控窗口")
+    .inner_size(1080.0, 740.0)
+    .min_inner_size(600.0, 440.0)
+    .build();
+
+    match view {
+        Ok(_) => Ok("opened"),
+        Err(_) => {
+            clear_slot(&state, &label);
+            Err("PUBLIC_SESSION_WINDOW_OPEN_FAILED".into())
+        }
+    }
+}
+
+#[tauri::command]
+pub(crate) fn public_session_window_attach(window: WebviewWindow) -> Result<Snapshot, String> {
+    let state = verified(&window)?;
+    let label = window.label().to_owned();
+    let intent = {
+        let mut slot = state.remote_window.lock().map_err(|_| STATE)?;
+        let entry = slot
+            .as_mut()
+            .filter(|s| s.label == label && !s.closing)
+            .ok_or(MISSING)?;
+        entry.intent.take()
+    };
+    if let Some(intent) = intent {
+        start_session(window.clone(), intent.role, Some(intent.invitation_id))?;
+    }
+    let snap = snapshot(&window, &state)?;
+    if snap.generation.is_none() {
+        return Err(MISSING.into());
+    }
+    Ok(snap)
+}
+
+#[tauri::command]
+pub(crate) fn public_session_window_snapshot(window: WebviewWindow) -> Result<Snapshot, String> {
+    let state = verified(&window)?;
+    snapshot(&window, &state)
+}
+
+fn snapshot(window: &WebviewWindow, state: &DesktopVideoState) -> Result<Snapshot, String> {
+    let label = current_label(state)?;
+    let session = match label.as_deref() {
+        Some(owner) => active_for(state, owner)?,
+        None => None,
+    };
+    let reveal_generation = label.as_deref() == Some(window.label()) && window.label() != "main";
+    Ok(Snapshot {
+        generation: session
+            .as_ref()
+            .filter(|_| reveal_generation)
+            .map(|s| s.id.clone()),
+        role: session.as_ref().map(|s| {
+            if s.role == Role::Viewer {
+                "viewer"
+            } else {
+                "host"
+            }
+        }),
+        status: session.as_ref().map(|s| s.snapshot()),
+    })
+}
+
+#[tauri::command]
+pub(crate) fn public_session_window_focus(window: WebviewWindow) -> Result<(), String> {
+    crate::experiment_origin::origin(&window)?;
+    let state = verified(&window)?;
+    let label = current_label(&state)?.ok_or(MISSING)?;
+    let remote = window.get_webview_window(&label).ok_or(MISSING)?;
+    focus(&remote)
+}
+
+#[tauri::command]
+pub(crate) async fn public_session_window_stop(window: WebviewWindow) -> Result<(), String> {
+    crate::experiment_origin::origin(&window)?;
+    let state = verified(&window)?;
+    let label = current_label(&state)?.ok_or(MISSING)?;
+    let session = active_for(&state, &label)?.ok_or(MISSING)?;
+    session.request_stop();
+    if !session.wait_finished_for(Duration::from_secs(3)).await {
+        return Err("PUBLIC_VIDEO_STOP_UNCONFIRMED".into());
+    }
+    Ok(())
+}
+
+pub(crate) fn own_window_event(window: &tauri::Window, event: &tauri::WindowEvent) -> bool {
+    let label = window.label();
+    if !label.starts_with(LABEL_PREFIX) {
+        return false;
+    }
+    let Some(state) = window
+        .try_state::<Arc<DesktopVideoState>>()
+        .map(|s| s.inner().clone())
+    else {
+        return true;
+    };
+    if !current_label(&state).is_ok_and(|s| s.as_deref() == Some(label)) {
+        return true;
+    }
+
+    match event {
+        tauri::WindowEvent::CloseRequested { api, .. } => {
+            api.prevent_close();
+            let reserved = state.remote_window.lock().is_ok_and(|mut slot| {
+                slot.as_mut()
+                    .filter(|s| s.label == label && !s.closing)
+                    .is_some_and(|s| {
+                        s.closing = true;
+                        s.intent = None;
+                        true
+                    })
+            });
+            if reserved {
+                // Do not touch the LAN or main-window lifecycle for a view close.
+                let session = active_for(&state, label).ok().flatten();
+                if let Some(session) = &session {
+                    session.request_stop();
+                }
+                let window = window.clone();
+                tauri::async_runtime::spawn(async move {
+                    let clean = match session {
+                        Some(s) => s.wait_finished().await,
+                        None => true,
+                    };
+                    if clean && window.destroy().is_ok() {
+                        return;
+                    }
+                    if let Ok(mut slot) = state.remote_window.lock() {
+                        if let Some(slot) = slot.as_mut().filter(|s| s.label == window.label()) {
+                            slot.closing = false;
+                        }
+                    }
+                });
+            }
+        }
+        tauri::WindowEvent::Destroyed => {
+            if let Ok(Some(session)) = active_for(&state, label) {
+                session.request_stop();
+            }
+            clear_slot(&state, label);
+        }
+        tauri::WindowEvent::Focused(false) => {
+            use tauri::Emitter;
+            let _ = window.emit_to(
+                tauri::EventTarget::webview_window(label),
+                "remotehub-session-input-pause",
+                (),
+            );
+        }
+        tauri::WindowEvent::Resized(_) if window.is_minimized().unwrap_or(false) => {
+            use tauri::Emitter;
+            let _ = window.emit_to(
+                tauri::EventTarget::webview_window(label),
+                "remotehub-session-input-pause",
+                (),
+            );
+        }
+        _ => {}
+    }
+    true
+}
+
+pub(crate) fn destroy_after_main_close(window: &tauri::Window) {
+    if let Some(state) = window.try_state::<Arc<DesktopVideoState>>() {
+        if let Ok(Some(label)) = current_label(&state) {
+            if let Some(remote) = window.get_webview_window(&label) {
+                let _ = remote.destroy();
+            }
+        }
+    }
+}
+
+pub(super) fn still_open(state: &DesktopVideoState, label: &str) -> bool {
+    state.remote_window.lock().is_ok_and(|slot| {
+        slot.as_ref()
+            .is_some_and(|slot| slot.label == label && !slot.closing)
+    })
+}
+
+pub(super) fn reservation_busy(state: &DesktopVideoState) -> bool {
+    state.remote_window.lock().map_or(true, |slot| {
+        slot.as_ref()
+            .is_some_and(|entry| entry.closing || entry.intent.is_some())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn replaced_or_closing_label_cannot_use_or_clear_another_session_owner() {
+        let state = DesktopVideoState::new();
+        let owner = "remote-session-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let stale = "remote-session-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        *state.remote_window.lock().unwrap() = Some(Slot {
+            label: owner.to_owned(),
+            intent: None,
+            closing: false,
+        });
+        let session = Arc::new(Session::owned(Role::Viewer, true, owner));
+        *state.active.lock().unwrap() = Some(session.clone());
+
+        assert!(still_open(&state, owner));
+        assert!(!still_open(&state, stale));
+        assert!(active_for(&state, stale).unwrap().is_none());
+        clear_slot(&state, stale);
+        assert_eq!(current_label(&state).unwrap().as_deref(), Some(owner));
+        assert_eq!(active_for(&state, owner).unwrap().unwrap().id, session.id);
+
+        state
+            .remote_window
+            .lock()
+            .unwrap()
+            .as_mut()
+            .unwrap()
+            .closing = true;
+        assert!(!still_open(&state, owner));
+        assert_eq!(session.snapshot().phase, Phase::Starting);
+        active_for(&state, owner).unwrap().unwrap().request_stop();
+        assert_eq!(session.snapshot().phase, Phase::Stopping);
+        clear_slot(&state, owner);
+        assert!(current_label(&state).unwrap().is_none());
+    }
+}

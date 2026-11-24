@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "public-session-window",
+  "description": "Dedicated remote view; no main window, invitation picker, capture probe or settings rights",
+  "windows": ["remote-session-*"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-public-session-window-attach",
+    "allow-public-session-window-snapshot",
+    "allow-public-video-status",
+    "allow-public-video-next-frame",
+    "allow-public-video-stop",
+    "allow-public-control-send-input"
+  ]
+}

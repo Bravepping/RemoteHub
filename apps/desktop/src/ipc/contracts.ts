@@ -26,6 +26,7 @@ export interface RuntimeInfo {
   public_video_available?: boolean;
   public_control_available?: boolean;
   public_invitation_picker?: boolean;
+  public_dedicated_session?: boolean;
   public_video_profile_consumed?: boolean;
   lan_input_queue_test?: boolean;
   app_version: string;
@@ -83,6 +84,7 @@ const flags = [
   'public_video_available',
   'public_control_available',
   'public_invitation_picker',
+  'public_dedicated_session',
   'public_video_profile_consumed',
   'lan_input_queue_test',
   'p004_enabled',

@@ -2,14 +2,22 @@ pub(crate) fn origin(window: &tauri::WebviewWindow) -> Result<(), String> {
     let url = window.url().map_err(|_| "WINDOW_URL_UNAVAILABLE")?;
     origin_url(window.label(), &url)
 }
+#[cfg(feature = "v2-session-window")]
+pub(crate) fn origin_for(window: &tauri::WebviewWindow, expected: &str) -> Result<(), String> {
+    let url = window.url().map_err(|_| "WINDOW_URL_UNAVAILABLE")?;
+    origin_url_for(window.label(), expected, &url)
+}
 pub(crate) fn origin_url(label: &str, url: &tauri::Url) -> Result<(), String> {
+    origin_url_for(label, "main", url)
+}
+fn origin_url_for(label: &str, expected: &str, url: &tauri::Url) -> Result<(), String> {
     let app = (url.scheme() == "tauri" && url.host_str() == Some("localhost"))
         || (url.scheme() == "http" && url.host_str() == Some("tauri.localhost"))
         || (cfg!(debug_assertions)
             && url.scheme() == "http"
             && url.host_str() == Some("127.0.0.1")
             && url.port() == Some(1420));
-    if label != "main" || !app {
+    if label != expected || !app {
         return Err("LOCAL_MAIN_WINDOW_REQUIRED".into());
     }
     Ok(())
