@@ -20,10 +20,8 @@ use hub_identity::{
 use sha2::{Digest, Sha256};
 use std::{
     ffi::OsStr,
-    fs::File,
     io::{self, Read, Write},
     net::{Ipv4Addr, SocketAddrV4},
-    os::{fd::AsFd, unix::fs::FileTypeExt},
     process::{ExitCode, Stdio},
     sync::{mpsc, Arc},
     thread,
@@ -787,12 +785,54 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
         .map_err(|_| "test runtime")
 }
 
-fn is_pipe(endpoint: impl AsFd) -> bool {
+#[cfg(target_os = "linux")]
+fn is_pipe(endpoint: impl std::os::fd::AsFd) -> bool {
+    use std::{fs::File, os::unix::fs::FileTypeExt};
+
     endpoint
         .as_fd()
         .try_clone_to_owned()
         .and_then(|fd| File::from(fd).metadata())
         .is_ok_and(|meta| meta.file_type().is_fifo())
+}
+
+#[cfg(windows)]
+fn is_pipe(endpoint: impl std::os::windows::io::AsHandle) -> bool {
+    use std::{os::windows::io::AsRawHandle, ptr};
+    use windows_sys::Win32::{
+        Storage::FileSystem::{GetFileType, FILE_TYPE_PIPE},
+        System::Pipes::GetNamedPipeInfo,
+    };
+
+    let handle = endpoint.as_handle();
+    let raw = handle.as_raw_handle();
+    // SAFETY: the standard I/O handle is borrowed and remains live for
+    // both queries. GetNamedPipeInfo takes optional output pointers.
+    // GetFileType alone also classifies sockets as PIPE on Windows.
+    unsafe {
+        GetFileType(raw) == FILE_TYPE_PIPE
+            && GetNamedPipeInfo(
+                raw,
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+                ptr::null_mut(),
+            ) != 0
+    }
+}
+
+#[cfg(test)]
+mod pipe_tests {
+    use super::*;
+
+    #[test]
+    fn distinguishes_local_pipe_ends_from_a_regular_file() {
+        let (reader, writer) = io::pipe().unwrap();
+        assert!(is_pipe(reader));
+        assert!(is_pipe(writer));
+        let file = std::fs::File::open(std::env::current_exe().unwrap()).unwrap();
+        assert!(!is_pipe(file));
+    }
 }
 
 fn run_worker(role: SessionRole, lane: Lane) -> Result<()> {

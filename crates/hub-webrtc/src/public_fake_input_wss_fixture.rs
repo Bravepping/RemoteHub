@@ -139,7 +139,10 @@ impl FixtureWssServer {
     /// lifetime. Canceling the wait or dropping the owner aborts the task.
     #[cfg(any(
         test,
-        all(target_os = "linux", feature = "v2-public-fake-input-process-check")
+        all(
+            any(target_os = "linux", all(windows, target_arch = "x86_64")),
+            feature = "v2-public-fake-input-process-check"
+        )
     ))]
     pub(super) async fn wait(self) -> Result<()> {
         let deadline = self.deadline;
