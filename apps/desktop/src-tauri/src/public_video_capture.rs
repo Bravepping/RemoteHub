@@ -40,12 +40,25 @@ fn safe_encoder_error(error: &hub_encode_win::EncodeError) -> &'static str {
         EncodeError::Capture(CaptureError::AccessLost) => "PUBLIC_VIDEO_CAPTURE_DISPLAY_CHANGED",
         EncodeError::Capture(CaptureError::NoFrames)
         | EncodeError::Timeout("live first DXGI frame") => "PUBLIC_VIDEO_CAPTURE_NO_DESKTOP_FRAME",
+        EncodeError::Capture(CaptureError::FrameFormat(10)) => {
+            "PUBLIC_VIDEO_CAPTURE_FRAME_FORMAT_FLOAT16"
+        }
+        EncodeError::Capture(CaptureError::FrameFormat(23 | 24 | 89)) => {
+            "PUBLIC_VIDEO_CAPTURE_FRAME_FORMAT_10BIT"
+        }
+        EncodeError::Capture(CaptureError::FrameFormat(_)) => "PUBLIC_VIDEO_CAPTURE_FRAME_FORMAT",
         EncodeError::Capture(CaptureError::Dxgi { stage, code }) => match (*stage, *code) {
             (_, 0x80070005) => "PUBLIC_VIDEO_CAPTURE_DXGI_ACCESS_DENIED",
-            ("DUPLICATE_OUTPUT", 0x887a0022) => "PUBLIC_VIDEO_CAPTURE_DXGI_LIMIT",
+            ("DUPLICATE_OUTPUT" | "DUPLICATE_OUTPUT1", 0x887a0022) => {
+                "PUBLIC_VIDEO_CAPTURE_DXGI_LIMIT"
+            }
             (_, 0x887a0028) => "PUBLIC_VIDEO_CAPTURE_DXGI_SESSION_DISCONNECTED",
-            ("DUPLICATE_OUTPUT", 0x887a0004) => "PUBLIC_VIDEO_CAPTURE_DXGI_UNSUPPORTED",
-            ("DUPLICATE_OUTPUT", _) => "PUBLIC_VIDEO_CAPTURE_DXGI_DUPLICATION_FAILED",
+            ("DUPLICATE_OUTPUT" | "DUPLICATE_OUTPUT1", 0x887a0004) => {
+                "PUBLIC_VIDEO_CAPTURE_DXGI_UNSUPPORTED"
+            }
+            ("DUPLICATE_OUTPUT" | "DUPLICATE_OUTPUT1", _) => {
+                "PUBLIC_VIDEO_CAPTURE_DXGI_DUPLICATION_FAILED"
+            }
             ("ACQUIRE_FRAME" | "TEXTURE_CAST" | "CREATE_STAGING" | "MAP_STAGING", _) => {
                 "PUBLIC_VIDEO_CAPTURE_DXGI_FRAME_FAILED"
             }
@@ -364,6 +377,14 @@ mod tests {
                 "NO_ATTACHED_PRIMARY_OUTPUT"
             ))),
             "PUBLIC_VIDEO_CAPTURE_NO_PRIMARY_OUTPUT"
+        );
+        assert_eq!(
+            safe_encoder_error(&EncodeError::Capture(CaptureError::FrameFormat(24))),
+            "PUBLIC_VIDEO_CAPTURE_FRAME_FORMAT_10BIT"
+        );
+        assert_eq!(
+            safe_encoder_error(&EncodeError::Capture(CaptureError::FrameFormat(10))),
+            "PUBLIC_VIDEO_CAPTURE_FRAME_FORMAT_FLOAT16"
         );
         assert_eq!(
             safe_encoder_error(&EncodeError::Native("private native detail".into())),

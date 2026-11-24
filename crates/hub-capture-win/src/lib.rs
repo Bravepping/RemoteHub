@@ -6,6 +6,8 @@ use thiserror::Error;
 mod dxgi;
 #[cfg(windows)]
 pub use dxgi::DxgiCapture;
+#[cfg(any(windows, test))]
+mod surface;
 
 #[derive(Debug, Error)]
 pub enum CaptureError {
@@ -19,6 +21,8 @@ pub enum CaptureError {
     Dxgi { stage: &'static str, code: u32 },
     #[error("CAPTURE_DXGI_STATE: {0}")]
     DxgiState(&'static str),
+    #[error("CAPTURE_DXGI_FRAME_FORMAT: {0}")]
+    FrameFormat(u32),
     #[error("CAPTURE_ACCESS_LOST: 桌面或分辨率已改变，请重新运行实验")]
     AccessLost,
     #[error("CAPTURE_TIMEOUT: 时间范围内没有收到桌面帧")]
