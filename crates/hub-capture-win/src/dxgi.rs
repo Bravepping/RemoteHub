@@ -13,15 +13,14 @@ use windows::{
     },
 };
 
-fn native_error(error: windows::core::Error) -> CaptureError {
+fn native_error(stage: &'static str, error: windows::core::Error) -> CaptureError {
     if error.code() == DXGI_ERROR_ACCESS_LOST {
         CaptureError::AccessLost
     } else {
-        CaptureError::Unavailable(format!(
-            "{} (HRESULT {:#010x})",
-            error.message(),
-            error.code().0 as u32
-        ))
+        CaptureError::Dxgi {
+            stage,
+            code: error.code().0 as u32,
+        }
     }
 }
 
@@ -59,14 +58,15 @@ impl DxgiCapture {
     pub fn new() -> Result<Self, CaptureError> {
         // All COM objects are owned by this capture instance. No raw interface pointer escapes.
         unsafe {
-            let factory: IDXGIFactory1 = CreateDXGIFactory1().map_err(native_error)?;
+            let factory: IDXGIFactory1 =
+                CreateDXGIFactory1().map_err(|e| native_error("CREATE_FACTORY", e))?;
             let primary = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
             let mut adapter_index = 0;
             loop {
                 let adapter = match factory.EnumAdapters1(adapter_index) {
                     Ok(adapter) => adapter,
                     Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
-                    Err(e) => return Err(native_error(e)),
+                    Err(e) => return Err(native_error("ENUM_ADAPTERS", e)),
                 };
                 adapter_index += 1;
                 let mut output_index = 0;
@@ -74,10 +74,12 @@ impl DxgiCapture {
                     let output = match adapter.EnumOutputs(output_index) {
                         Ok(output) => output,
                         Err(e) if e.code() == DXGI_ERROR_NOT_FOUND => break,
-                        Err(e) => return Err(native_error(e)),
+                        Err(e) => return Err(native_error("ENUM_OUTPUTS", e)),
                     };
                     output_index += 1;
-                    let description = output.GetDesc().map_err(native_error)?;
+                    let description = output
+                        .GetDesc()
+                        .map_err(|e| native_error("OUTPUT_DESC", e))?;
                     if description.Monitor != primary || !description.AttachedToDesktop.as_bool() {
                         continue;
                     }
@@ -86,7 +88,9 @@ impl DxgiCapture {
                             "首轮实验尚不支持旋转显示器".into(),
                         ));
                     }
-                    let base_adapter: IDXGIAdapter = adapter.cast().map_err(native_error)?;
+                    let base_adapter: IDXGIAdapter = adapter
+                        .cast()
+                        .map_err(|e| native_error("ADAPTER_CAST", e))?;
                     let mut device = None;
                     let mut context = None;
                     D3D11CreateDevice(
@@ -100,14 +104,19 @@ impl DxgiCapture {
                         None,
                         Some(&mut context),
                     )
-                    .map_err(native_error)?;
+                    .map_err(|e| native_error("CREATE_DEVICE", e))?;
                     let device = device
                         .ok_or_else(|| CaptureError::Unavailable("D3D11 device missing".into()))?;
                     let context = context
                         .ok_or_else(|| CaptureError::Unavailable("D3D11 context missing".into()))?;
-                    let output1: IDXGIOutput1 = output.cast().map_err(native_error)?;
-                    let duplication = output1.DuplicateOutput(&device).map_err(native_error)?;
-                    let adapter_desc = adapter.GetDesc1().map_err(native_error)?;
+                    let output1: IDXGIOutput1 =
+                        output.cast().map_err(|e| native_error("OUTPUT_CAST", e))?;
+                    let duplication = output1
+                        .DuplicateOutput(&device)
+                        .map_err(|e| native_error("DUPLICATE_OUTPUT", e))?;
+                    let adapter_desc = adapter
+                        .GetDesc1()
+                        .map_err(|e| native_error("ADAPTER_DESC", e))?;
                     let end = adapter_desc
                         .Description
                         .iter()
@@ -148,12 +157,14 @@ impl DxgiCapture {
             {
                 Ok(()) => (),
                 Err(e) if e.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(None),
-                Err(e) => return Err(native_error(e)),
+                Err(e) => return Err(native_error("ACQUIRE_FRAME", e)),
             }
             let _acquired = AcquiredFrame(&self.duplication);
             let resource = resource
                 .ok_or_else(|| CaptureError::Unavailable("DXGI frame resource missing".into()))?;
-            let texture: ID3D11Texture2D = resource.cast().map_err(native_error)?;
+            let texture: ID3D11Texture2D = resource
+                .cast()
+                .map_err(|e| native_error("TEXTURE_CAST", e))?;
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             texture.GetDesc(&mut desc);
             if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM {
@@ -167,7 +178,7 @@ impl DxgiCapture {
                 let mut staging = None;
                 self.device
                     .CreateTexture2D(&desc, None, Some(&mut staging))
-                    .map_err(native_error)?;
+                    .map_err(|e| native_error("CREATE_STAGING", e))?;
                 self.staging = staging;
                 self.width = desc.Width;
                 self.height = desc.Height;
@@ -180,7 +191,7 @@ impl DxgiCapture {
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             self.context
                 .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                .map_err(native_error)?;
+                .map_err(|e| native_error("MAP_STAGING", e))?;
             let _mapped = MappedTexture(&self.context, staging);
             if mapped.pData.is_null()
                 || self.height == 0

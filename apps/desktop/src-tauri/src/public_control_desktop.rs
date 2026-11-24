@@ -224,6 +224,7 @@ pub(crate) async fn run_host(
     mut stop: watch::Receiver<bool>,
     hwnd: usize,
     peer_fingerprint: String,
+    mut first_video: watch::Receiver<bool>,
     status: watch::Sender<InputState>,
 ) -> Result<(), &'static str> {
     status.send_replace(InputState::ViewOnly);
@@ -233,6 +234,20 @@ pub(crate) async fn run_host(
         }
         let scope = transport.scope();
         let until = transport.deadline().min(Instant::now() + LIVE_WINDOW);
+        if local_halt(&stop, until, true).is_some() {
+            return Ok(());
+        }
+        // Do not offer control of a desktop we could not capture and send.
+        // Until then this owner has no grant, input queue or injector.
+        match live(&mut stop, until, true, async {
+            Ok(first_video.wait_for(|&sent| sent).await.is_ok())
+        })
+        .await
+        {
+            Ok(true) => (),
+            Ok(false) => return Ok(()),
+            Err(exit) => return result(Err(exit)),
+        }
         if local_halt(&stop, until, true).is_some() {
             return Ok(());
         }

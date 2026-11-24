@@ -342,8 +342,16 @@ async fn exercise(abrupt: bool, path: TestPath, traffic: TestMedia) {
     let (_viewer_stop, viewer_rx) = watch::channel(false);
     let (host_state_tx, mut host_state) = watch::channel(ScopedWssState::Negotiating);
     let (viewer_state_tx, mut viewer_state) = watch::channel(ScopedWssState::Negotiating);
+    #[cfg(feature = "v2-public-control")]
+    let (first_au, sent_au) = watch::channel(false);
     let (host_media, viewer_media, mut producer, mut consumer) = if traffic != TestMedia::None {
         let (host_media, producer) = ScopedVideoMedia::host();
+        #[cfg(feature = "v2-public-control")]
+        let host_media = {
+            let mut host_media = host_media;
+            host_media.notify_first_host_video(first_au);
+            host_media
+        };
         let (viewer_media, consumer) = ScopedVideoMedia::viewer();
         (
             Some(host_media),
@@ -419,7 +427,11 @@ async fn exercise(abrupt: bool, path: TestPath, traffic: TestMedia) {
             assert_ne!(host_peer, viewer_peer);
         }
         if let (Some(producer), Some(consumer)) = (producer.as_mut(), consumer.as_mut()) {
+            #[cfg(feature = "v2-public-control")]
+            assert!(!*sent_au.borrow(), "a connected path alone is not media");
             loopback_access_units(traffic, producer, consumer).await;
+            #[cfg(feature = "v2-public-control")]
+            assert!(*sent_au.borrow(), "complete access unit routed");
         }
         if abrupt {
             tls.task.abort();

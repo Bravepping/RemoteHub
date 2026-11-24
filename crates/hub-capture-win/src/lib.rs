@@ -15,6 +15,8 @@ pub enum CaptureError {
     InvalidArgument(&'static str),
     #[error("CAPTURE_UNAVAILABLE: {0}")]
     Unavailable(String),
+    #[error("CAPTURE_DXGI: {stage} (HRESULT 0x{code:08x})")]
+    Dxgi { stage: &'static str, code: u32 },
     #[error("CAPTURE_ACCESS_LOST: 桌面或分辨率已改变，请重新运行实验")]
     AccessLost,
     #[error("CAPTURE_TIMEOUT: 时间范围内没有收到桌面帧")]

@@ -606,6 +606,8 @@ async fn run(
             actor = pending.establish() => actor?,
         };
         #[cfg(feature = "v2-public-control-desktop")]
+        let (first_video_sent, first_video) = watch::channel(false);
+        #[cfg(feature = "v2-public-control-desktop")]
         let run_input = {
             let owner = session.clone();
             let fingerprint = peer.fingerprint().to_owned();
@@ -616,6 +618,7 @@ async fn run(
                         input_stop,
                         hwnd,
                         fingerprint,
+                        first_video,
                         owner.input_state.clone(),
                     )
                     .await
@@ -638,6 +641,14 @@ async fn run(
         };
         if session.role == Role::Host {
             let (media, sender) = ScopedVideoMedia::host();
+            #[cfg(feature = "v2-public-control-desktop")]
+            let media = {
+                let mut media = media;
+                if control_launch {
+                    media.notify_first_host_video(first_video_sent);
+                }
+                media
+            };
             let phase = phase_tx.subscribe();
             let actor_stop = stop.clone();
             let run_actor = async {
@@ -742,7 +753,8 @@ mod tests {
         assert_eq!(json["end_reason"], "peer_left");
         assert!(json.get("elapsed_ms").is_none());
 
-        let initial = serde_json::to_value(&*Session::new(Role::Host, false).status.borrow()).unwrap();
+        let initial =
+            serde_json::to_value(&*Session::new(Role::Host, false).status.borrow()).unwrap();
         assert!(initial.get("end_reason").is_none());
         assert!(initial.get("elapsed_ms").is_none());
 

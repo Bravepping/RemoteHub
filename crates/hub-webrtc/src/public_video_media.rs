@@ -38,6 +38,7 @@ enum Port {
 pub struct ScopedVideoMedia {
     port: Port,
     revoke: watch::Sender<bool>,
+    first_host_video: Option<watch::Sender<bool>>,
 }
 
 pub struct ScopedVideoSender {
@@ -58,6 +59,7 @@ impl ScopedVideoMedia {
             Self {
                 port: Port::Host(rx),
                 revoke,
+                first_host_video: None,
             },
             ScopedVideoSender { queue: tx, closed },
         )
@@ -70,9 +72,18 @@ impl ScopedVideoMedia {
             Self {
                 port: Port::Viewer(tx),
                 revoke,
+                first_host_video: None,
             },
             ScopedVideoReceiver { queue: rx, closed },
         )
+    }
+
+    /// One-shot notification after a complete host AU has been sent to the
+    /// verified transport. This does not attest that the peer displayed it.
+    #[cfg(feature = "v2-public-control")]
+    pub fn notify_first_host_video(&mut self, sender: watch::Sender<bool>) {
+        debug_assert_eq!(self.role(), Role::Host);
+        self.first_host_video = Some(sender);
     }
 
     pub(crate) fn role(&self) -> Role {
@@ -92,7 +103,7 @@ impl ScopedVideoMedia {
         state: &watch::Sender<ScopedWssState>,
     ) -> Result<(), &'static str> {
         match &mut self.port {
-            Port::Host(au) => run_host(ice, state, au).await,
+            Port::Host(au) => run_host(ice, state, au, &mut self.first_host_video).await,
             Port::Viewer(frames) => run_viewer(ice, frames).await,
         }
     }
@@ -174,6 +185,7 @@ async fn run_host(
     ice: &mut PublicVideoScopedIce<'_>,
     state: &watch::Sender<ScopedWssState>,
     queue: &mut mpsc::Receiver<Vec<Packet>>,
+    first_video: &mut Option<watch::Sender<bool>>,
 ) -> Result<(), &'static str> {
     let initial_until = Instant::now() + START_WAIT;
     let mut route = None;
@@ -200,6 +212,9 @@ async fn run_host(
                         tokio::task::yield_now().await;
                     }
                     ice.send_rtp(packet, wall_seconds()?).await?;
+                }
+                if let Some(first_video) = first_video.take() {
+                    first_video.send_replace(true);
                 }
             }
             Ok(None) => return Ok(()),
