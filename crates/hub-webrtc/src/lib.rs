@@ -37,6 +37,8 @@ pub mod public_fake_input;
 #[cfg(feature = "v2-public-fake-input-proof")]
 mod public_fake_input_pair;
 #[cfg(feature = "v2-public-fake-input-proof")]
+pub mod public_fake_input_profile;
+#[cfg(feature = "v2-public-fake-input-proof")]
 mod public_fake_input_sdp;
 #[cfg(any(
     all(test, feature = "v2-public-fake-input-proof"),
