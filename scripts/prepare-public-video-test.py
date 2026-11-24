@@ -10,6 +10,7 @@ import getpass
 import hashlib
 import hmac
 import ipaddress
+import io
 import json
 import os
 from pathlib import Path
@@ -22,12 +23,15 @@ import sys
 import time
 import uuid
 import warnings
+import zipfile
 
 MAX_CA_DER = 16 * 1024
 MAX_CA_FILE = 24 * 1024
 MIN_TTL, MAX_TTL = 180, 600
 DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 FILES = ("host.json", "viewer.json", "wss.env")
+BATCH_FILES = ("host-test-rounds.zip", "viewer-test-rounds.zip", "batch.json", "wss.env")
+BATCH_OFFSETS = (0, 0, 0, 0, 450, 450, 900, 1200)
 VIDEO = "public-video"
 CONTROL = "public-control"
 PRIVATE = tuple(map(ipaddress.IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
@@ -84,6 +88,8 @@ def parser():
                    help="Profile purpose (default: public-video). public-control is explicit and "
                    "requires the separate enabled server and desktop build.")
     p.add_argument("--ttl", type=int, default=300, help="Lifetime in seconds (180–600; default 300).")
+    p.add_argument("--batch", action="store_true",
+                   help="Explicit public-control only: eight one-shot rounds in a 30-minute window.")
     p.add_argument("--self-test", action="store_true", help="Run standalone synthetic tests; use by itself.")
     return p
 
@@ -198,6 +204,8 @@ def normalize(args):
         raise Invalid("Host and viewer must be two distinct verified devices.")
     if not MIN_TTL <= args.ttl <= MAX_TTL:
         raise Invalid("TTL must be 180–600 seconds.")
+    if args.batch and args.purpose != CONTROL:
+        raise Invalid("A batch requires the explicit public-control purpose.")
     args.tls_cert, args.tls_key = server_path(args.tls_cert), server_path(args.tls_key)
     args.ca_der = read_ca(args.ca)
     digest = hashlib.sha256(args.ca_der).hexdigest()
@@ -357,6 +365,47 @@ def make_kit(args, secret, now):
     return encoded, expires
 
 
+def make_batch(args, secret, now, session_path):
+    if args.purpose != CONTROL:
+        raise Invalid("A batch requires the explicit public-control purpose.")
+    args = argparse.Namespace(**vars(args))
+    args.ttl = MAX_TTL
+    stop_at = now + BATCH_OFFSETS[-1] + MAX_TTL
+    rounds = {"version": 1, "expires_at": stop_at, "host_ipv4": args.host_egress_ip,
+              "viewer_ipv4": args.viewer_egress_ip, "rooms": []}
+    buffers = {role: io.BytesIO() for role in ("host", "viewer")}
+    with (zipfile.ZipFile(buffers["host"], "w", compression=zipfile.ZIP_DEFLATED) as host_zip,
+          zipfile.ZipFile(buffers["viewer"], "w", compression=zipfile.ZIP_DEFLATED) as viewer_zip):
+        for index, offset in enumerate(BATCH_OFFSETS, 1):
+            not_before = now + offset
+            kit, expires = make_kit(args, secret, not_before)
+            host = json.loads(kit["host.json"])
+            viewer = json.loads(kit["viewer.json"])
+            rounds["rooms"].append({
+                "room": uuid.UUID(host["room"]).hex,
+                "not_before": not_before,
+                "expires_at": expires,
+                "host_token": host["relay_token"],
+                "viewer_token": viewer["relay_token"],
+            })
+            for role, archive in (("host", host_zip), ("viewer", viewer_zip)):
+                archive.writestr(f"round-{index:02d}.json", kit[role + ".json"])
+    env = {
+        "REMOTEHUB_V2_MODE": CONTROL,
+        "REMOTEHUB_V2_BIND": args.bind,
+        "REMOTEHUB_V2_TLS_CERT": args.tls_cert,
+        "REMOTEHUB_V2_TLS_KEY": args.tls_key,
+        "REMOTEHUB_V2_PUBLIC_CONTROL_BATCH_FILE": str(Path(session_path).absolute() / "batch.json"),
+    }
+    return {
+        "host-test-rounds.zip": buffers["host"].getvalue(),
+        "viewer-test-rounds.zip": buffers["viewer"].getvalue(),
+        "batch.json": json.dumps(rounds, indent=2).encode("ascii") + b"\n",
+        "wss.env": ("# Private batch reference. Transfer only the separate role archives.\n"
+                    + "".join(f"export {name}={shlex.quote(value)}\n" for name, value in env.items())).encode("utf-8"),
+    }, stop_at
+
+
 def open_output_parent(path):
     # Walk with no symlinks and refuse untrusted owners/writable ancestors
     # (a trusted sticky directory such as /tmp may protect its child entry).
@@ -414,6 +463,9 @@ def write_private(directory, name, data):
 
 
 def publish(parent, name, files, move):
+    filenames = next((allowed for allowed in (FILES, BATCH_FILES) if files.keys() == set(allowed)), None)
+    if filenames is None:
+        raise Invalid("Unexpected private kit contents.")
     stage = ".remotehub-test-stage-" + secrets.token_hex(16)
     old_umask = os.umask(0o077)
     try:
@@ -423,7 +475,7 @@ def publish(parent, name, files, move):
     directory = None
     try:
         directory = os.open(stage, DIR_FLAGS, dir_fd=parent)
-        for filename in FILES:
+        for filename in filenames:
             write_private(directory, filename, files[filename])
         os.fsync(directory)
         move(parent, stage, name)
@@ -436,7 +488,7 @@ def publish(parent, name, files, move):
             pass
         else:
             if directory is not None:
-                for filename in FILES:
+                for filename in filenames:
                     try:
                         os.unlink(filename, dir_fd=directory)
                     except FileNotFoundError:
@@ -460,7 +512,9 @@ def main(argv):
         try:
             secret = read_turn_config(args) if args.turn_config else read_turn_secret()
             try:
-                files, expires = make_kit(args, secret, int(time.time()))
+                now = int(time.time())
+                files, expires = (make_batch(args, secret, now, args.out_dir) if args.batch
+                                  else make_kit(args, secret, now))
             finally:
                 secret[:] = b"\0" * len(secret)
             publish(parent, name, files, move)
@@ -475,7 +529,14 @@ def main(argv):
     except (OSError, ValueError):
         print("Could not prepare a complete private kit. Check the output path and filesystem.", file=sys.stderr)
         return 2
-    print("Created host.json, viewer.json and wss.env (no services started).")
+    if args.batch:
+        print("Created host-test-rounds.zip and viewer-test-rounds.zip (no services started).")
+        base = expires - BATCH_OFFSETS[-1] - MAX_TTL
+        for i, offset in enumerate(BATCH_OFFSETS, 1):
+            print(f"Round {i:02d}: UTC {time.strftime('%H:%M:%S', time.gmtime(base + offset))}"
+                  f" to {time.strftime('%H:%M:%S', time.gmtime(base + offset + MAX_TTL - 60))} (start window)")
+    else:
+        print("Created host.json, viewer.json and wss.env (no services started).")
     print(f"CA SHA-256: {args.ca_sha256}")
     print(f"Expires at Unix UTC: {expires}; desktop startup requires 60 seconds remaining.")
     return 0
@@ -531,6 +592,34 @@ def self_test():
         def test_rust_coturn_known_vector(self):
             username = "1300:00000000-0000-4000-8000-000000000001"
             self.assertEqual(turn_credential(fake_secret, username), "0ldqFwNKnG3DNOQTbQ9ED2WAfr8=")
+
+        def test_batch_limits_and_private_role_archives(self):
+            args = normalize(self.args(purpose=CONTROL))
+            path = self.root / "kit"
+            files, expires = make_batch(args, fake_secret, 1000, path)
+            batch = json.loads(files["batch.json"])
+            self.assertEqual((batch["version"], batch["expires_at"], expires), (1, 2800, 2800))
+            self.assertEqual(len(batch["rooms"]), 8)
+            self.assertEqual(len({r["room"] for r in batch["rooms"]}), 8)
+            self.assertEqual(len({r[rk] for r in batch["rooms"] for rk in ("host_token", "viewer_token")}), 16)
+            self.assertNotIn(batch["rooms"][0]["host_token"].encode(), files["wss.env"])
+            for role, other in (("host", "viewer"), ("viewer", "host")):
+                with zipfile.ZipFile(io.BytesIO(files[f"{role}-test-rounds.zip"])) as archive:
+                    self.assertEqual(archive.namelist(), [f"round-{n:02}.json" for n in range(1, 9)])
+                    for offset, room, file in zip(BATCH_OFFSETS, batch["rooms"], archive.namelist()):
+                        config = json.loads(archive.read(file))
+                        self.assertEqual(room["not_before"], 1000 + offset)
+                        self.assertEqual(config["expires_at"], room["not_before"] + 600)
+                        self.assertEqual(config["expires_at"], room["expires_at"])
+                        self.assertEqual(config["relay_token"], room[f"{role}_token"])
+                        self.assertNotIn(room[f"{other}_token"].encode(), archive.read(file))
+            parent, name = open_output_parent(path)
+            try:
+                publish(parent, name, files, rename_noreplace())
+            finally:
+                os.close(parent)
+            self.assertEqual(set(p.name for p in path.iterdir()), set(BATCH_FILES))
+            self.assertTrue(all(stat.S_IMODE(p.stat().st_mode) == 0o600 for p in path.iterdir()))
 
         def test_profiles_and_wss_env_are_role_correct_and_private(self):
             args = normalize(self.args())

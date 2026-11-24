@@ -636,9 +636,9 @@ impl<'a> PublicVideoScopedIce<'a> {
             let clean = redact_gathered_sdp(&desc.sdp)?;
             #[cfg(feature = "v2-public-control")]
             if self.proof.control_scope().is_some() {
-                return Ok::<_, &'static str>(clean.replace("a=ice-options:trickle\r\n", ""));
+                return Ok(clean.replace("a=ice-options:trickle\r\n", ""));
             }
-            Ok(clean)
+            Ok::<_, &'static str>(clean)
         })
         .await
         .map_err(|_| WAIT)??;

@@ -29,7 +29,7 @@ path = "tests/synthetic_wss_admission.rs"
 required-features = ["v2-synthetic-admission-test"]
 
 [features]
-v2-public-control = ["hub-signal-v2/public-control"]
+v2-public-control = ["hub-signal-v2/public-control", "dep:libc"]
 v2-native-wss-consent-manual = []
 v2-synthetic-admission-test = ["hub-signal-v2/synthetic-admission", "hub-webrtc/v2-synthetic-admission-rtc-test"]
 v2-synthetic-profile-check = ["dep:hub-identity", "dep:libc", "hub-webrtc/v2-synthetic-role-profile"]

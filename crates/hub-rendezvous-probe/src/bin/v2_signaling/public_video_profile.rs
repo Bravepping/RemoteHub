@@ -20,12 +20,18 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+#[cfg(feature = "v2-public-control")]
+use tokio::sync::Notify;
 use tokio::{
     sync::mpsc,
     time::{sleep_until, timeout_at, Instant},
 };
 use uuid::Uuid;
 use zeroize::Zeroizing;
+
+#[cfg(feature = "v2-public-control")]
+#[path = "public_control_batch.rs"]
+mod batch;
 
 const EXPIRED: &str = "V2_PUBLIC_VIDEO_EXPIRED";
 const DENIED: &str = "V2_PUBLIC_VIDEO_APPROVAL_INVALID";
@@ -97,6 +103,8 @@ pub(super) struct PublicVideoApproval {
     viewer_token: Zeroizing<String>,
     expires_at: u64,
     deadline: Instant,
+    #[cfg(feature = "v2-public-control")]
+    not_before: Option<(u64, Instant)>,
 }
 
 impl PublicVideoApproval {
@@ -109,13 +117,7 @@ impl PublicVideoApproval {
         expires_at: u64,
         now: u64,
     ) -> Result<Self, &'static str> {
-        if room.is_nil()
-            || !purpose.validate_token(&host_token)
-            || !purpose.validate_token(&viewer_token)
-            || purpose.matches(&host_token, &viewer_token)
-        {
-            return Err(DENIED);
-        }
+        Self::check_invitation(purpose, room, &host_token, &viewer_token)?;
         Ok(Self {
             purpose,
             room,
@@ -124,7 +126,25 @@ impl PublicVideoApproval {
             viewer_token,
             expires_at,
             deadline: Instant::now() + remaining(expires_at, now)?,
+            #[cfg(feature = "v2-public-control")]
+            not_before: None,
         })
+    }
+
+    fn check_invitation(
+        purpose: Purpose,
+        room: Uuid,
+        host_token: &str,
+        viewer_token: &str,
+    ) -> Result<(), &'static str> {
+        if room.is_nil()
+            || !purpose.validate_token(host_token)
+            || !purpose.validate_token(viewer_token)
+            || purpose.matches(host_token, viewer_token)
+        {
+            return Err(DENIED);
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -151,13 +171,21 @@ impl PublicVideoApproval {
     }
 
     fn deadline(&self) -> Result<Instant, &'static str> {
-        let mono = Instant::now();
+        self.deadline_at(now()?, Instant::now())
+    }
+
+    fn deadline_at(&self, wall: u64, mono: Instant) -> Result<Instant, &'static str> {
         if mono >= self.deadline {
             return Err(EXPIRED);
         }
-        Ok(self
-            .deadline
-            .min(mono + remaining(self.expires_at, now()?)?))
+        #[cfg(feature = "v2-public-control")]
+        if self
+            .not_before
+            .is_some_and(|(begin_wall, begin_mono)| wall < begin_wall || mono < begin_mono)
+        {
+            return Err(EXPIRED);
+        }
+        Ok(self.deadline.min(mono + remaining(self.expires_at, wall)?))
     }
 
     fn has_source(&self, observed_ip: IpAddr) -> bool {
@@ -215,10 +243,46 @@ struct OneRoom {
 struct PublicVideoApp {
     approval: PublicVideoApproval,
     room: Mutex<OneRoom>,
-    active: AtomicUsize,
+    active: Arc<AtomicUsize>,
+    #[cfg(feature = "v2-public-control")]
+    exit_wake: Option<Notify>,
 }
 
 impl PublicVideoApp {
+    fn new(approval: PublicVideoApproval) -> Self {
+        Self {
+            approval,
+            room: Mutex::new(OneRoom::default()),
+            active: Arc::default(),
+            #[cfg(feature = "v2-public-control")]
+            exit_wake: None,
+        }
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    async fn wait_for_one_shot_exit(&self, wake: &Notify) {
+        let mut wall_check = tokio::time::interval(Duration::from_millis(250));
+        loop {
+            let Ok(deadline) = self.approval.deadline() else {
+                return;
+            };
+            let closed = match self.room.lock() {
+                Ok(room) => room.closed,
+                // Never hold the listener open with poisoned state.
+                Err(_) => return,
+            };
+            if closed && self.active.load(Ordering::Acquire) == 0 {
+                // Both role handlers had a chance to send PeerLeft/close.
+                return;
+            }
+            tokio::select! {
+                _ = sleep_until(deadline) => return,
+                _ = wall_check.tick() => {},
+                _ = wake.notified() => {},
+            }
+        }
+    }
+
     fn reserve(self: &Arc<Self>) -> Option<Slot> {
         let mut active = self.active.load(Ordering::Acquire);
         while active < MAX_CONNECTIONS {
@@ -340,6 +404,10 @@ impl PublicVideoApp {
                 let _ = peer.tx.try_send(message.clone());
             }
         }
+        #[cfg(feature = "v2-public-control")]
+        if let Some(wake) = &self.exit_wake {
+            wake.notify_one();
+        }
     }
 }
 
@@ -348,6 +416,10 @@ struct Slot(Arc<PublicVideoApp>);
 impl Drop for Slot {
     fn drop(&mut self) {
         self.0.active.fetch_sub(1, Ordering::AcqRel);
+        #[cfg(feature = "v2-public-control")]
+        if let Some(wake) = &self.0.exit_wake {
+            wake.notify_one();
+        }
     }
 }
 
@@ -360,35 +432,59 @@ impl Drop for Joined<'_> {
 }
 
 pub(super) fn public_video_router(approval: PublicVideoApproval) -> Router {
-    let path = approval.purpose.path();
-    let app = Arc::new(PublicVideoApp {
-        approval,
-        room: Mutex::new(OneRoom::default()),
-        active: AtomicUsize::new(0),
-    });
-    Router::new().route(path, get(upgrade)).with_state(app)
+    router(Arc::new(PublicVideoApp::new(approval)))
+}
+
+fn router(app: Arc<PublicVideoApp>) -> Router {
+    router_with_rooms(app.approval.purpose, vec![app])
+}
+
+#[derive(Clone)]
+struct Admission {
+    #[cfg(feature = "v2-public-control")]
+    purpose: Purpose,
+    rooms: Arc<[Arc<PublicVideoApp>]>,
+}
+
+fn router_with_rooms(purpose: Purpose, rooms: Vec<Arc<PublicVideoApp>>) -> Router {
+    Router::new()
+        .route(purpose.path(), get(upgrade))
+        .with_state(Admission {
+            #[cfg(feature = "v2-public-control")]
+            purpose,
+            rooms: rooms.into(),
+        })
 }
 
 async fn upgrade(
-    State(app): State<Arc<PublicVideoApp>>,
+    State(admission): State<Admission>,
     peer: SocketPeer,
     #[cfg(feature = "v2-public-control")] OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
     #[cfg(feature = "v2-public-control")]
-    if matches!(app.approval.purpose, Purpose::Control)
-        && uri.path_and_query().map(|target| target.as_str()) != Some(app.approval.purpose.path())
+    if matches!(admission.purpose, Purpose::Control)
+        && uri.path_and_query().map(|target| target.as_str()) != Some(admission.purpose.path())
     {
         return StatusCode::FORBIDDEN.into_response();
     }
-    if app.approval.deadline().is_err() || headers.contains_key(header::ORIGIN) {
+    if headers.contains_key(header::ORIGIN) {
         return StatusCode::FORBIDDEN.into_response();
     }
     let observed_ip = match peer {
-        Ok(ConnectInfo(address)) if app.approval.has_source(address.ip()) => address.ip(),
+        Ok(ConnectInfo(address)) => address.ip(),
         _ => return StatusCode::FORBIDDEN.into_response(),
     };
+    let eligible = || {
+        admission
+            .rooms
+            .iter()
+            .filter(|app| app.approval.deadline().is_ok() && app.approval.has_source(observed_ip))
+    };
+    if eligible().next().is_none() {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let values = headers.get_all(header::AUTHORIZATION);
     let mut headers = values.iter();
     let given = headers
@@ -399,9 +495,17 @@ async fn upgrade(
     if headers.next().is_some() {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    let Some(role) = app.approval.permitted_role(observed_ip, given) else {
+    // Scan the small bounded pool, even after finding a match; no headers
+    // can nominate an app. Its exact room is still checked by HELLO.
+    let mut matches = eligible().filter_map(|app| {
+        app.approval
+            .permitted_role(observed_ip, given)
+            .map(|role| (app, role))
+    });
+    let (Some((app, role)), None) = (matches.next(), matches.next()) else {
         return StatusCode::UNAUTHORIZED.into_response();
     };
+    let app = app.clone();
     let Some(guard) = app.reserve() else {
         return StatusCode::TOO_MANY_REQUESTS.into_response();
     };
@@ -529,6 +633,30 @@ fn validate_public_bind(addr: SocketAddr, cert: &Path, key: &Path) -> Result<(),
     Ok(())
 }
 
+#[cfg(feature = "v2-public-control")]
+fn exit_after_room_enabled(value: Option<&std::ffi::OsStr>) -> Result<bool, &'static str> {
+    match value {
+        None => Ok(false),
+        Some(value) if value == "1" => Ok(true),
+        _ => Err("V2_PUBLIC_CONTROL_EXIT_AFTER_ROOM_INVALID"),
+    }
+}
+
+#[cfg(feature = "v2-public-control")]
+async fn serve_one_shot(
+    app: &PublicVideoApp,
+    wake: &Notify,
+    server: impl std::future::Future<Output = std::io::Result<()>>,
+) -> std::io::Result<()> {
+    tokio::select! {
+        biased;
+        result = server => result,
+        // Dropping the serving future releases the listener, including at the
+        // hard deadline when an upgraded connection may not yet have drained.
+        _ = app.wait_for_one_shot_exit(wake) => Ok(()),
+    }
+}
+
 pub(super) async fn run_from_env(purpose: Purpose) -> Result<(), &'static str> {
     fn env(name: &str) -> Result<String, &'static str> {
         std::env::var(name).map_err(|_| DENIED)
@@ -539,6 +667,21 @@ pub(super) async fn run_from_env(purpose: Purpose) -> Result<(), &'static str> {
             purpose.profile_name()
         ))
     };
+    #[cfg(feature = "v2-public-control")]
+    let one_shot = matches!(purpose, Purpose::Control)
+        && exit_after_room_enabled(
+            std::env::var_os("REMOTEHUB_V2_PUBLIC_CONTROL_EXIT_AFTER_ROOM").as_deref(),
+        )?;
+    #[cfg(feature = "v2-public-control")]
+    let batch_path = if matches!(purpose, Purpose::Control) {
+        std::env::var_os("REMOTEHUB_V2_PUBLIC_CONTROL_BATCH_FILE").map(PathBuf::from)
+    } else {
+        None
+    };
+    #[cfg(feature = "v2-public-control")]
+    if one_shot && batch_path.is_some() {
+        return Err("V2_PUBLIC_CONTROL_BATCH_CONFLICT");
+    }
 
     let addr = env("REMOTEHUB_V2_BIND")?
         .parse::<SocketAddr>()
@@ -550,6 +693,11 @@ pub(super) async fn run_from_env(purpose: Purpose) -> Result<(), &'static str> {
         .map(PathBuf::from)
         .ok_or("V2_PUBLIC_VIDEO_TLS_REQUIRED")?;
     validate_public_bind(addr, &cert, &key)?;
+    #[cfg(feature = "v2-public-control")]
+    if let Some(path) = batch_path {
+        let batch = batch::Batch::load(&path)?;
+        return batch.serve(addr, load_tls(cert, key).await?).await;
+    }
     let room = profile("ROOM")?;
     if !signal_wire::valid_room(&room) {
         return Err(DENIED);
@@ -575,15 +723,37 @@ pub(super) async fn run_from_env(purpose: Purpose) -> Result<(), &'static str> {
         profile("EXPIRES_AT")?.parse::<u64>().map_err(|_| DENIED)?,
         now()?,
     )?;
-    let _ = rustls::crypto::ring::default_provider().install_default();
-    let tls = axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)
-        .await
-        .map_err(|_| "V2_TLS_CONFIG_FAILED")?;
+    let tls = load_tls(cert, key).await?;
     approval.deadline()?;
-    axum_server::bind_rustls(addr, tls)
+    let server = axum_server::bind_rustls(addr, tls);
+    #[cfg(feature = "v2-public-control")]
+    if one_shot {
+        let mut app = PublicVideoApp::new(approval);
+        app.exit_wake = Some(Notify::new());
+        let app = Arc::new(app);
+        let service = router(app.clone()).into_make_service_with_connect_info::<SocketAddr>();
+        return serve_one_shot(
+            &app,
+            app.exit_wake.as_ref().expect("configured above"),
+            server.serve(service),
+        )
+        .await
+        .map_err(|_| "V2_SERVER_FAILED");
+    }
+    server
         .serve(public_video_router(approval).into_make_service_with_connect_info::<SocketAddr>())
         .await
         .map_err(|_| "V2_SERVER_FAILED")
+}
+
+async fn load_tls(
+    cert: PathBuf,
+    key: PathBuf,
+) -> Result<axum_server::tls_rustls::RustlsConfig, &'static str> {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    axum_server::tls_rustls::RustlsConfig::from_pem_file(cert, key)
+        .await
+        .map_err(|_| "V2_TLS_CONFIG_FAILED")
 }
 
 #[cfg(test)]
@@ -604,6 +774,124 @@ mod tests {
             now,
         )
         .unwrap()
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    fn one_shot_app() -> PublicVideoApp {
+        let now = now().unwrap();
+        let approval = PublicVideoApproval::new(
+            Purpose::Control,
+            Uuid::new_v4(),
+            PeerSources {
+                host: Ipv4Addr::LOCALHOST,
+                viewer: Ipv4Addr::LOCALHOST,
+            },
+            Zeroizing::new(format!("rhctl1-{}", "a".repeat(64))),
+            Zeroizing::new(format!("rhctl1-{}", "b".repeat(64))),
+            now + 15,
+            now,
+        )
+        .unwrap();
+        let mut app = PublicVideoApp::new(approval);
+        app.exit_wake = Some(Notify::new());
+        app
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    #[test]
+    fn shutdown_flag_is_explicit_and_fail_closed() {
+        use std::ffi::OsStr;
+        assert_eq!(exit_after_room_enabled(None), Ok(false));
+        assert_eq!(exit_after_room_enabled(Some(OsStr::new("1"))), Ok(true));
+        for invalid in ["0", "", "true", "01", "1 ", " 1"] {
+            assert!(exit_after_room_enabled(Some(OsStr::new(invalid))).is_err());
+        }
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    #[tokio::test]
+    async fn one_shot_requires_joined_room_teardown_and_both_handlers_drained() {
+        let app = Arc::new(one_shot_app());
+        let monitor = app.clone();
+        let mut serve = tokio::spawn(async move {
+            serve_one_shot(
+                &monitor,
+                monitor.exit_wake.as_ref().unwrap(),
+                std::future::pending(),
+            )
+            .await
+        });
+        let (wrong_tx, _wrong_rx) = mpsc::channel(2);
+        let unexpected = Uuid::new_v4();
+        assert!(app
+            .join(
+                &unexpected.simple().to_string(),
+                Role::Host,
+                unexpected,
+                wrong_tx
+            )
+            .is_err());
+        app.leave(unexpected);
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut serve)
+            .await
+            .is_err());
+
+        let host_slot = app.reserve().unwrap();
+        let viewer_slot = app.reserve().unwrap();
+        let (host_tx, _host_rx) = mpsc::channel(2);
+        let (viewer_tx, mut viewer_rx) = mpsc::channel(2);
+        let room = app.approval.room.simple().to_string();
+        let host = Uuid::new_v4();
+        let viewer = Uuid::new_v4();
+        app.join(&room, Role::Host, host, host_tx).unwrap();
+        app.join(&room, Role::Viewer, viewer, viewer_tx).unwrap();
+        app.leave(host);
+        drop(host_slot);
+        let Some(Message::Text(paired)) = viewer_rx.recv().await else {
+            panic!("missing Paired")
+        };
+        let Some(Message::Text(left)) = viewer_rx.recv().await else {
+            panic!("missing PeerLeft")
+        };
+        assert!(matches!(
+            signal_wire::decode::<ServerFrame>(&paired),
+            Ok(ServerFrame::Paired {})
+        ));
+        assert!(matches!(
+            signal_wire::decode::<ServerFrame>(&left),
+            Ok(ServerFrame::PeerLeft {})
+        ));
+        assert!(tokio::time::timeout(Duration::from_millis(20), &mut serve)
+            .await
+            .is_err());
+        drop(viewer_slot);
+        tokio::time::timeout(Duration::from_secs(2), serve)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    #[tokio::test]
+    async fn one_shot_exits_at_invitation_deadline_with_an_unjoined_slot() {
+        let mut app = one_shot_app();
+        app.approval.deadline = Instant::now() + Duration::from_millis(40);
+        let app = Arc::new(app);
+        let _unjoined_slot = app.reserve().unwrap();
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            serve_one_shot(
+                &app,
+                app.exit_wake.as_ref().unwrap(),
+                std::future::pending(),
+            ),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert!(app.approval.deadline().is_err());
+        assert!(!app.room.lock().unwrap().closed);
     }
 
     #[test]
@@ -730,11 +1018,7 @@ mod tests {
     fn public_room_does_not_reopen_after_either_slot_leaves() {
         let approval = approval();
         let room = approval.room.simple().to_string();
-        let app = PublicVideoApp {
-            approval,
-            room: Mutex::new(OneRoom::default()),
-            active: AtomicUsize::new(0),
-        };
+        let app = PublicVideoApp::new(approval);
         let (other_tx, _other_rx) = mpsc::channel(8);
         assert_eq!(
             app.join(&room, Role::Viewer, Uuid::new_v4(), other_tx.clone()),
