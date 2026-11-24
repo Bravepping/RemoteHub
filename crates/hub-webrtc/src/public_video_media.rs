@@ -104,7 +104,7 @@ impl ScopedVideoMedia {
     ) -> Result<(), &'static str> {
         match &mut self.port {
             Port::Host(au) => run_host(ice, state, au, &mut self.first_host_video).await,
-            Port::Viewer(frames) => run_viewer(ice, frames).await,
+            Port::Viewer(frames) => run_viewer(ice, state, frames).await,
         }
     }
 }
@@ -225,12 +225,14 @@ async fn run_host(
 
 async fn run_viewer(
     ice: &mut PublicVideoScopedIce<'_>,
+    state: &watch::Sender<ScopedWssState>,
     frames: &mpsc::Sender<VerifiedVideoFrame>,
 ) -> Result<(), &'static str> {
     let initial_until = Instant::now() + START_WAIT;
     let mut assembler = PublicVideoFrameAssembler::new(SSRC);
     let mut order = RtpOrder::default();
     let mut seen_frame = false;
+    let mut route = None;
     loop {
         if frames.is_closed() {
             return Ok(());
@@ -239,7 +241,12 @@ async fn run_viewer(
             return Err(UNAVAILABLE);
         }
         order.check_deadline(Instant::now())?;
-        if let Some(packet) = ice.recv_rtp(wall_seconds()?).await? {
+        if let Some((packet, path)) = ice.recv_rtp(wall_seconds()?).await? {
+            let key = (path.route, path.local_type, path.remote_type);
+            if route != Some(key) {
+                route = Some(key);
+                state.send_replace(ScopedWssState::ViewerPathVerified(key.0, key.1, key.2));
+            }
             // recv_rtp has already checked the signed live path, SSRC, PT
             // and datagram size. Do not feed arrival order into the strict AU parser.
             order.insert(packet, Instant::now())?;

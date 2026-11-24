@@ -31,6 +31,7 @@ pub struct Boundary {
     server: Option<SocketAddr>,
     peers: RwLock<Option<Vec<(SocketAddr, crate::direct_policy::Kind)>>>,
     deadline: Instant,
+    pub(crate) round_deadline: Option<Arc<std::sync::OnceLock<Instant>>>,
     stopped: AtomicBool,
     drop_direct: bool,
     drop_turn: bool,
@@ -59,7 +60,7 @@ impl Boundary {
         ttl: Duration,
         scope: uuid::Uuid,
     ) -> Result<Arc<Self>, String> {
-        if ttl.is_zero() || ttl > Duration::from_secs(600) {
+        if ttl.is_zero() || ttl > Duration::from_secs(1800) {
             return Err("DIRECT_BOUNDARY_TTL".into());
         }
         Ok(Arc::new(Self {
@@ -68,6 +69,7 @@ impl Boundary {
             server,
             peers: RwLock::new(None),
             deadline: Instant::now() + ttl,
+            round_deadline: None,
             stopped: AtomicBool::new(false),
             drop_direct: false,
             drop_turn: false,
@@ -120,12 +122,15 @@ impl Boundary {
     pub fn stop(&self) {
         self.stopped.store(true, Ordering::Release);
     }
-    #[cfg(feature = "v2-public-video-wss")]
     pub(crate) fn deadline(&self) -> Instant {
-        self.deadline
+        self.round_deadline
+            .as_ref()
+            .and_then(|d| d.get())
+            .copied()
+            .map_or(self.deadline, |d| self.deadline.min(d))
     }
     fn active(&self) -> bool {
-        !self.stopped.load(Ordering::Acquire) && Instant::now() < self.deadline
+        !self.stopped.load(Ordering::Acquire) && Instant::now() < self.deadline()
     }
     fn allowed(&self, addr: SocketAddr) -> bool {
         self.active()

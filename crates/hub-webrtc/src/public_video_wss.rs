@@ -397,9 +397,7 @@ impl<'a> PublicVideoWss<'a> {
         let room = cfg.invitation.room;
         let role = cfg.invitation.role;
         let scope = cfg.scope;
-        if scope.mode != crate::ice_policy::IceMode::RelayOnly
-            || cfg.invitation.expires_at != scope.expires_at
-        {
+        if cfg.invitation.expires_at != scope.expires_at {
             return Err("PUBLIC_CONTROL_WSS_SCOPE");
         }
         let immediate_batch = cfg.invitation.immediate_batch;
@@ -1037,6 +1035,7 @@ pub enum ScopedWssState {
     Established,
     /// Host RTP transport selected an exact signed pair. Not a media result.
     HostPathVerified(SelectedRoute, Kind, Kind),
+    ViewerPathVerified(SelectedRoute, Kind, Kind),
     Closed,
 }
 

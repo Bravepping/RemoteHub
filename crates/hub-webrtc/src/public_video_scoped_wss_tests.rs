@@ -430,6 +430,11 @@ async fn exercise(abrupt: bool, path: TestPath, traffic: TestMedia) {
             #[cfg(feature = "v2-public-control")]
             assert!(!*sent_au.borrow(), "a connected path alone is not media");
             loopback_access_units(traffic, producer, consumer).await;
+            assert_eq!(
+                *viewer_state.borrow(),
+                ScopedWssState::ViewerPathVerified(route.0, route.1, route.1),
+                "viewer reports the actual verified RTP path",
+            );
             #[cfg(feature = "v2-public-control")]
             assert!(*sent_au.borrow(), "complete access unit routed");
         }
@@ -440,7 +445,9 @@ async fn exercise(abrupt: bool, path: TestPath, traffic: TestMedia) {
         }
     };
     let active_budget = match traffic {
-        TestMedia::Sustained => Duration::from_secs(10),
+        // Windows relay-only gathering consumes about 5s before the 7s
+        // paced-media budget starts. Reserve teardown time independently.
+        TestMedia::Sustained => WAIT + Duration::from_secs(9),
         #[cfg(feature = "v2-public-video-60s-test")]
         TestMedia::SustainedMinute => Duration::from_secs(73),
         _ => WAIT,

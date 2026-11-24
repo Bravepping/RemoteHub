@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a short-lived RelayOnly test kit without any network I/O."""
+"""Prepare a short-lived scoped test kit without any network I/O."""
 
 import argparse
 import base64
@@ -88,6 +88,8 @@ def parser():
     p.add_argument("--purpose", choices=(VIDEO, CONTROL), default=VIDEO,
                    help="Profile purpose (default: public-video). public-control is explicit and "
                    "requires the separate enabled server and desktop build.")
+    p.add_argument("--mode", choices=("relay_only", "direct_preferred"), default="relay_only",
+                   help="direct_preferred enables public direct ICE with TURN fallback; requires updated clients.")
     p.add_argument("--ttl", type=int, default=300, help="Lifetime in seconds (180–600; default 300).")
     p.add_argument("--batch", action="store_true",
                    help="Explicit public-control only: eight one-shot rounds in a 30-minute window.")
@@ -318,6 +320,10 @@ def make_kit(args, secret, now):
     if purpose not in (VIDEO, CONTROL):
         raise Invalid("Profile purpose must be public-video or public-control.")
     control = purpose == CONTROL
+    if getattr(args, "mode", "relay_only") not in ("relay_only", "direct_preferred"):
+        raise Invalid("Unsupported route mode.")
+    if not control and getattr(args, "mode", "relay_only") != "relay_only":
+        raise Invalid("Automatic routing requires the public-control client.")
     prefix = "rhctl1-" if control else ""
     host_bearer = prefix + host_token.hex()
     viewer_bearer = prefix + viewer_token.hex()
@@ -330,7 +336,7 @@ def make_kit(args, secret, now):
         "wss": args.wss,
         "turn": args.turn,
         "relay_ports": args.relay_ports,
-        "mode": "relay_only",
+        "mode": getattr(args, "mode", "relay_only"),
         "ca_sha256": args.ca_sha256,
         "ca_der_base64": base64.b64encode(args.ca_der).decode("ascii"),
         "pairing_key": pair.hex(),
@@ -655,6 +661,23 @@ def self_test():
                     for p, room in zip(profiles, rooms):
                         self.assertEqual((p["version"], p["expires_at"], p["turn_expires_at"]), (2, 2800, 2800))
                         self.assertEqual(p["relay_token"], room[f"{role}_token"])
+
+        def test_automatic_mode_is_bound_to_both_roles_in_every_round(self):
+            args = normalize(self.args(purpose=CONTROL, mode="direct_preferred"))
+            args.all_ready = True
+            files, expires = make_batch(args, fake_secret, 1000, self.root / "auto")
+            self.assertEqual(expires, 2800)
+            for role in ("host", "viewer"):
+                with zipfile.ZipFile(io.BytesIO(files[f"{role}-test-rounds.zip"])) as archive:
+                    for entry in archive.namelist():
+                        profile = json.loads(archive.read(entry))
+                        self.assertEqual(profile["mode"], "direct_preferred")
+                        self.assertEqual(profile["role"], role)
+                        self.assertEqual(profile["version"], 2)
+                        self.assertEqual(profile["expires_at"], 2800)
+            args.purpose = VIDEO
+            with self.assertRaises(Invalid):
+                make_kit(args, fake_secret, 1000)
 
         def test_profiles_and_wss_env_are_role_correct_and_private(self):
             args = normalize(self.args())

@@ -149,7 +149,7 @@ impl IceConfig {
         self.validate_mode_with_max(grant, now, IceMode::RelayOnly, 1800)
     }
 
-    fn validate_mode_with_max(
+    pub(crate) fn validate_mode_with_max(
         &self,
         grant: &RelayGrant,
         now: u64,

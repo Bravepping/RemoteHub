@@ -20,6 +20,7 @@ const MAX_INPUT_QUEUE = 8;
 const RELEASE_INPUT = '{"kind":"release_all"}';
 
 export type PublicVideoRole = 'host' | 'viewer';
+export type PublicConnectionPath = 'direct' | 'relay';
 export type PublicVideoState =
   | 'idle'
   | 'starting'
@@ -210,6 +211,7 @@ interface NativeStatus {
   profileConsumed?: boolean;
   inputState?: PublicInputState;
   roundSeconds?: PublicControlRoundSeconds;
+  connectionPath?: PublicConnectionPath;
 }
 
 function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
@@ -222,6 +224,7 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
     profile_consumed?: unknown;
     input_state?: unknown;
     round_seconds?: unknown;
+    connection_path?: unknown;
   };
   if (
     !Object.hasOwn(parsed, 'phase') ||
@@ -242,6 +245,18 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
         ? parsed.profile_consumed
         : undefined,
   };
+  if (
+    Object.hasOwn(parsed, 'connection_path') &&
+    parsed.connection_path != null
+  ) {
+    if (
+      parsed.connection_path !== 'direct' &&
+      parsed.connection_path !== 'relay'
+    )
+      throw new InvalidResponse();
+    if (parsed.phase === 'ready' && !parsed.error)
+      result.connectionPath = parsed.connection_path;
+  }
   const input = Object.hasOwn(parsed, 'input_state')
     ? parsed.input_state
     : undefined;
@@ -353,6 +368,7 @@ export class PublicVideoSession {
     private readonly onRound: (
       seconds: PublicControlRoundSeconds,
     ) => void = () => {},
+    private readonly onPath: (path?: PublicConnectionPath) => void = () => {},
   ) {}
 
   start(role: PublicVideoRole, controlLaunch = false): void {
@@ -375,6 +391,7 @@ export class PublicVideoSession {
     };
     this.run = run;
     if (run.controlLaunch) this.reportInput(run);
+    this.onPath(undefined);
     this.update('starting');
     void this.work(run);
   }
@@ -543,6 +560,7 @@ export class PublicVideoSession {
           );
           if (!this.active(run)) return;
           const current = parseStatus(nativeStatus, run.role);
+          this.onPath(current.connectionPath);
           if (run.controlLaunch && current.roundSeconds !== undefined)
             this.onRound(current.roundSeconds);
           this.observeProfile(run, current);
@@ -715,6 +733,7 @@ export class PublicVideoSession {
         .then(() => this.bridge.sendInput!(id, RELEASE_INPUT))
         .catch(() => {});
     }
+    this.onPath(undefined);
     if (!this.disposed) this.update('stopping');
     const cleanup = async () => {
       const generation = await run.generation.catch((cause: unknown) => {

@@ -35,6 +35,7 @@ enum Purpose {
 }
 
 impl Purpose {
+    // Preserve legacy domains: the signed statement independently binds the route mode.
     fn domain(self) -> &'static [u8] {
         match self {
             Self::Video => b"RemoteHub.V2.public-video-only.sdp.v1\0",
@@ -47,10 +48,6 @@ impl Purpose {
 
     fn check(self, scope: PublicVideoScope, now: u64) -> Result<u8, &'static str> {
         match self {
-            #[cfg(feature = "v2-public-control")]
-            Self::Control if scope.mode != IceMode::RelayOnly => {
-                Err("PUBLIC_CONTROL_TURN_REQUIRED")
-            }
             #[cfg(feature = "v2-public-control")]
             Self::ControlBatch => scope.checked_control_batch(now),
             _ => scope.checked_mode(now),
@@ -77,9 +74,6 @@ impl PublicVideoScope {
 
     #[cfg(feature = "v2-public-control")]
     pub(crate) fn checked_control_batch(self, now: u64) -> Result<u8, &'static str> {
-        if self.mode != IceMode::RelayOnly {
-            return Err("PUBLIC_CONTROL_TURN_REQUIRED");
-        }
         self.checked_mode_with_max(now, 1800)
     }
 
@@ -373,7 +367,7 @@ impl<'a> PublicVideoProof<'a> {
     }
 }
 
-/// Authenticates only the separate TURN-only bundled video/control purpose.
+/// Authenticates the separate bundled video/control purpose and signed route mode.
 /// Does not grant capture, input consent or access to a DataChannel.
 #[cfg(feature = "v2-public-control")]
 pub struct PublicControlProof<'a>(PublicVideoProof<'a>);

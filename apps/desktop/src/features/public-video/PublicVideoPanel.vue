@@ -126,6 +126,7 @@ async function selectInvitation() {
 }
 const profileUnconfirmed = ref(false);
 const roundSeconds = ref<PublicControlRoundSeconds>();
+const connectionPath = ref<'direct' | 'relay'>();
 const inputState = ref<PublicInputState>('view_only');
 const inputEnabled = ref(false);
 const releasingInput = ref(false);
@@ -344,6 +345,9 @@ onMounted(() => {
     (seconds) => {
       roundSeconds.value = seconds;
     },
+    (path) => {
+      connectionPath.value = path;
+    },
   );
 });
 onBeforeUnmount(() => {
@@ -422,6 +426,15 @@ function start() {
         停止并清屏
       </button>
     </div>
+    <p v-if="canStop" aria-live="polite" data-testid="connection-path">
+      本次连接：{{
+        connectionPath === 'direct'
+          ? '直连'
+          : connectionPath === 'relay'
+            ? 'TURN 中继'
+            : '正在确认路径…'
+      }}
+    </p>
     <p role="status">
       {{
         controlAvailable && state === 'sharing'

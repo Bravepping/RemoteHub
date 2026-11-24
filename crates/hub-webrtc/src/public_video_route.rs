@@ -80,13 +80,19 @@ impl PublicVideoIcePlan {
         }
         // Exactly one TURN URI. DirectPreferred adds the same endpoint's STUN
         // entry locally; the server cannot supply a second network destination.
-        if config.ice_servers.len() != 1 || config.ice_servers[0].urls.len() != 1 {
+        if config.mode != scope.mode
+            || config.ice_servers.len() != 1
+            || config.ice_servers[0].urls.len() != 1
+        {
             return Err(CONFIG_MISMATCH);
         }
         #[cfg(feature = "v2-public-control")]
         if immediate_control_batch {
+            if config.expires_at != scope.expires_at {
+                return Err(CONFIG_MISMATCH);
+            }
             config
-                .validate_immediate_control_batch(&relay, now)
+                .validate_mode_with_max(&relay, now, scope.mode, 1800)
                 .map_err(|_| CONFIG_MISMATCH)?;
         } else {
             config
@@ -98,9 +104,17 @@ impl PublicVideoIcePlan {
             .validate_mode(&relay, now, scope.mode)
             .map_err(|_| CONFIG_MISMATCH)?;
         let grant = match scope.mode {
-            IceMode::DirectPreferred => RouteGrant::Direct(
-                DirectGrant::new(relay, Vec::new(), &config, now).map_err(|_| CONFIG_MISMATCH)?,
-            ),
+            IceMode::DirectPreferred => {
+                #[cfg(feature = "v2-public-control")]
+                let grant = if immediate_control_batch {
+                    DirectGrant::new_control_batch(relay, &config, now)
+                } else {
+                    DirectGrant::new(relay, Vec::new(), &config, now)
+                };
+                #[cfg(not(feature = "v2-public-control"))]
+                let grant = DirectGrant::new(relay, Vec::new(), &config, now);
+                RouteGrant::Direct(grant.map_err(|_| CONFIG_MISMATCH)?)
+            }
             IceMode::RelayOnly => RouteGrant::Relay(relay),
             _ => return Err(CONFIG_MISMATCH),
         };
@@ -136,13 +150,13 @@ impl PublicVideoIcePlan {
         #[cfg(feature = "v2-public-control")]
         if self.immediate_control_batch {
             self.scope.checked_control_batch(now)?;
-            let RouteGrant::Relay(ref grant) = self.grant else {
-                return Err(CONFIG_MISMATCH);
-            };
-            return self
-                .config
-                .immediate_control_batch_configuration(grant, now)
-                .map_err(|_| CONFIG_MISMATCH);
+            return match &self.grant {
+                RouteGrant::Direct(grant) => grant.configuration(Some(&self.config), now),
+                RouteGrant::Relay(grant) => self
+                    .config
+                    .immediate_control_batch_configuration(grant, now),
+            }
+            .map_err(|_| CONFIG_MISMATCH);
         }
         self.scope.checked_mode(now)?;
         match &self.grant {

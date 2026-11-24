@@ -11,6 +11,7 @@ pub struct DirectGrant {
     local: Ipv4Addr,
     private_peers: Vec<Ipv4Addr>,
     expires_at: u64,
+    max_ttl: u64,
     scope: uuid::Uuid,
 }
 impl DirectGrant {
@@ -22,7 +23,29 @@ impl DirectGrant {
         config: &IceConfig,
         now: u64,
     ) -> Result<Self, String> {
-        config.validate_mode(&relay, now, IceMode::DirectPreferred)?;
+        Self::new_with_ttl(relay, private_peers, config, now, 600)
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn new_control_batch(
+        relay: RelayGrant,
+        config: &IceConfig,
+        now: u64,
+    ) -> Result<Self, String> {
+        if config.expires_at != relay.expires_at() {
+            return Err("DIRECT_CONFIG_EXPIRY_MISMATCH".into());
+        }
+        Self::new_with_ttl(relay, Vec::new(), config, now, 1800)
+    }
+
+    fn new_with_ttl(
+        relay: RelayGrant,
+        private_peers: Vec<Ipv4Addr>,
+        config: &IceConfig,
+        now: u64,
+        max_ttl: u64,
+    ) -> Result<Self, String> {
+        config.validate_mode_with_max(&relay, now, IceMode::DirectPreferred, max_ttl)?;
         if !relay.is_current(now)
             || private_peers.len() > 2
             || private_peers.iter().any(|p| !p.is_private())
@@ -33,7 +56,7 @@ impl DirectGrant {
         let scope = uuid::Uuid::parse_str(relay.session()).map_err(|_| "DIRECT_SESSION_INVALID")?;
         // TTL comes from the same authenticated session, never a fresh local extension.
         let expires_at = config.expires_at.min(relay.expires_at());
-        if !(60..=600).contains(&expires_at.saturating_sub(now)) {
+        if !(60..=max_ttl).contains(&expires_at.saturating_sub(now)) {
             return Err("DIRECT_GRANT_EXPIRY".into());
         }
         Ok(Self {
@@ -41,6 +64,7 @@ impl DirectGrant {
             local,
             private_peers,
             expires_at,
+            max_ttl,
             scope,
         })
     }
@@ -60,6 +84,7 @@ impl DirectGrant {
             local,
             private_peers: vec![local],
             expires_at,
+            max_ttl: 600,
             scope: uuid::Uuid::new_v4(),
         })
     }
@@ -71,6 +96,7 @@ impl DirectGrant {
             local: Ipv4Addr::LOCALHOST,
             private_peers: vec![Ipv4Addr::LOCALHOST],
             expires_at: now + 120,
+            max_ttl: 600,
             scope: uuid::Uuid::new_v4(),
         }
     }
@@ -149,7 +175,12 @@ impl DirectGrant {
         let mut servers = vec![];
         match (&self.relay, config) {
             (Some(grant), Some(config)) => {
-                config.validate_mode(grant, now, IceMode::DirectPreferred)?;
+                config.validate_mode_with_max(
+                    grant,
+                    now,
+                    IceMode::DirectPreferred,
+                    self.max_ttl,
+                )?;
                 if config.expires_at != self.expires_at {
                     return Err("DIRECT_CONFIG_EXPIRY_MISMATCH".into());
                 }

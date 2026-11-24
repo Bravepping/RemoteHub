@@ -107,11 +107,20 @@ enum EndReason {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+enum ConnectionPath {
+    Direct,
+    Relay,
+}
+
 #[derive(Clone, Serialize)]
 pub(crate) struct Status {
     phase: Phase,
     error: Option<&'static str>,
     profile_consumed: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connection_path: Option<ConnectionPath>,
     #[cfg(feature = "v2-public-control-desktop")]
     #[serde(skip_serializing_if = "Option::is_none")]
     input_state: Option<InputState>,
@@ -132,6 +141,35 @@ struct Outcome {
 }
 
 impl Status {
+    fn observe(&mut self, role: Role, state: ScopedWssState) -> bool {
+        if !matches!(self.phase, Phase::Starting | Phase::Ready) {
+            return false;
+        }
+        let path = match (role, state) {
+            (Role::Host, ScopedWssState::HostPathVerified(route, ..))
+            | (Role::Viewer, ScopedWssState::ViewerPathVerified(route, ..)) => Some(
+                if route == hub_webrtc::direct_policy::SelectedRoute::TurnRelay {
+                    ConnectionPath::Relay
+                } else {
+                    ConnectionPath::Direct
+                },
+            ),
+            _ => None,
+        };
+        let ready =
+            path.is_some() || matches!((role, state), (Role::Viewer, ScopedWssState::Established));
+        if !ready {
+            return false;
+        }
+        let changed =
+            self.phase != Phase::Ready || (path.is_some() && self.connection_path != path);
+        self.phase = Phase::Ready;
+        if path.is_some() {
+            self.connection_path = path;
+        }
+        changed
+    }
+
     fn closed(result: Result<Outcome, &'static str>) -> Self {
         let Outcome {
             terminal,
@@ -149,6 +187,7 @@ impl Status {
             phase: Phase::Closed,
             error,
             profile_consumed: false,
+            connection_path: None,
             #[cfg(feature = "v2-public-control-desktop")]
             input_state: None,
             #[cfg(feature = "v2-public-control-desktop")]
@@ -222,6 +261,7 @@ impl Session {
                 phase: Phase::Starting,
                 error: None,
                 profile_consumed: false,
+                connection_path: None,
                 #[cfg(feature = "v2-public-control-desktop")]
                 input_state: None,
                 #[cfg(feature = "v2-public-control-desktop")]
@@ -260,6 +300,7 @@ impl Session {
                 return false;
             }
             status.phase = Phase::Stopping;
+            status.connection_path = None;
             true
         });
     }
@@ -616,7 +657,9 @@ async fn run(
     .await
     .map_err(|_| "PUBLIC_VIDEO_PROFILE")??;
     let approval = profile.approval();
-    if approval.role != session.role || approval.scope.mode != IceMode::RelayOnly {
+    if approval.role != session.role
+        || (!control_launch && approval.scope.mode != IceMode::RelayOnly)
+    {
         return Err("PUBLIC_VIDEO_ROLE_OR_ROUTE");
     }
     if profile.expected_peer_fingerprint() != peer.fingerprint() {
@@ -651,8 +694,13 @@ async fn run(
     } else {
         "不允许键鼠或无人值守访问。"
     };
+    let route_notice = if approval.scope.mode == IceMode::DirectPreferred {
+        "优先公网直连，不通时自动使用 TURN 中继。"
+    } else {
+        "只允许中继。"
+    };
     let message = format!(
-        "本次仅{action}，共享最多 {} 秒。只允许中继。{input_notice}点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
+        "本次仅{action}，共享最多 {} 秒。{route_notice}{input_notice}点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
         approved_window.as_secs(),
         approval.scope.wss, approval.scope.turn, peer.fingerprint(),
     );
@@ -694,16 +742,7 @@ async fn run(
                 event = phase_rx.changed() => {
                     if event.is_err() { return; }
                     let phase = *phase_rx.borrow_and_update();
-                    let ready = matches!((watch_session.role, phase),
-                        (Role::Host, ScopedWssState::HostPathVerified(..))
-                        | (Role::Viewer, ScopedWssState::Established));
-                    if ready {
-                        watch_session.status.send_if_modified(|s| {
-                            if s.phase != Phase::Starting { return false; }
-                            s.phase = Phase::Ready;
-                            true
-                        });
-                    }
+                    watch_session.status.send_if_modified(|s| s.observe(watch_session.role, phase));
                 }
             }
         }
@@ -909,6 +948,42 @@ mod tests {
             assert_eq!(json["end_reason"], expected);
             assert_eq!(json["elapsed_ms"], 1234);
             assert!(json["error"].is_null());
+        }
+    }
+
+    #[test]
+    fn route_status_requires_verified_local_transport_and_clears_on_stop() {
+        use hub_webrtc::direct_policy::{Kind, SelectedRoute};
+        for role in [Role::Host, Role::Viewer] {
+            let session = Session::new(role, true);
+            let mut status = session.status.borrow().clone();
+            status.observe(role, ScopedWssState::Established);
+            assert!(status.connection_path.is_none());
+            for route in [
+                SelectedRoute::ServerReflexiveDirect,
+                SelectedRoute::TurnRelay,
+            ] {
+                let event = if role == Role::Host {
+                    ScopedWssState::HostPathVerified(route, Kind::Srflx, Kind::Relay)
+                } else {
+                    ScopedWssState::ViewerPathVerified(route, Kind::Srflx, Kind::Relay)
+                };
+                assert!(status.observe(role, event));
+                let value = serde_json::to_value(&status).unwrap();
+                assert_eq!(
+                    value["connection_path"],
+                    if route == SelectedRoute::TurnRelay {
+                        "relay"
+                    } else {
+                        "direct"
+                    }
+                );
+                session.status.send_replace(status.clone());
+                session.request_stop();
+                let mut stopped = session.status.borrow().clone();
+                assert!(stopped.connection_path.is_none());
+                assert!(!stopped.observe(role, event));
+            }
         }
     }
 

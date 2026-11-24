@@ -1,4 +1,4 @@
-//! Strict native-only TURN SDP for the separately signed product-control
+//! Strict native-only scoped ICE SDP for the separately signed product-control
 //! purpose. Exactly one bundled H.264 section and one reliable SCTP media
 //! section may use the same signed transport description.
 use crate::{direct_policy::Candidate, public_video::PublicVideoScope};
@@ -209,7 +209,7 @@ pub(crate) fn validate(
     // both exact ordered MIDs were checked above against signed bytes.
     let candidates =
         crate::public_video_ice::validate_shape(video_only, scope, answer).map_err(|_| ERROR)?;
-    if candidates.len() != 1 {
+    if scope.mode == crate::ice_policy::IceMode::RelayOnly && candidates.len() != 1 {
         return Err(ERROR);
     }
     Ok(candidates)
@@ -458,7 +458,7 @@ mod tests {
             .seal(wrong_generation.challenge().unwrap(), &offer, NOW)
             .unwrap();
         assert!(wrong_generation.verify(&offer, &mismatched, NOW).is_err());
-        assert!(PublicControlProof::prepare(
+        let mut automatic = PublicControlProof::prepare(
             &host,
             &host_pin,
             SessionRole::Host,
@@ -470,6 +470,10 @@ mod tests {
             },
             NOW,
         )
-        .is_err());
+        .unwrap();
+        let relay_signature = viewer_p()
+            .seal(automatic.challenge().unwrap(), &offer, NOW)
+            .unwrap();
+        assert!(automatic.verify(&offer, &relay_signature, NOW).is_err());
     }
 }

@@ -14,18 +14,35 @@ mod local_turn;
 
 #[tokio::test]
 async fn control_and_video_share_the_same_signed_loopback_turn_path() {
-    exchange(false).await;
+    exchange(false, false, true).await;
 }
 
 #[tokio::test]
 async fn immediate_control_batch_clamps_the_live_shared_boundary_once() {
-    exchange(true).await;
+    exchange(true, false, true).await;
 }
 
-async fn exchange(batch: bool) {
+#[tokio::test]
+async fn control_prefers_direct_when_both_paths_are_available() {
+    exchange(false, true, false).await;
+}
+#[tokio::test]
+async fn control_automatically_uses_turn_when_direct_is_blocked() {
+    exchange(false, true, true).await;
+}
+#[tokio::test]
+async fn direct_batch_round_clamps_video_and_input_to_sixty_seconds() {
+    exchange(true, true, false).await;
+}
+#[tokio::test]
+async fn direct_batch_round_automatically_falls_back_to_turn() {
+    exchange(true, true, true).await;
+}
+
+async fn exchange(batch: bool, automatic: bool, blocked: bool) {
     timeout(Duration::from_secs(20), async {
         let relay = local_turn::FixtureTurn::start(15).await.unwrap();
-        relay.block_direct(true);
+        relay.block_direct(blocked);
         let room = Uuid::new_v4();
         let now = wall_seconds().unwrap();
         let scope = PublicVideoScope {
@@ -33,7 +50,11 @@ async fn exchange(batch: bool) {
             ca_sha256: [1; 32],
             turn: SocketAddrV4::new(local_turn::RELAY_LABEL, relay.server().port()),
             relay_ports: local_turn::RELAY_PORTS,
-            mode: IceMode::RelayOnly,
+            mode: if automatic {
+                IceMode::DirectPreferred
+            } else {
+                IceMode::RelayOnly
+            },
             expires_at: now + if batch { 1800 } else { 90 },
         };
         let host_identity = Identity::generate_ephemeral().unwrap();
@@ -50,20 +71,37 @@ async fn exchange(batch: bool) {
                 .unwrap()
                 .into_inner()
         };
-        let mut host = PublicVideoScopedIce::new_turn_loopback_fixture(
+        let make = |proof, side| {
+            if automatic {
+                PublicVideoScopedIce::new_loopback_fixture(
+                    proof,
+                    room,
+                    SocketAddrV4::new(std::net::Ipv4Addr::LOCALHOST, 0),
+                    relay.server(),
+                    webrtc::peer_connection::RTCConfigurationBuilder::default()
+                        .with_ice_servers(vec![relay.combined_ice_server()])
+                        .build(),
+                    relay.runtime(side),
+                    now,
+                )
+            } else {
+                PublicVideoScopedIce::new_turn_loopback_fixture(
+                    proof,
+                    relay.server(),
+                    relay.ice_server(),
+                    now,
+                )
+            }
+            .unwrap()
+        };
+        let mut host = make(
             proof(&host_identity, &viewer_identity, SessionRole::Host),
-            relay.server(),
-            relay.ice_server(),
-            now,
-        )
-        .unwrap();
-        let mut viewer = PublicVideoScopedIce::new_turn_loopback_fixture(
+            local_turn::FixtureDirectSide::Host,
+        );
+        let mut viewer = make(
             proof(&viewer_identity, &host_identity, SessionRole::Viewer),
-            relay.server(),
-            relay.ice_server(),
-            now,
-        )
-        .unwrap();
+            local_turn::FixtureDirectSide::Viewer,
+        );
         let host_challenge = host.challenge().unwrap();
         let viewer_challenge = viewer.challenge().unwrap();
         assert!(host.open_control(now).await.unwrap().is_none());
@@ -109,6 +147,12 @@ async fn exchange(batch: bool) {
 
         let host_video = host.checked_track(wall_seconds().unwrap()).await.unwrap();
         assert!(host_video.pair == host_channel.pair);
+        let expected = if automatic && !blocked {
+            direct_policy::SelectedRoute::ServerReflexiveDirect
+        } else {
+            direct_policy::SelectedRoute::TurnRelay
+        };
+        assert_eq!(host_video.path.route, expected);
         viewer_channel.send_text("fixture:transport").await.unwrap();
         loop {
             if let Some(packet) = host_channel.recv_text().await.unwrap() {
@@ -142,7 +186,8 @@ async fn exchange(batch: bool) {
             },
             async {
                 loop {
-                    if let Some(packet) = viewer.recv_rtp(wall_seconds()?).await? {
+                    if let Some((packet, path)) = viewer.recv_rtp(wall_seconds()?).await? {
+                        assert_eq!(path.route, expected);
                         assert_eq!(packet.payload.as_ref(), payload.as_ref());
                         break;
                     }
@@ -154,8 +199,16 @@ async fn exchange(batch: bool) {
         .unwrap();
         let viewer_video = viewer.checked_track(wall_seconds().unwrap()).await.unwrap();
         assert!(viewer_video.pair == viewer_channel.pair);
-        assert!(relay.stats().forwarded_packets > 0);
-        assert_eq!(relay.stats().direct_forwarded, 0);
+        assert_eq!(viewer_video.path.route, expected);
+        if automatic && !blocked {
+            assert!(relay.stats().direct_forwarded > 0);
+        } else {
+            assert!(relay.stats().forwarded_packets > 0);
+            assert_eq!(relay.stats().direct_forwarded, 0);
+            if automatic {
+                assert!(relay.stats().direct_checks_dropped > 0);
+            }
+        }
         host.close().await.unwrap();
         assert!(host_channel.recv_text().await.is_err());
         viewer.close().await.unwrap();

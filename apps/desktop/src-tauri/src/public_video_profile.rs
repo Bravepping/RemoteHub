@@ -161,7 +161,6 @@ impl PublicVideoProfile {
         let purpose_ok = if control {
             cfg!(feature = "v2-public-control-desktop")
                 && input.purpose.as_deref() == Some("public-control")
-                && input.mode == IceMode::RelayOnly
         } else {
             input.purpose.is_none()
         };
@@ -831,7 +830,7 @@ mod tests {
             NOW,
             true
         )
-        .is_err());
+        .is_ok());
     }
 
     #[cfg(all(
@@ -862,8 +861,10 @@ mod tests {
         control["version"] = json!(2);
         assert!(parse(&control, now).unwrap().is_control_batch());
         assert!(parse_fixture(&control, now).is_err());
+        control["mode"] = json!("direct_preferred");
+        assert!(parse(&control, now).unwrap().is_control_batch());
         for (key, value) in [
-            ("mode", json!("direct_preferred")),
+            ("mode", json!("host_only")),
             ("purpose", json!("public-video")),
             ("relay_token", json!("45".repeat(32))),
             ("expires_at", json!(expiry + 1)),

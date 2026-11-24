@@ -112,12 +112,15 @@ describe('public video viewer controller', () => {
     );
     const update = vi.fn();
     const input = vi.fn();
+    const path = vi.fn();
     const session = new PublicVideoSession(
       bridge,
       create,
       update,
       undefined,
       input,
+      undefined,
+      path,
     );
     return {
       bridge,
@@ -126,10 +129,53 @@ describe('public video viewer controller', () => {
       ingress,
       update,
       input,
+      path,
       session,
       draw: () => draw(),
     };
   }
+
+  it.each(['host', 'viewer'] as const)(
+    'shows only confirmed paths for %s and clears stale paths',
+    async (role) => {
+      const { bridge, session, path } = harness();
+      bridge.status.mockResolvedValue({ phase: 'starting' });
+      session.start(role, true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(path).toHaveBeenLastCalledWith(undefined);
+      for (const connection_path of ['direct', 'relay']) {
+        bridge.status.mockResolvedValue({ phase: 'ready', connection_path });
+        await vi.advanceTimersByTimeAsync(400);
+        expect(path).toHaveBeenLastCalledWith(connection_path);
+      }
+      bridge.status.mockResolvedValue({ phase: 'closed' });
+      await session.stop();
+      expect(path).toHaveBeenLastCalledWith(undefined);
+      bridge.status.mockResolvedValue({ phase: 'starting' });
+      session.start(role, true);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(path).toHaveBeenLastCalledWith(undefined);
+      bridge.status.mockResolvedValue({ phase: 'closed' });
+      await session.stop();
+    },
+  );
+
+  it('rejects unrecognized route values without rendering arbitrary native text', async () => {
+    const { bridge, session, path, update } = harness();
+    bridge.status.mockResolvedValue({
+      phase: 'ready',
+      connection_path: 'private endpoint secret',
+    });
+    session.start('host', true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(path).not.toHaveBeenCalledWith('private endpoint secret');
+    bridge.status.mockResolvedValue({ phase: 'closed' });
+    await vi.advanceTimersByTimeAsync(400);
+    expect(update).toHaveBeenCalledWith(
+      'failed',
+      'PUBLIC_VIDEO_RESPONSE_INVALID',
+    );
+  });
 
   const keyA = { kind: 'key', key: 'KeyA', down: true } as const;
   const allowed = {

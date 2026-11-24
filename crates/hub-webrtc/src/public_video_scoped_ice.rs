@@ -120,7 +120,7 @@ impl ScopedRuntime {
                 .and_then(|d| d.get())
                 .copied()
                 .map_or(self.deadline, |d| self.deadline.min(d)),
-            RouteRuntime::Direct(_) => self.deadline,
+            RouteRuntime::Direct(runtime) => self.deadline.min(runtime.boundary.deadline()),
         }
     }
 
@@ -349,10 +349,11 @@ impl<'a> PublicVideoScopedIce<'a> {
         #[cfg(not(feature = "v2-public-control"))]
         let round_deadline = None;
         let physical = match &plan.grant {
-            RouteGrant::Direct(grant) => RouteRuntime::Direct(DirectRuntime {
-                inner,
-                boundary: Boundary::new(grant, now).map_err(|_| SETUP)?,
-            }),
+            RouteGrant::Direct(grant) => {
+                let mut boundary = Boundary::new(grant, now).map_err(|_| SETUP)?;
+                Arc::get_mut(&mut boundary).ok_or(SETUP)?.round_deadline = round_deadline;
+                RouteRuntime::Direct(DirectRuntime { inner, boundary })
+            }
             RouteGrant::Relay(grant) => RouteRuntime::Relay(RelayRuntime {
                 base: PinnedRuntime {
                     inner,
@@ -404,7 +405,13 @@ impl<'a> PublicVideoScopedIce<'a> {
         now: u64,
     ) -> Result<Self, &'static str> {
         assert_eq!(*local.ip(), std::net::Ipv4Addr::LOCALHOST);
-        let boundary = Boundary::loopback_fixture(server.into(), room);
+        #[allow(unused_mut)]
+        let mut boundary = Boundary::loopback_fixture(server.into(), room);
+        #[cfg(feature = "v2-public-control")]
+        {
+            Arc::get_mut(&mut boundary).unwrap().round_deadline =
+                proof.is_immediate_control_batch().then(Arc::default);
+        }
         let deadline = boundary.deadline();
         Ok(Self {
             proof,
@@ -788,7 +795,10 @@ impl<'a> PublicVideoScopedIce<'a> {
     /// Receive only from the same signed live video transport before and
     /// after dequeuing RTP. Not ready or no packet during the short poll
     /// is nonterminal; wrong RTP/path and cancellation revoke the runtime.
-    pub(crate) async fn recv_rtp(&mut self, now: u64) -> Result<Option<Packet>, &'static str> {
+    pub(crate) async fn recv_rtp(
+        &mut self,
+        now: u64,
+    ) -> Result<Option<(Packet, PathSummary)>, &'static str> {
         let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
         self.check_current(now)?;
         if self.proof.role() != SessionRole::Viewer {
@@ -837,7 +847,7 @@ impl<'a> PublicVideoScopedIce<'a> {
         let CheckedTrack {
             pair: current_pair,
             track: VideoTrack::Remote(current_track),
-            ..
+            path,
         } = self.checked_track(now).await?
         else {
             return Err(RTP_IO);
@@ -847,7 +857,7 @@ impl<'a> PublicVideoScopedIce<'a> {
         }
         self.check_current(now)?;
         guard.0 = None;
-        Ok(Some(packet))
+        Ok(Some((packet, path)))
     }
 
     #[cfg(feature = "v2-public-control")]
@@ -913,14 +923,22 @@ impl<'a> PublicVideoScopedIce<'a> {
             }
             let sctp = pc.sctp().await.ok_or(CONTROL_IO)?;
             let local = self.local_candidates.as_ref().ok_or(PEER)?;
+            let selected = sctp
+                .transport()
+                .ice_transport()
+                .get_selected_candidate_pair()
+                .await
+                .map_err(|_| CONTROL_IO)?
+                .ok_or(CONTROL_IO)?;
             let pair = {
                 let remote = self.runtime.peers.read().map_err(|_| PEER)?;
-                let local = local.candidates();
-                let remote = remote.as_ref().ok_or(PEER)?.candidates();
-                let ([local], [remote]) = (local, remote) else {
-                    return Err(PEER);
-                };
-                (*local, *remote)
+                let pair = (
+                    to_candidate(selected.local())?,
+                    to_candidate(selected.remote())?,
+                );
+                direct_policy::selected(pair.0, pair.1, local, remote.as_ref().ok_or(PEER)?)
+                    .map_err(|_| PEER)?;
+                pair
             };
             check_control_pair(&*sctp, pair).await?;
             Ok(Some((sctp, pair)))
@@ -1060,11 +1078,7 @@ async fn check_control_pair(
         .ok_or(CONTROL_IO)?;
     let actual = (to_candidate(pair.local())?, to_candidate(pair.remote())?);
     connected().await?;
-    if actual != exact
-        || exact.0.address == exact.1.address
-        || exact.0.kind != direct_policy::Kind::Relay
-        || exact.1.kind != direct_policy::Kind::Relay
-    {
+    if actual != exact || exact.0.address == exact.1.address {
         return Err(PAIR_REJECTED);
     }
     Ok(())
@@ -1100,10 +1114,12 @@ impl PublicControlTransport {
 
     pub(crate) fn begin_immediate_batch_round(&self) -> Result<Instant, &'static str> {
         self.current()?;
-        let RouteRuntime::Relay(relay) = &self.runtime.physical else {
-            return Err(CONTROL_INVALID);
-        };
-        let round = relay.round_deadline.as_ref().ok_or(CONTROL_INVALID)?;
+        let round = match &self.runtime.physical {
+            RouteRuntime::Relay(relay) => &relay.round_deadline,
+            RouteRuntime::Direct(direct) => &direct.boundary.round_deadline,
+        }
+        .as_ref()
+        .ok_or(CONTROL_INVALID)?;
         let until = (Instant::now() + Duration::from_secs(60)).min(self.runtime.deadline);
         round.set(until).map_err(|_| CONTROL_INVALID)?;
         Ok(until)
@@ -1235,7 +1251,7 @@ fn redact_gathered_sdp(sdp: &str) -> Result<String, &'static str> {
     Ok(clean)
 }
 
-#[cfg(all(test, feature = "v2-public-control", target_os = "linux"))]
+#[cfg(all(test, feature = "v2-public-control"))]
 #[path = "public_control_scoped_ice_tests.rs"]
 mod control_tests;
 
@@ -1300,6 +1316,77 @@ mod tests {
         };
         let grant = RelayGrant::new(target, &room.to_string(), scope.expires_at, true).unwrap();
         proof.stage_ice(grant, config, NOW).unwrap()
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    #[tokio::test]
+    async fn automatic_batch_production_plan_preserves_scope_and_deadlines() {
+        let identity = Identity::generate_ephemeral().unwrap();
+        let peer = Identity::generate_ephemeral().unwrap();
+        let pin = identity
+            .verify_peer(
+                &PairingCandidate::parse(&peer.pairing_code()).unwrap(),
+                &peer.public().fingerprint,
+            )
+            .unwrap();
+        let room = Uuid::new_v4();
+        let scope = PublicVideoScope {
+            expires_at: NOW + 1800,
+            ..scope(IceMode::DirectPreferred)
+        };
+        let proof = crate::public_video::PublicControlProof::prepare_immediate_batch(
+            &identity,
+            &pin,
+            SessionRole::Host,
+            room,
+            [1; 32],
+            scope,
+            NOW,
+        )
+        .unwrap()
+        .into_inner();
+        let target = RelayTarget {
+            local: "192.168.1.2".parse().unwrap(),
+            turn: scope.turn,
+            relay: *scope.turn.ip(),
+            port_min: scope.relay_ports.0,
+            port_max: scope.relay_ports.1,
+        };
+        let grant = || RelayGrant::new(target, &room.to_string(), scope.expires_at, true).unwrap();
+        let config = |mode| IceConfig {
+            mode,
+            expires_at: scope.expires_at,
+            session_id: room.to_string(),
+            ice_servers: vec![IceServer {
+                urls: vec![format!("turn:{TURN}?transport=udp")],
+                username: format!("{}:{room}", scope.expires_at),
+                credential: "AAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+            }],
+        };
+        assert!(proof
+            .prepare_ice(grant(), config(IceMode::RelayOnly), NOW)
+            .is_err());
+        assert!(
+            crate::direct_policy::DirectGrant::new(grant(), vec![], &config(scope.mode), NOW)
+                .is_err()
+        );
+        let plan = proof.prepare_ice(grant(), config(scope.mode), NOW).unwrap();
+        assert!(!plan.host_candidates_allowed());
+        let rtc = plan.rtc_configuration(NOW).unwrap();
+        assert_eq!(
+            rtc.ice_transport_policy(),
+            webrtc::peer_connection::RTCIceTransportPolicy::All
+        );
+        assert_eq!(rtc.ice_servers().len(), 2);
+        assert!(plan.rtc_configuration(scope.expires_at).is_err());
+        let owner = PublicVideoScopedIce::new(proof, plan, NOW).unwrap();
+        let RouteRuntime::Direct(direct) = &owner.runtime.physical else {
+            panic!("direct runtime");
+        };
+        let round = direct.boundary.round_deadline.as_ref().unwrap();
+        round.set(Instant::now()).unwrap();
+        assert!(direct.boundary.deadline() <= Instant::now());
+        assert!(!owner.runtime.active());
     }
 
     fn offer(candidate: &str) -> String {

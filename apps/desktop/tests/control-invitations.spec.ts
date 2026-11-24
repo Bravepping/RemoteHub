@@ -98,3 +98,87 @@ test('previews each locally selected invitation and starts only its own round', 
     { role: 'viewer', invitationId: 'b'.repeat(32) },
   ]);
 });
+
+for (const role of ['host', 'viewer'] as const) {
+  test(
+    'displays actual ' + role + ' path and clears it when stopped',
+    async ({ page }) => {
+      await page.addInitScript((role) => {
+        const state = {
+          phase: 'starting',
+          path: undefined as string | undefined,
+        };
+        Object.assign(window, {
+          routeFixture: state,
+          isTauri: true,
+          __TAURI_INTERNALS__: {
+            async invoke(command: string) {
+              switch (command) {
+                case 'get_runtime_info':
+                  return {
+                    app_version: 'fixture',
+                    os: 'windows',
+                    arch: 'x86_64',
+                    capture_backend: 'fixture',
+                    remote_access_enabled: false,
+                    public_video_available: true,
+                    public_control_available: true,
+                    public_invitation_picker: true,
+                  };
+                case 'select_control_invitation':
+                  return [
+                    {
+                      id: 'a'.repeat(32),
+                      role,
+                      round: 1,
+                      expires_at: 1900000000,
+                    },
+                  ];
+                case 'public_video_start':
+                  return 'b'.repeat(32);
+                case 'public_video_status':
+                  return {
+                    phase: state.phase,
+                    connection_path: state.path,
+                    profile_consumed: true,
+                  };
+                case 'public_video_next_frame':
+                  return new ArrayBuffer(0);
+                case 'public_video_stop':
+                  state.phase = 'closed';
+                  return;
+                default:
+                  throw new Error('UNEXPECTED_COMMAND_FIXTURE');
+              }
+            },
+          },
+        });
+      }, role);
+      await page.goto('/');
+      await page.getByRole('button', { name: '打开邀请 ZIP 或 JSON' }).click();
+      await page.getByLabel('第 1 轮').check();
+      await page.getByRole('button', { name: '开始本次会话' }).click();
+      const path = page.getByTestId('connection-path');
+      await expect(path).toContainText('正在确认路径');
+      for (const next of ['direct', 'relay']) {
+        await page.evaluate((next) => {
+          const state = (
+            window as unknown as {
+              routeFixture: { phase: string; path: string };
+            }
+          ).routeFixture;
+          state.phase = 'ready';
+          state.path = next;
+        }, next);
+        await expect(path).toHaveText(
+          next === 'direct' ? '本次连接：直连' : '本次连接：TURN 中继',
+        );
+      }
+      await page.getByRole('button', { name: '停止并清屏' }).click();
+      await expect(path).toBeHidden();
+      await expect(
+        page.getByRole('region', { name: '公网远控测试' }).getByRole('status'),
+      ).toContainText('本次会话已停止');
+    },
+  );
+}
