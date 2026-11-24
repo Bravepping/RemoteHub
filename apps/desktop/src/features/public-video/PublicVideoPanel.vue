@@ -123,40 +123,38 @@ function toggleInput() {
   }
 }
 
-function point(e: MouseEvent) {
+function inputPointOrPause(e: MouseEvent) {
   const target = surface.value;
   const image = canvas.value;
   if (!inputEnabled.value || !target || !image) return;
-  return normalizedPublicPoint(
+  const normalized = normalizedPublicPoint(
     target.getBoundingClientRect(),
     image.width,
     image.height,
     e.clientX,
     e.clientY,
   );
+  if (!normalized) pauseInput();
+  return normalized;
 }
 
 function move(e: MouseEvent) {
-  if (performance.now() - lastMove < 50) return;
-  const normalized = point(e);
-  if (normalized && session?.sendInput({ kind: 'mouse_move', ...normalized }))
+  const normalized = inputPointOrPause(e);
+  if (!normalized || performance.now() - lastMove < 50) return;
+  if (session?.sendInput({ kind: 'mouse_move', ...normalized }))
     lastMove = performance.now();
 }
 
 function button(e: MouseEvent, down: boolean) {
+  const normalized = inputPointOrPause(e);
   if (
-    !inputEnabled.value ||
+    !normalized ||
     e.button < 0 ||
     e.button > 2 ||
     pressedButtons.has(e.button) === down
   )
     return;
   e.preventDefault();
-  const normalized = point(e);
-  if (!normalized) {
-    if (!down) pauseInput();
-    return;
-  }
   if (
     session?.sendInput({ kind: 'mouse_move', ...normalized }) &&
     session.sendInput({ kind: 'mouse_button', button: e.button, down })
