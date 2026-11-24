@@ -345,7 +345,7 @@ impl<'a> PublicVideoScopedIce<'a> {
         let inner = webrtc::runtime::default_runtime().ok_or(SETUP)?;
         let stopped = Arc::new(AtomicBool::new(false));
         #[cfg(feature = "v2-public-control")]
-        let round_deadline = proof.is_immediate_control_batch().then(Arc::default);
+        let round_deadline = proof.has_round_deadline().then(Arc::default);
         #[cfg(not(feature = "v2-public-control"))]
         let round_deadline = None;
         let physical = match &plan.grant {
@@ -410,7 +410,7 @@ impl<'a> PublicVideoScopedIce<'a> {
         #[cfg(feature = "v2-public-control")]
         {
             Arc::get_mut(&mut boundary).unwrap().round_deadline =
-                proof.is_immediate_control_batch().then(Arc::default);
+                proof.has_round_deadline().then(Arc::default);
         }
         let deadline = boundary.deadline();
         Ok(Self {
@@ -457,10 +457,20 @@ impl<'a> PublicVideoScopedIce<'a> {
         {
             return Err(SETUP);
         }
-        let deadline = Instant::now() + Duration::from_secs(120);
+        let seconds = {
+            #[cfg(feature = "v2-public-control-sustained")]
+            if proof.is_sustained_control() {
+                crate::public_video::SUSTAINED_CONTROL_SCOPE_TTL_SECONDS
+            } else {
+                120
+            }
+            #[cfg(not(feature = "v2-public-control-sustained"))]
+            120
+        };
+        let deadline = Instant::now() + Duration::from_secs(seconds);
         let stopped = Arc::new(AtomicBool::new(false));
         #[cfg(feature = "v2-public-control")]
-        let round_deadline = proof.is_immediate_control_batch().then(Arc::default);
+        let round_deadline = proof.has_round_deadline().then(Arc::default);
         #[cfg(not(feature = "v2-public-control"))]
         let round_deadline = None;
         Ok(Self {
@@ -483,7 +493,7 @@ impl<'a> PublicVideoScopedIce<'a> {
                 deadline,
             }),
             issued_at: now,
-            expires_at: now + 120,
+            expires_at: now + seconds,
             start: Some(DriverStart {
                 config: RTCConfigurationBuilder::default()
                     .with_ice_servers(vec![server])
@@ -865,6 +875,11 @@ impl<'a> PublicVideoScopedIce<'a> {
         self.proof.is_immediate_control_batch()
     }
 
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(crate) fn is_sustained_control(&self) -> bool {
+        self.proof.is_sustained_control()
+    }
+
     /// Poll for the one reliable device-bound control channel. A video-only
     /// owner cannot create or claim it. The returned transport does not grant
     /// consent; its lifetime shares the revocable video/ICE boundary.
@@ -954,6 +969,9 @@ impl<'a> PublicVideoScopedIce<'a> {
         Ok(Some(PublicControlTransport {
             role: self.proof.role(),
             scope,
+            immediate_batch: self.proof.is_immediate_control_batch(),
+            #[cfg(feature = "v2-public-control-sustained")]
+            sustained: self.proof.is_sustained_control(),
             runtime: self.runtime.clone(),
             issued_at: self.issued_at,
             expires_at: self.expires_at,
@@ -1090,6 +1108,9 @@ async fn check_control_pair(
 pub struct PublicControlTransport {
     role: SessionRole,
     scope: InputScope,
+    immediate_batch: bool,
+    #[cfg(feature = "v2-public-control-sustained")]
+    sustained: bool,
     runtime: Arc<ScopedRuntime>,
     issued_at: u64,
     expires_at: u64,
@@ -1114,13 +1135,41 @@ impl PublicControlTransport {
 
     pub(crate) fn begin_immediate_batch_round(&self) -> Result<Instant, &'static str> {
         self.current()?;
+        if !self.immediate_batch {
+            return Err(CONTROL_INVALID);
+        }
+        let until = (Instant::now() + Duration::from_secs(60)).min(self.runtime.deadline);
+        self.set_round_deadline(until)
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub fn is_sustained(&self) -> bool {
+        self.sustained
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(crate) fn begin_sustained_round(&self) -> Result<Instant, &'static str> {
+        self.current()?;
+        if !self.sustained {
+            return Err(CONTROL_INVALID);
+        }
+        let until = Instant::now()
+            + Duration::from_secs(crate::public_video::SUSTAINED_CONTROL_SESSION_SECONDS);
+        // Do not advertise a complete run from a partial capability; no
+        // fallback and no TURN or socket lease extension.
+        if until > self.runtime.deadline {
+            return Err(CONTROL_INVALID);
+        }
+        self.set_round_deadline(until)
+    }
+
+    fn set_round_deadline(&self, until: Instant) -> Result<Instant, &'static str> {
         let round = match &self.runtime.physical {
             RouteRuntime::Relay(relay) => &relay.round_deadline,
             RouteRuntime::Direct(direct) => &direct.boundary.round_deadline,
         }
         .as_ref()
         .ok_or(CONTROL_INVALID)?;
-        let until = (Instant::now() + Duration::from_secs(60)).min(self.runtime.deadline);
         round.set(until).map_err(|_| CONTROL_INVALID)?;
         Ok(until)
     }

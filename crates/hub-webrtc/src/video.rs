@@ -24,6 +24,8 @@ pub struct Packetizer {
     initialized: bool,
     #[cfg(feature = "v2-public-video-60s-test")]
     public_video_60s_test: bool,
+    #[cfg(feature = "v2-public-control-sustained")]
+    public_video_sustained: bool,
     pub source_sps_profile_level_id: Option<String>,
     pub ignored_constraint_set5: bool,
 }
@@ -37,7 +39,24 @@ impl Packetizer {
         }
     }
 
+    /// Native sustained-purpose actor only. This does not choose an RTP
+    /// route or replace the actor's independent monotonic cutoff.
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub fn public_video_sustained() -> Self {
+        Self {
+            public_video_sustained: true,
+            ..Self::default()
+        }
+    }
+
     fn frame_timestamp(&self, pts: i64) -> Result<u32, String> {
+        #[cfg(feature = "v2-public-control-sustained")]
+        if self.public_video_sustained {
+            return timestamp_with_limit(
+                pts,
+                (crate::public_video::SUSTAINED_CONTROL_SESSION_SECONDS as i64) * 10_000_000,
+            );
+        }
         #[cfg(feature = "v2-public-video-60s-test")]
         if self.public_video_60s_test {
             return timestamp_with_limit(pts, 600_000_000);
@@ -159,6 +178,20 @@ mod tests {
         );
         assert!(long.packets(frame(600_000_001), 102).is_err());
     }
+    #[cfg(feature = "v2-public-control-sustained")]
+    #[test]
+    fn sustained_timestamp_is_fixed_and_sequence_wrap_is_exact() {
+        let mut p = Packetizer::public_video_sustained();
+        p.sequence = u16::MAX - 1;
+        let first = p.packets(frame(0), 102).unwrap();
+        assert_eq!(first[0].header.sequence_number, u16::MAX - 1);
+        assert_eq!(first[1].header.sequence_number, u16::MAX);
+        assert_eq!(first[2].header.sequence_number, 0);
+        let last = p.packets(frame(18_000_000_000), 102).unwrap();
+        assert_eq!(last[0].header.timestamp, 162_000_000);
+        assert!(p.packets(frame(18_000_000_001), 102).is_err());
+    }
+
     #[test]
     fn exact_clock_and_fua_payloads_preserve_access_unit() {
         assert_eq!(

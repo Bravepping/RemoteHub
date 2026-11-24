@@ -39,7 +39,17 @@ async fn direct_batch_round_automatically_falls_back_to_turn() {
     exchange(true, true, true).await;
 }
 
+#[cfg(feature = "v2-public-control-sustained")]
+#[tokio::test]
+async fn sustained_signed_mock_turn_path_sets_exact_one_shot_media_deadline() {
+    exchange_inner(false, false, true, true).await;
+}
+
 async fn exchange(batch: bool, automatic: bool, blocked: bool) {
+    exchange_inner(batch, automatic, blocked, false).await;
+}
+
+async fn exchange_inner(batch: bool, automatic: bool, blocked: bool, sustained: bool) {
     timeout(Duration::from_secs(20), async {
         let relay = local_turn::FixtureTurn::start(15).await.unwrap();
         relay.block_direct(blocked);
@@ -55,13 +65,28 @@ async fn exchange(batch: bool, automatic: bool, blocked: bool) {
             } else {
                 IceMode::RelayOnly
             },
-            expires_at: now + if batch { 1800 } else { 90 },
+            expires_at: now
+                + if sustained {
+                    2400
+                } else if batch {
+                    1800
+                } else {
+                    90
+                },
         };
         let host_identity = Identity::generate_ephemeral().unwrap();
         let viewer_identity = Identity::generate_ephemeral().unwrap();
         let proof = |local, remote: &Identity, role| {
             let remote_pub = remote.public();
             let peer = local_identity_pin(local, &remote_pub);
+            #[cfg(feature = "v2-public-control-sustained")]
+            if sustained {
+                return PublicControlProof::prepare_sustained(
+                    local, &peer, role, room, [3; 32], scope, now,
+                )
+                .unwrap()
+                .into_inner();
+            }
             let prepare = if batch {
                 PublicControlProof::prepare_immediate_batch
             } else {
@@ -143,6 +168,21 @@ async fn exchange(batch: bool, automatic: bool, blocked: bool) {
             assert!(host_channel.begin_immediate_batch_round().is_err());
         } else {
             assert!(host_channel.begin_immediate_batch_round().is_err());
+        }
+
+        #[cfg(feature = "v2-public-control-sustained")]
+        if sustained {
+            assert!(host_channel.is_sustained());
+            assert!(viewer_channel.is_sustained());
+            let earliest = Instant::now() + Duration::from_secs(1800);
+            let host_deadline = host_channel.begin_sustained_round().unwrap();
+            let viewer_deadline = viewer_channel.begin_sustained_round().unwrap();
+            assert!(host_deadline >= earliest);
+            assert!(viewer_deadline <= Instant::now() + Duration::from_secs(1800));
+            assert!(host_channel.begin_sustained_round().is_err());
+            assert!(viewer_channel.begin_sustained_round().is_err());
+            assert_eq!(host_deadline, host.runtime.effective_deadline());
+            assert_eq!(viewer_deadline, viewer.runtime.effective_deadline());
         }
 
         let host_video = host.checked_track(wall_seconds().unwrap()).await.unwrap();

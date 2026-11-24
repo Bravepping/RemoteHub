@@ -211,6 +211,24 @@ impl IceConfig {
         Ok(self.relay_configuration())
     }
 
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(crate) fn control_sustained_configuration(
+        &self,
+        grant: &RelayGrant,
+        now: u64,
+    ) -> Result<RTCConfiguration, String> {
+        if self.expires_at != grant.expires_at {
+            return Err("ICE_SESSION_EXPIRED_OR_MISMATCHED".into());
+        }
+        self.validate_mode_with_max(
+            grant,
+            now,
+            IceMode::RelayOnly,
+            crate::public_video::SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
+        )?;
+        Ok(self.relay_configuration())
+    }
+
     fn relay_configuration(&self) -> RTCConfiguration {
         let servers = self
             .ice_servers

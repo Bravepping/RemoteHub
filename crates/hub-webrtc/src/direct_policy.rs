@@ -38,6 +38,24 @@ impl DirectGrant {
         Self::new_with_ttl(relay, Vec::new(), config, now, 1800)
     }
 
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(crate) fn new_control_sustained(
+        relay: RelayGrant,
+        config: &IceConfig,
+        now: u64,
+    ) -> Result<Self, String> {
+        if config.expires_at != relay.expires_at() {
+            return Err("DIRECT_CONFIG_EXPIRY_MISMATCH".into());
+        }
+        Self::new_with_ttl(
+            relay,
+            Vec::new(),
+            config,
+            now,
+            crate::public_video::SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
+        )
+    }
+
     fn new_with_ttl(
         relay: RelayGrant,
         private_peers: Vec<Ipv4Addr>,

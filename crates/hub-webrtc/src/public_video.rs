@@ -22,6 +22,8 @@ const MAX_SCOPE_TTL: u64 = 600;
 pub const SUSTAINED_CONTROL_SESSION_SECONDS: u64 = 1800;
 #[cfg(feature = "v2-public-control-sustained")]
 pub const SUSTAINED_CONTROL_SCOPE_TTL_SECONDS: u64 = 2400;
+#[cfg(feature = "v2-public-control-sustained")]
+pub const SUSTAINED_CONTROL_BOOTSTRAP_MIN_SECONDS: u64 = 1860;
 const PROOF_TTL: u64 = 15;
 const INVALID_SCOPE: &str = "PUBLIC_VIDEO_SCOPE_INVALID";
 const EXPIRED: &str = "PUBLIC_VIDEO_SCOPE_EXPIRED";
@@ -250,6 +252,20 @@ impl<'a> PublicVideoProof<'a> {
         matches!(self.purpose, Purpose::ControlBatch)
     }
 
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(crate) fn is_sustained_control(&self) -> bool {
+        matches!(self.purpose, Purpose::ControlSustained)
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn has_round_deadline(&self) -> bool {
+        #[cfg(feature = "v2-public-control-sustained")]
+        if self.is_sustained_control() {
+            return true;
+        }
+        self.is_immediate_control_batch()
+    }
+
     #[cfg(feature = "v2-public-video-wss")]
     fn validate_exact_sdp(
         &self,
@@ -282,9 +298,9 @@ impl<'a> PublicVideoProof<'a> {
     ) -> Result<PublicVideoIcePlan, &'static str> {
         #[cfg(feature = "v2-public-control-sustained")]
         if matches!(self.purpose, Purpose::ControlSustained) {
-            // This signed contract is inert until the distinct sustained
-            // route and media deadline are wired end to end.
-            return Err("PUBLIC_CONTROL_SUSTAINED_STAGE_UNAVAILABLE");
+            return PublicVideoIcePlan::prepare_control_sustained(
+                self.scope, self.room, grant, config, now,
+            );
         }
         #[cfg(feature = "v2-public-control")]
         if self.is_immediate_control_batch() {

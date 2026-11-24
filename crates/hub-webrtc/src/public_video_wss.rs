@@ -301,6 +301,51 @@ pub enum PublicVideoWssEvent {
     PeerLeft,
 }
 
+#[cfg(feature = "v2-public-control")]
+enum SharedRound {
+    Legacy,
+    Immediate(watch::Sender<Option<std::time::Instant>>),
+    #[cfg(feature = "v2-public-control-sustained")]
+    Sustained(watch::Sender<Option<std::time::Instant>>),
+}
+
+#[cfg(feature = "v2-public-control")]
+impl SharedRound {
+    fn matches(&self, ice: &PublicVideoScopedIce<'_>) -> bool {
+        #[cfg(feature = "v2-public-control-sustained")]
+        if ice.is_sustained_control() {
+            return matches!(self, Self::Sustained(tx) if tx.borrow().is_none());
+        }
+        match self {
+            Self::Legacy => !ice.is_immediate_control_batch(),
+            Self::Immediate(tx) => ice.is_immediate_control_batch() && tx.borrow().is_none(),
+            #[cfg(feature = "v2-public-control-sustained")]
+            Self::Sustained(_) => false,
+        }
+    }
+
+    fn begin(
+        self,
+        control: &crate::public_video::PublicControlTransport,
+    ) -> Result<Option<std::time::Instant>, &'static str> {
+        let deadline = match self {
+            Self::Legacy => None,
+            Self::Immediate(tx) => {
+                let deadline = control.begin_immediate_batch_round()?;
+                tx.send_replace(Some(deadline));
+                Some(deadline)
+            }
+            #[cfg(feature = "v2-public-control-sustained")]
+            Self::Sustained(tx) => {
+                let deadline = control.begin_sustained_round()?;
+                tx.send_replace(Some(deadline));
+                Some(deadline)
+            }
+        };
+        Ok(deadline)
+    }
+}
+
 struct ScopedWire {
     relay: AuthenticatedLoopbackRelay,
     role: Role,
@@ -1293,7 +1338,7 @@ impl ScopedPublicVideoWss<'_> {
         F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
         Owner: std::future::Future<Output = Result<(), &'static str>>,
     {
-        self.run_control_inner(stop, state, media, None, start_control)
+        self.run_control_inner(stop, state, media, SharedRound::Legacy, start_control)
             .await
     }
 
@@ -1313,8 +1358,39 @@ impl ScopedPublicVideoWss<'_> {
         F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
         Owner: std::future::Future<Output = Result<(), &'static str>>,
     {
-        self.run_control_inner(stop, state, media, Some(round_deadline), start_control)
-            .await
+        self.run_control_inner(
+            stop,
+            state,
+            media,
+            SharedRound::Immediate(round_deadline),
+            start_control,
+        )
+        .await
+    }
+
+    /// Exact sustained proof and immutable lease only. The native owner
+    /// remains alive in view-only mode after an input grant expires.
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub async fn run_with_media_and_control_sustained<F, Owner>(
+        self,
+        stop: watch::Receiver<bool>,
+        state: watch::Sender<ScopedWssState>,
+        media: ScopedVideoMedia,
+        round_deadline: watch::Sender<Option<std::time::Instant>>,
+        start_control: F,
+    ) -> Result<ScopedWssEnd, &'static str>
+    where
+        F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
+        Owner: std::future::Future<Output = Result<(), &'static str>>,
+    {
+        self.run_control_inner(
+            stop,
+            state,
+            media,
+            SharedRound::Sustained(round_deadline),
+            start_control,
+        )
+        .await
     }
 
     #[cfg(feature = "v2-public-control")]
@@ -1323,20 +1399,14 @@ impl ScopedPublicVideoWss<'_> {
         mut stop: watch::Receiver<bool>,
         state: watch::Sender<ScopedWssState>,
         mut media: ScopedVideoMedia,
-        round_deadline: Option<watch::Sender<Option<std::time::Instant>>>,
+        round: SharedRound,
         start_control: F,
     ) -> Result<ScopedWssEnd, &'static str>
     where
         F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
         Owner: std::future::Future<Output = Result<(), &'static str>>,
     {
-        if !self.control
-            || media.role() != self.wire.role
-            || self.ice.is_immediate_control_batch() != round_deadline.is_some()
-            || round_deadline
-                .as_ref()
-                .is_some_and(|tx| tx.borrow().is_some())
-        {
+        if !self.control || media.role() != self.wire.role || !round.matches(&self.ice) {
             return Err(PROTOCOL);
         }
         state.send_replace(ScopedWssState::Negotiating);
@@ -1384,16 +1454,9 @@ impl ScopedPublicVideoWss<'_> {
                     Err(_) => break 'session Err("PUBLIC_CONTROL_CHANNEL_TIMEOUT"),
                 },
             };
-            let round_end = match &round_deadline {
-                Some(tx) => {
-                    let deadline = match control.begin_immediate_batch_round() {
-                        Ok(deadline) => deadline,
-                        Err(error) => break 'session Err(error),
-                    };
-                    tx.send_replace(Some(deadline));
-                    Some(deadline)
-                }
-                None => None,
+            let round_end = match round.begin(&control) {
+                Ok(end) => end,
+                Err(error) => break 'session Err(error),
             };
             let round_elapsed = async {
                 match round_end {
