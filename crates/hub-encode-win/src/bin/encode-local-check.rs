@@ -14,6 +14,7 @@ fn classify(error: &hub_encode_win::EncodeError) -> String {
         EncodeError::Capture(CaptureError::Dxgi { stage, code }) => {
             format!("dxgi_stage={stage} HRESULT=0x{code:08X}")
         }
+        EncodeError::Capture(CaptureError::DxgiState(state)) => format!("dxgi_stage={state}"),
         EncodeError::Capture(CaptureError::NoFrames)
         | EncodeError::Timeout("live first DXGI frame") => "NO_DESKTOP_FRAME".into(),
         EncodeError::Capture(_) => "DXGI_UNAVAILABLE".into(),

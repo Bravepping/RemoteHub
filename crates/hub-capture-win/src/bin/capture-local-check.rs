@@ -7,15 +7,8 @@ fn status(error: &CaptureError) -> String {
     match error {
         CaptureError::AccessLost => "DXGI_ACCESS_LOST".into(),
         CaptureError::Dxgi { stage, code } => format!("api={stage} HRESULT=0x{code:08x}"),
-        CaptureError::Unavailable(detail) => {
-            if detail == "首轮实验尚不支持旋转显示器" {
-                return "ROTATED_PRIMARY".into();
-            }
-            if detail == "没有可用的主显示器 DXGI output" {
-                return "NO_ATTACHED_PRIMARY_OUTPUT".into();
-            }
-            "DXGI_UNAVAILABLE".into()
-        }
+        CaptureError::DxgiState(state) => format!("api={state}"),
+        CaptureError::Unavailable(_) => "DXGI_UNAVAILABLE".into(),
         CaptureError::InvalidArgument(_) => "INVALID_FRAME".into(),
         _ => "CAPTURE_FAILED".into(),
     }

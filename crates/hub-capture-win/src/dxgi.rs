@@ -3,13 +3,14 @@ use std::time::Instant;
 use windows::{
     core::Interface,
     Win32::{
-        Foundation::{HMODULE, POINT},
+        Foundation::HMODULE,
         Graphics::{
             Direct3D::D3D_DRIVER_TYPE_UNKNOWN,
             Direct3D11::*,
             Dxgi::{Common::*, *},
-            Gdi::{MonitorFromPoint, MONITOR_DEFAULTTOPRIMARY},
+            Gdi::{GetMonitorInfoW, MONITORINFO},
         },
+        UI::WindowsAndMessaging::MONITORINFOF_PRIMARY,
     },
 };
 
@@ -60,7 +61,6 @@ impl DxgiCapture {
         unsafe {
             let factory: IDXGIFactory1 =
                 CreateDXGIFactory1().map_err(|e| native_error("CREATE_FACTORY", e))?;
-            let primary = MonitorFromPoint(POINT { x: 0, y: 0 }, MONITOR_DEFAULTTOPRIMARY);
             let mut adapter_index = 0;
             loop {
                 let adapter = match factory.EnumAdapters1(adapter_index) {
@@ -80,13 +80,23 @@ impl DxgiCapture {
                     let description = output
                         .GetDesc()
                         .map_err(|e| native_error("OUTPUT_DESC", e))?;
-                    if description.Monitor != primary || !description.AttachedToDesktop.as_bool() {
+                    if !description.AttachedToDesktop.as_bool() || description.Monitor.is_invalid()
+                    {
+                        continue;
+                    }
+                    // Use Windows' actual primary flag, not a point in a
+                    // potentially virtualized DPI coordinate space.
+                    let mut info = MONITORINFO {
+                        cbSize: std::mem::size_of::<MONITORINFO>() as u32,
+                        ..Default::default()
+                    };
+                    if !GetMonitorInfoW(description.Monitor, &mut info).as_bool()
+                        || info.dwFlags & MONITORINFOF_PRIMARY == 0
+                    {
                         continue;
                     }
                     if description.Rotation != DXGI_MODE_ROTATION_IDENTITY {
-                        return Err(CaptureError::Unavailable(
-                            "首轮实验尚不支持旋转显示器".into(),
-                        ));
+                        return Err(CaptureError::DxgiState("ROTATED_PRIMARY"));
                     }
                     let base_adapter: IDXGIAdapter = adapter
                         .cast()
@@ -105,10 +115,8 @@ impl DxgiCapture {
                         Some(&mut context),
                     )
                     .map_err(|e| native_error("CREATE_DEVICE", e))?;
-                    let device = device
-                        .ok_or_else(|| CaptureError::Unavailable("D3D11 device missing".into()))?;
-                    let context = context
-                        .ok_or_else(|| CaptureError::Unavailable("D3D11 context missing".into()))?;
+                    let device = device.ok_or(CaptureError::DxgiState("DEVICE_MISSING"))?;
+                    let context = context.ok_or(CaptureError::DxgiState("CONTEXT_MISSING"))?;
                     let output1: IDXGIOutput1 =
                         output.cast().map_err(|e| native_error("OUTPUT_CAST", e))?;
                     let duplication = output1
@@ -135,9 +143,7 @@ impl DxgiCapture {
                 }
             }
         }
-        Err(CaptureError::Unavailable(
-            "没有可用的主显示器 DXGI output".into(),
-        ))
+        Err(CaptureError::DxgiState("NO_ATTACHED_PRIMARY_OUTPUT"))
     }
 
     pub fn adapter_name(&self) -> &str {
@@ -160,15 +166,14 @@ impl DxgiCapture {
                 Err(e) => return Err(native_error("ACQUIRE_FRAME", e)),
             }
             let _acquired = AcquiredFrame(&self.duplication);
-            let resource = resource
-                .ok_or_else(|| CaptureError::Unavailable("DXGI frame resource missing".into()))?;
+            let resource = resource.ok_or(CaptureError::DxgiState("FRAME_RESOURCE_MISSING"))?;
             let texture: ID3D11Texture2D = resource
                 .cast()
                 .map_err(|e| native_error("TEXTURE_CAST", e))?;
             let mut desc = D3D11_TEXTURE2D_DESC::default();
             texture.GetDesc(&mut desc);
             if desc.Format != DXGI_FORMAT_B8G8R8A8_UNORM {
-                return Err(CaptureError::Unavailable("DXGI frame is not BGRA8".into()));
+                return Err(CaptureError::DxgiState("FRAME_FORMAT"));
             }
             if self.staging.is_none() || self.width != desc.Width || self.height != desc.Height {
                 desc.Usage = D3D11_USAGE_STAGING;
@@ -186,7 +191,7 @@ impl DxgiCapture {
             let staging = self
                 .staging
                 .as_ref()
-                .ok_or_else(|| CaptureError::Unavailable("staging texture missing".into()))?;
+                .ok_or(CaptureError::DxgiState("STAGING_MISSING"))?;
             self.context.CopyResource(staging, &texture);
             let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
             self.context
@@ -198,9 +203,7 @@ impl DxgiCapture {
                 || self.height > 16384
                 || self.width > 16384
             {
-                return Err(CaptureError::Unavailable(
-                    "invalid mapped DXGI frame".into(),
-                ));
+                return Err(CaptureError::DxgiState("FRAME_GEOMETRY"));
             }
             let size = (mapped.RowPitch as usize)
                 .checked_mul(self.height as usize)

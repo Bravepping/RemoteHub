@@ -51,6 +51,19 @@ fn safe_encoder_error(error: &hub_encode_win::EncodeError) -> &'static str {
             }
             _ => "PUBLIC_VIDEO_CAPTURE_DXGI_INIT_FAILED",
         },
+        EncodeError::Capture(CaptureError::DxgiState(state)) => match *state {
+            "NO_ATTACHED_PRIMARY_OUTPUT" => "PUBLIC_VIDEO_CAPTURE_NO_PRIMARY_OUTPUT",
+            "ROTATED_PRIMARY" => "PUBLIC_VIDEO_CAPTURE_ROTATED_PRIMARY",
+            "FRAME_FORMAT" => "PUBLIC_VIDEO_CAPTURE_FRAME_FORMAT",
+            "FRAME_GEOMETRY" => "PUBLIC_VIDEO_CAPTURE_FRAME_GEOMETRY",
+            "FRAME_RESOURCE_MISSING" | "STAGING_MISSING" => {
+                "PUBLIC_VIDEO_CAPTURE_DXGI_FRAME_FAILED"
+            }
+            _ => "PUBLIC_VIDEO_CAPTURE_DXGI_INIT_FAILED",
+        },
+        EncodeError::Capture(CaptureError::InvalidArgument(_)) => {
+            "PUBLIC_VIDEO_CAPTURE_FRAME_GEOMETRY"
+        }
         EncodeError::Capture(_) => "PUBLIC_VIDEO_CAPTURE_DESKTOP_UNAVAILABLE",
         EncodeError::Unsupported(_) => "PUBLIC_VIDEO_CAPTURE_H264_UNSUPPORTED",
         EncodeError::Windows(_) => "PUBLIC_VIDEO_CAPTURE_MEDIA_FOUNDATION_FAILED",
@@ -345,6 +358,12 @@ mod tests {
                 code: 0x887a0022,
             })),
             "PUBLIC_VIDEO_CAPTURE_DXGI_LIMIT"
+        );
+        assert_eq!(
+            safe_encoder_error(&EncodeError::Capture(CaptureError::DxgiState(
+                "NO_ATTACHED_PRIMARY_OUTPUT"
+            ))),
+            "PUBLIC_VIDEO_CAPTURE_NO_PRIMARY_OUTPUT"
         );
         assert_eq!(
             safe_encoder_error(&EncodeError::Native("private native detail".into())),
