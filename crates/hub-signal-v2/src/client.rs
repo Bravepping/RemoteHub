@@ -1,3 +1,5 @@
+#[cfg(feature = "public-control")]
+use crate::wire::PUBLIC_CONTROL_PATH;
 use crate::wire::{
     self, ClientFrame, Flow, Role, ServerFrame, SignalKind, MAX_WIRE, PATH, PUBLIC_VIDEO_PATH,
     ROOM_LIFETIME, VERSION,
@@ -70,6 +72,21 @@ impl RelayToken {
     pub fn new(value: String) -> Result<Self, ClientError> {
         let value = Zeroizing::new(value);
         if !wire::valid_token(&value) {
+            return Err(ClientError::Token);
+        }
+        Ok(Self(value))
+    }
+}
+
+/// Native-only bearer for the distinctly provisioned control route.
+#[cfg(feature = "public-control")]
+pub struct PublicControlToken(Zeroizing<String>);
+
+#[cfg(feature = "public-control")]
+impl PublicControlToken {
+    pub fn new(value: String) -> Result<Self, ClientError> {
+        let value = Zeroizing::new(value);
+        if !wire::valid_public_control_token(&value) {
             return Err(ClientError::Token);
         }
         Ok(Self(value))
@@ -254,6 +271,22 @@ fn public_unicast(ip: Ipv4Addr) -> bool {
         && !(a == 198 && (b == 18 || b == 19))
 }
 
+/// An explicitly configured route, not media or input permission.
+#[cfg(feature = "public-control")]
+pub struct PublicControlEndpoint(PublicVideoEndpoint);
+
+#[cfg(feature = "public-control")]
+impl PublicControlEndpoint {
+    pub fn new(
+        source: Ipv4Addr,
+        relay: SocketAddrV4,
+        expires_at: u64,
+        now: u64,
+    ) -> Result<Self, ClientError> {
+        PublicVideoEndpoint::new(source, relay, expires_at, now).map(Self)
+    }
+}
+
 fn epoch_seconds() -> Result<u64, ClientError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -304,6 +337,8 @@ enum Route<'a> {
     Loopback(SocketAddr, Option<&'a LoopbackTlsTrust>),
     PrivateLan(PrivateLanEndpoint, &'a LoopbackTlsTrust),
     PublicVideo(PublicVideoEndpoint, &'a LoopbackTlsTrust),
+    #[cfg(feature = "public-control")]
+    PublicControl(PublicControlEndpoint, &'a LoopbackTlsTrust),
 }
 
 impl Route<'_> {
@@ -315,6 +350,8 @@ impl Route<'_> {
             Self::Loopback(..) => Err(ClientError::Endpoint),
             Self::PrivateLan(endpoint, _) => Ok(SocketAddr::V4(endpoint.relay)),
             Self::PublicVideo(ref endpoint, _) => Ok(SocketAddr::V4(endpoint.relay)),
+            #[cfg(feature = "public-control")]
+            Self::PublicControl(ref endpoint, _) => Ok(SocketAddr::V4(endpoint.0.relay)),
         }
     }
 
@@ -322,12 +359,16 @@ impl Route<'_> {
         match *self {
             Self::Loopback(_, trust) => trust,
             Self::PrivateLan(_, trust) | Self::PublicVideo(_, trust) => Some(trust),
+            #[cfg(feature = "public-control")]
+            Self::PublicControl(_, trust) => Some(trust),
         }
     }
 
     fn path(&self) -> &'static str {
         match self {
             Self::PublicVideo(..) => PUBLIC_VIDEO_PATH,
+            #[cfg(feature = "public-control")]
+            Self::PublicControl(..) => PUBLIC_CONTROL_PATH,
             _ => PATH,
         }
     }
@@ -335,6 +376,10 @@ impl Route<'_> {
     fn checked_deadline(&self, fallback: Instant) -> Result<Instant, ClientError> {
         match self {
             Self::PublicVideo(endpoint, _) => endpoint.checked_deadline().map(|d| d.min(fallback)),
+            #[cfg(feature = "public-control")]
+            Self::PublicControl(endpoint, _) => {
+                endpoint.0.checked_deadline().map(|d| d.min(fallback))
+            }
             _ => Ok(fallback),
         }
     }
@@ -342,6 +387,8 @@ impl Route<'_> {
     fn into_approval(self) -> Option<PublicVideoEndpoint> {
         match self {
             Self::PublicVideo(endpoint, _) => Some(endpoint),
+            #[cfg(feature = "public-control")]
+            Self::PublicControl(endpoint, _) => Some(endpoint.0),
             _ => None,
         }
     }
@@ -352,16 +399,20 @@ impl Route<'_> {
                 .await
                 .map_err(|_| ClientError::Transport),
             Self::PrivateLan(endpoint, _) => endpoint.dial().await,
-            Self::PublicVideo(ref endpoint, _) => {
-                endpoint.checked_deadline()?;
-                dial_bound(
-                    endpoint.source,
-                    endpoint.relay,
-                    ClientError::PublicVideoBind,
-                )
-                .await
-            }
+            Self::PublicVideo(ref endpoint, _) => Self::dial_public(endpoint).await,
+            #[cfg(feature = "public-control")]
+            Self::PublicControl(ref endpoint, _) => Self::dial_public(&endpoint.0).await,
         }
+    }
+
+    async fn dial_public(endpoint: &PublicVideoEndpoint) -> Result<TcpStream, ClientError> {
+        endpoint.checked_deadline()?;
+        dial_bound(
+            endpoint.source,
+            endpoint.relay,
+            ClientError::PublicVideoBind,
+        )
+        .await
     }
 }
 
@@ -379,7 +430,7 @@ pub async fn connect_private_lan_wss(
     role: Role,
     trust: &LoopbackTlsTrust,
 ) -> Result<PrivateLanRelay, ClientError> {
-    LoopbackRelay::connect_with_route(Route::PrivateLan(endpoint, trust), token, room, role)
+    LoopbackRelay::connect_with_route(Route::PrivateLan(endpoint, trust), &token.0, room, role)
         .await
         .map(PrivateLanRelay)
 }
@@ -413,12 +464,48 @@ pub async fn connect_public_video_wss(
     role: Role,
     trust: &LoopbackTlsTrust,
 ) -> Result<PublicVideoRelay, ClientError> {
-    LoopbackRelay::connect_with_route(Route::PublicVideo(endpoint, trust), token, room, role)
+    LoopbackRelay::connect_with_route(Route::PublicVideo(endpoint, trust), &token.0, room, role)
         .await
         .map(PublicVideoRelay)
 }
 
 impl PublicVideoRelay {
+    pub async fn send_signal(&mut self, kind: SignalKind, data: String) -> Result<(), ClientError> {
+        let result = self.0.send_signal(kind, data).await;
+        if result.is_err() {
+            self.0.socket.take();
+        }
+        result
+    }
+
+    pub async fn next_event(&mut self, wait: Duration) -> Result<RelayEvent, ClientError> {
+        self.0.next_event(wait).await
+    }
+
+    pub async fn leave(self) -> Result<(), ClientError> {
+        self.0.leave().await
+    }
+}
+
+/// Scoped signaling for the control route, not device or input approval.
+#[cfg(feature = "public-control")]
+pub struct PublicControlRelay(LoopbackRelay);
+
+#[cfg(feature = "public-control")]
+pub async fn connect_public_control_wss(
+    endpoint: PublicControlEndpoint,
+    token: &PublicControlToken,
+    room: RoomId,
+    role: Role,
+    trust: &LoopbackTlsTrust,
+) -> Result<PublicControlRelay, ClientError> {
+    LoopbackRelay::connect_with_route(Route::PublicControl(endpoint, trust), &token.0, room, role)
+        .await
+        .map(PublicControlRelay)
+}
+
+#[cfg(feature = "public-control")]
+impl PublicControlRelay {
     pub async fn send_signal(&mut self, kind: SignalKind, data: String) -> Result<(), ClientError> {
         let result = self.0.send_signal(kind, data).await;
         if result.is_err() {
@@ -472,7 +559,7 @@ impl LoopbackRelay {
         room: RoomId,
         role: Role,
     ) -> Result<Self, ClientError> {
-        Self::connect_with_route(Route::Loopback(address, None), token, room, role).await
+        Self::connect_with_route(Route::Loopback(address, None), &token.0, room, role).await
     }
 
     /// Use WSS with an independently provisioned trust anchor. The HTTP
@@ -485,12 +572,12 @@ impl LoopbackRelay {
         role: Role,
         trust: &LoopbackTlsTrust,
     ) -> Result<Self, ClientError> {
-        Self::connect_with_route(Route::Loopback(address, Some(trust)), token, room, role).await
+        Self::connect_with_route(Route::Loopback(address, Some(trust)), &token.0, room, role).await
     }
 
     async fn connect_with_route(
         route: Route<'_>,
-        token: &RelayToken,
+        token: &str,
         room: RoomId,
         role: Role,
     ) -> Result<Self, ClientError> {
@@ -522,7 +609,7 @@ impl LoopbackRelay {
             let mut request = format!("{scheme}://{address}{path}")
                 .into_client_request()
                 .map_err(|_| ClientError::Endpoint)?;
-            let auth = Zeroizing::new(format!("Bearer {}", token.0.as_str()));
+            let auth = Zeroizing::new(format!("Bearer {token}"));
             let mut auth_header = HeaderValue::from_str(&auth).map_err(|_| ClientError::Token)?;
             auth_header.set_sensitive(true);
             request

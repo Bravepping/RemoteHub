@@ -7,6 +7,10 @@ pub use client::{
     LoopbackTlsTrust, PrivateLanEndpoint, PrivateLanRelay, PublicVideoEndpoint, PublicVideoRelay,
     RelayEvent, RelayToken, RoomId,
 };
+#[cfg(feature = "public-control")]
+pub use client::{
+    connect_public_control_wss, PublicControlEndpoint, PublicControlRelay, PublicControlToken,
+};
 
 pub mod wire;
 pub use wire::{Role, SignalKind};

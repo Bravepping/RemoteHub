@@ -5,10 +5,12 @@ use std::{
 };
 
 const PROFILE_ARG: &str = "--public-video-profile";
+const CONTROL_ARG: &str = "--public-control-profile";
 
 pub(crate) enum LaunchMode {
     Normal,
     PublicVideo(Option<PathBuf>),
+    PublicControl(Option<PathBuf>),
 }
 
 impl LaunchMode {
@@ -16,34 +18,45 @@ impl LaunchMode {
         let mut args = args.into_iter();
         let mut result = Self::Normal;
         while let Some(arg) = args.next() {
-            if arg == PROFILE_ARG {
-                if result.is_public_video() {
-                    return Self::PublicVideo(None);
-                }
-                let path = args
-                    .next()
-                    .map(PathBuf::from)
-                    .filter(|path| path.is_absolute());
-                result = Self::PublicVideo(path);
-            } else if arg
-                .as_encoded_bytes()
-                .starts_with(b"--public-video-profile=")
-            {
-                // Unsupported shorthand still counts as an explicit request,
-                // so a typo cannot leave the process in ordinary LAN mode.
-                return Self::PublicVideo(None);
+            let control = arg == CONTROL_ARG
+                || arg
+                    .as_encoded_bytes()
+                    .starts_with(b"--public-control-profile=");
+            let video = arg == PROFILE_ARG
+                || arg
+                    .as_encoded_bytes()
+                    .starts_with(b"--public-video-profile=");
+            if !control && !video {
+                continue;
             }
+            let mode = if control {
+                Self::PublicControl
+            } else {
+                Self::PublicVideo
+            };
+            if result.is_public_video() || arg.as_encoded_bytes().contains(&b'=') {
+                return mode(None);
+            }
+            let path = args
+                .next()
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute());
+            result = mode(path);
         }
         result
     }
 
     pub(crate) fn is_public_video(&self) -> bool {
-        matches!(self, Self::PublicVideo(_))
+        matches!(self, Self::PublicVideo(_) | Self::PublicControl(_))
+    }
+
+    pub(crate) fn is_control(&self) -> bool {
+        matches!(self, Self::PublicControl(_))
     }
 
     pub(crate) fn profile(&self) -> Option<&Path> {
         match self {
-            Self::PublicVideo(path) => path.as_deref(),
+            Self::PublicVideo(path) | Self::PublicControl(path) => path.as_deref(),
             Self::Normal => None,
         }
     }
@@ -93,6 +106,27 @@ mod tests {
             duplicate.require_lan(),
             Err("LAN_DISABLED_IN_PUBLIC_VIDEO_MODE")
         );
+    }
+
+    #[test]
+    fn explicit_control_never_falls_back_to_video_or_lan() {
+        let path = std::env::temp_dir().join("remotehub-fixture-do-not-open.json");
+        let mode = LaunchMode::parse([CONTROL_ARG.into(), path.clone().into_os_string()]);
+        assert!(mode.is_control());
+        assert_eq!(mode.profile(), Some(path.as_path()));
+        assert!(mode.require_lan().is_err());
+
+        let mixed = LaunchMode::parse([
+            PROFILE_ARG.into(),
+            path.clone().into_os_string(),
+            CONTROL_ARG.into(),
+            path.into_os_string(),
+        ]);
+        assert!(mixed.profile().is_none());
+        assert!(mixed.require_lan().is_err());
+        let bad = parse(&["--public-control-profile=relative.json"]);
+        assert!(bad.is_control());
+        assert!(bad.profile().is_none());
     }
 
     #[test]

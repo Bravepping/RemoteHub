@@ -31,10 +31,18 @@ const remoteState = ref('idle');
 // Runtime refresh deliberately clears the displayed runtime snapshot. Keep
 // this launch-mode panel alive so refresh cannot dispose an active session.
 const publicPanelMounted = ref(false);
+const publicControlLaunch = ref(false);
 watch(
   () => props.runtime?.public_video_available,
   (available) => {
     if (available === true) publicPanelMounted.value = true;
+  },
+  { immediate: true },
+);
+watch(
+  () => props.runtime?.public_control_available,
+  (available) => {
+    if (available === true) publicControlLaunch.value = true;
   },
   { immediate: true },
 );
@@ -131,6 +139,7 @@ onUnmounted(() => {
       <PublicVideoPanel
         v-if="publicPanelMounted"
         :available="runtime?.public_video_available === true"
+        :control-available="publicControlLaunch"
         :profile-consumed="runtime?.public_video_profile_consumed === true"
       />
       <RemoteWorkspace

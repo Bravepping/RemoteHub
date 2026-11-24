@@ -3,6 +3,10 @@
 
 use base64::{engine::general_purpose::STANDARD, Engine};
 use hub_identity::{pairing::VerifiedPeer, Identity};
+#[cfg(feature = "v2-public-control-desktop")]
+use hub_webrtc::public_video_wss::{
+    PublicControlNetworkConfig, PublicControlToken, PublicControlWssInvitation,
+};
 use hub_webrtc::{
     ice_policy::{public_v4, IceConfig, IceMode, IceServer, RelayGrant, RelayTarget},
     lan_wire::Key,
@@ -56,8 +60,14 @@ pub(crate) struct PublicVideoProfile {
     credentials: Option<SessionInputs>,
 }
 
+enum Invitation {
+    Video(PublicVideoWssInvitation),
+    #[cfg(feature = "v2-public-control-desktop")]
+    Control(PublicControlWssInvitation),
+}
+
 struct SessionInputs {
-    invitation: PublicVideoWssInvitation,
+    invitation: Invitation,
     pairing_key: Arc<Key>,
     wire_nonce: String,
     session_nonce: Zeroizing<[u8; 32]>,
@@ -82,6 +92,7 @@ impl Sensitive {
 #[serde(deny_unknown_fields)]
 struct ProfileJson {
     version: u8,
+    purpose: Option<String>,
     role: Role,
     room: String,
     expires_at: u64,
@@ -106,15 +117,29 @@ impl PublicVideoProfile {
     /// Call with an exact path chosen in the native UI, never an IPC payload.
     /// The accepted bytes are snapshotted once; consent never reopens the file.
     pub(crate) fn load(path: &Path, now: u64) -> Result<Self, &'static str> {
+        Self::load_with_purpose(path, now, false)
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    pub(crate) fn load_control(path: &Path, now: u64) -> Result<Self, &'static str> {
+        Self::load_with_purpose(path, now, true)
+    }
+
+    fn load_with_purpose(path: &Path, now: u64, control: bool) -> Result<Self, &'static str> {
         let file = open_local_regular(path)?;
         let mut bytes = Zeroizing::new(Vec::with_capacity(MAX_FILE + 1));
         file.take((MAX_FILE + 1) as u64)
             .read_to_end(&mut bytes)
             .map_err(|_| FILE)?;
-        Self::parse(&bytes, now)
+        Self::parse_with_purpose(&bytes, now, control)
     }
 
+    #[cfg(test)]
     fn parse(bytes: &[u8], now: u64) -> Result<Self, &'static str> {
+        Self::parse_with_purpose(bytes, now, false)
+    }
+
+    fn parse_with_purpose(bytes: &[u8], now: u64, control: bool) -> Result<Self, &'static str> {
         if bytes.is_empty() || bytes.len() > MAX_FILE {
             return Err(SIZE);
         }
@@ -126,7 +151,15 @@ impl PublicVideoProfile {
         let ca_sha256 = parse_hex::<32>(&input.ca_sha256)?;
         let fingerprint = parse_hex::<32>(&input.expected_peer_fingerprint)?;
         let pair_bytes = Zeroizing::new(parse_pairing_key(&input.pairing_key.0)?);
+        let purpose_ok = if control {
+            cfg!(feature = "v2-public-control-desktop")
+                && input.purpose.as_deref() == Some("public-control")
+                && input.mode == IceMode::RelayOnly
+        } else {
+            input.purpose.is_none()
+        };
         if input.version != 1
+            || !purpose_ok
             || !matches!(input.mode, IceMode::DirectPreferred | IceMode::RelayOnly)
             || wire_nonce == room
             || *session_nonce == [0; 32]
@@ -174,13 +207,40 @@ impl PublicVideoProfile {
         {
             return Err(INVALID);
         }
-        let token_bytes = Zeroizing::new(parse_hex::<32>(&input.relay_token.0)?);
+        let token_hex = if control {
+            input.relay_token.0.strip_prefix("rhctl1-").ok_or(INVALID)?
+        } else {
+            input.relay_token.0.as_str()
+        };
+        let token_bytes = Zeroizing::new(parse_hex::<32>(token_hex)?);
         if *token_bytes == [0; 32] || *token_bytes == *session_nonce {
             return Err(INVALID);
         }
-        let token = RelayToken::new(input.relay_token.into_string()).map_err(|_| INVALID)?;
-        let invitation = PublicVideoWssInvitation::new(room, input.role, input.expires_at, token)
-            .map_err(|_| INVALID)?;
+        let invitation = if control {
+            #[cfg(feature = "v2-public-control-desktop")]
+            {
+                let token = PublicControlToken::new(input.relay_token.into_string())
+                    .map_err(|_| INVALID)?;
+                Invitation::Control(PublicControlWssInvitation::new(
+                    room,
+                    input.role,
+                    input.expires_at,
+                    token,
+                )?)
+            }
+            #[cfg(not(feature = "v2-public-control-desktop"))]
+            {
+                return Err(INVALID);
+            }
+        } else {
+            let token = RelayToken::new(input.relay_token.into_string()).map_err(|_| INVALID)?;
+            Invitation::Video(PublicVideoWssInvitation::new(
+                room,
+                input.role,
+                input.expires_at,
+                token,
+            )?)
+        };
         let pairing_key = Arc::new(Key::parse(&input.pairing_key.0).map_err(|_| INVALID)?);
         let ice_config = IceConfig {
             mode: input.mode,
@@ -236,6 +296,79 @@ impl PublicVideoProfile {
         now: u64,
         approved: bool,
     ) -> Result<PublicVideoNetworkConfig<'a>, &'static str> {
+        if !matches!(
+            self.credentials.as_ref().map(|c| &c.invitation),
+            Some(Invitation::Video(_))
+        ) {
+            return Err(if self.credentials.is_none() {
+                CONSUMED
+            } else {
+                INVALID
+            });
+        }
+        let (credentials, grant) = self.take_inputs(local, peer, now, approved)?;
+        #[allow(irrefutable_let_patterns)]
+        let Invitation::Video(invitation) = credentials.invitation
+        else {
+            return Err(INVALID);
+        };
+        Ok(PublicVideoNetworkConfig {
+            invitation,
+            pairing_key: credentials.pairing_key,
+            wire_nonce: credentials.wire_nonce,
+            session_nonce: *credentials.session_nonce,
+            ca_der: &self.ca_der,
+            local_identity: local,
+            peer,
+            scope: self.display.scope,
+            relay_grant: grant,
+            ice_config: credentials.ice_config,
+        })
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    pub(crate) fn take_control_config<'a>(
+        &'a mut self,
+        local: &'a Identity,
+        peer: &'a VerifiedPeer,
+        now: u64,
+        approved: bool,
+    ) -> Result<PublicControlNetworkConfig<'a>, &'static str> {
+        if !matches!(
+            self.credentials.as_ref().map(|c| &c.invitation),
+            Some(Invitation::Control(_))
+        ) {
+            return Err(if self.credentials.is_none() {
+                CONSUMED
+            } else {
+                INVALID
+            });
+        }
+        let (credentials, grant) = self.take_inputs(local, peer, now, approved)?;
+        let Invitation::Control(invitation) = credentials.invitation else {
+            return Err(INVALID);
+        };
+        Ok(PublicControlNetworkConfig {
+            invitation,
+            pairing_key: credentials.pairing_key,
+            wire_nonce: credentials.wire_nonce,
+            session_nonce: *credentials.session_nonce,
+            ca_der: &self.ca_der,
+            local_identity: local,
+            peer,
+            scope: self.display.scope,
+            relay_grant: grant,
+            ice_config: credentials.ice_config,
+        })
+    }
+
+    fn take_inputs(
+        &mut self,
+        local: &Identity,
+        peer: &VerifiedPeer,
+        now: u64,
+        approved: bool,
+    ) -> Result<(SessionInputs, RelayGrant), &'static str> {
         if !approved {
             return Err(DENIED);
         }
@@ -262,19 +395,7 @@ impl PublicVideoProfile {
             approved,
         )
         .map_err(|_| INVALID)?;
-        let credentials = self.credentials.take().ok_or(CONSUMED)?;
-        Ok(PublicVideoNetworkConfig {
-            invitation: credentials.invitation,
-            pairing_key: credentials.pairing_key,
-            wire_nonce: credentials.wire_nonce,
-            session_nonce: *credentials.session_nonce,
-            ca_der: &self.ca_der,
-            local_identity: local,
-            peer,
-            scope: approval.scope,
-            relay_grant: grant,
-            ice_config: credentials.ice_config,
-        })
+        Ok((self.credentials.take().ok_or(CONSUMED)?, grant))
     }
 }
 
@@ -463,6 +584,29 @@ mod tests {
 
     fn parse_fixture(input: &Value, now: u64) -> Result<PublicVideoProfile, &'static str> {
         PublicVideoProfile::parse(&serde_json::to_vec(input).unwrap(), now)
+    }
+
+    #[cfg(feature = "v2-public-control-desktop")]
+    #[test]
+    fn purpose_and_bearer_cannot_be_reused_between_video_and_control() {
+        let mut control = fixture();
+        let video = serde_json::to_vec(&control).unwrap();
+        assert!(PublicVideoProfile::parse_with_purpose(&video, NOW, true).is_err());
+
+        control["purpose"] = json!("public-control");
+        control["mode"] = json!("relay_only");
+        control["relay_token"] = json!(format!("rhctl1-{}", "45".repeat(32)));
+        let bytes = serde_json::to_vec(&control).unwrap();
+        assert!(PublicVideoProfile::parse_with_purpose(&bytes, NOW, true).is_ok());
+        assert!(PublicVideoProfile::parse(&bytes, NOW).is_err());
+
+        control["mode"] = json!("direct_preferred");
+        assert!(PublicVideoProfile::parse_with_purpose(
+            &serde_json::to_vec(&control).unwrap(),
+            NOW,
+            true
+        )
+        .is_err());
     }
 
     #[test]

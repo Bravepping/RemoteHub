@@ -530,8 +530,15 @@ fn read_access() -> Result<Access, &'static str> {
 }
 
 async fn run() -> Result<(), &'static str> {
-    if std::env::var("REMOTEHUB_V2_MODE").as_deref() == Ok("public-video") {
-        return public_video_profile::run_from_env().await;
+    match std::env::var("REMOTEHUB_V2_MODE").as_deref() {
+        Ok("public-video") => {
+            return public_video_profile::run_from_env(public_video_profile::Purpose::Video).await;
+        }
+        #[cfg(feature = "v2-public-control")]
+        Ok("public-control") => {
+            return public_video_profile::run_from_env(public_video_profile::Purpose::Control).await;
+        }
+        _ => {}
     }
     let access = read_access()?;
     let addr: SocketAddr = match std::env::var("REMOTEHUB_V2_BIND") {

@@ -8,6 +8,23 @@ pub const VERSION: u8 = 2;
 pub const PATH: &str = "/v2/ws";
 /// Reserved for the explicitly admitted public-video profile; not a fallback.
 pub const PUBLIC_VIDEO_PATH: &str = "/v2/public-video/ws";
+#[cfg(feature = "public-control")]
+pub const PUBLIC_CONTROL_PATH: &str = "/v2/public-control/ws";
+#[cfg(feature = "public-control")]
+pub const PUBLIC_CONTROL_TOKEN_PREFIX: &str = "rhctl1-";
+
+#[cfg(feature = "public-control")]
+pub fn valid_public_control_token(value: &str) -> bool {
+    value
+        .strip_prefix(PUBLIC_CONTROL_TOKEN_PREFIX)
+        .is_some_and(|hex| {
+            hex.len() == 64
+                && hex
+                    .bytes()
+                    .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+                && hex.bytes().any(|byte| byte != b'0')
+        })
+}
 pub const MAX_WIRE: usize = 64 * 1024;
 pub const MAX_SIGNAL: usize = 32 * 1024;
 pub const MAX_CHALLENGE_DATA: usize = 1024;

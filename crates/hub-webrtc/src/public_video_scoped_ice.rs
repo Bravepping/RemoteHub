@@ -50,6 +50,21 @@ use webrtc::{
     rtp_transceiver::{RTCRtpTransceiverDirection, RTCRtpTransceiverInit},
 };
 
+#[cfg(feature = "v2-public-control")]
+use crate::{control::MAX_BYTES as MAX_CONTROL_BYTES, input_approval::InputScope};
+#[cfg(feature = "v2-public-control")]
+use rtc::peer_connection::{
+    configuration::setting_engine::SctpMaxMessageSize,
+    transport::{RTCDtlsTransportState, RTCIceTransportState, RTCSctpTransportState},
+};
+#[cfg(feature = "v2-public-control")]
+use tokio::sync::mpsc;
+#[cfg(feature = "v2-public-control")]
+use webrtc::{
+    data_channel::{DataChannel, DataChannelEvent, RTCDataChannelInit, RTCDataChannelState},
+    peer_connection::transport::SctpTransport,
+};
+
 const DRIVER: &str = "PUBLIC_VIDEO_ICE_DRIVER";
 const WAIT: &str = "PUBLIC_VIDEO_ICE_DRIVER_TIMEOUT";
 const DRIVER_WAIT: Duration = Duration::from_secs(8);
@@ -195,15 +210,56 @@ struct DriverStart {
     host_candidates: bool,
 }
 
+#[cfg(feature = "v2-public-control")]
+const CONTROL_LABEL: &str = "remotehub-public-control.v1";
+#[cfg(feature = "v2-public-control")]
+const CONTROL_PROTOCOL: &str = "remotehub.device-consented.v1";
+#[cfg(feature = "v2-public-control")]
+const CONTROL_INVALID: &str = "PUBLIC_CONTROL_CHANNEL_INVALID";
+#[cfg(feature = "v2-public-control")]
+const CONTROL_IO: &str = "PUBLIC_CONTROL_CHANNEL_UNAVAILABLE";
+
+#[cfg(feature = "v2-public-control")]
+struct ControlEvents {
+    host: bool,
+    claimed: AtomicBool,
+    ready: mpsc::Sender<Arc<dyn DataChannel>>,
+    runtime: Arc<ScopedRuntime>,
+}
+
+#[cfg(feature = "v2-public-control")]
+#[derive(Default)]
+struct ControlLane {
+    incoming: Option<mpsc::Receiver<Arc<dyn DataChannel>>>,
+    channel: Option<Arc<dyn DataChannel>>,
+    opened: bool,
+}
+
 struct DriverEvents {
     gathered: watch::Sender<bool>,
     seen_track: Arc<AtomicBool>,
+    #[cfg(feature = "v2-public-control")]
+    control: Option<ControlEvents>,
 }
 #[async_trait::async_trait]
 impl PeerConnectionEventHandler for DriverEvents {
     async fn on_ice_gathering_state_change(&self, state: RTCIceGatheringState) {
         if state == RTCIceGatheringState::Complete {
             self.gathered.send_replace(true);
+        }
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    async fn on_data_channel(&self, channel: Arc<dyn DataChannel>) {
+        let Some(control) = &self.control else {
+            return;
+        };
+        if !control.host
+            || control.claimed.swap(true, Ordering::AcqRel)
+            || control.ready.try_send(channel).is_err()
+        {
+            // A remote-created second or reflected channel must not continue.
+            control.runtime.stop();
         }
     }
 
@@ -255,6 +311,8 @@ pub struct PublicVideoScopedIce<'a> {
     local_candidates: Option<VerifiedCandidates>,
     remote_applied: bool,
     path_verified: bool,
+    #[cfg(feature = "v2-public-control")]
+    control: ControlLane,
 }
 
 impl<'a> PublicVideoScopedIce<'a> {
@@ -313,6 +371,8 @@ impl<'a> PublicVideoScopedIce<'a> {
             local_candidates: None,
             remote_applied: false,
             path_verified: false,
+            #[cfg(feature = "v2-public-control")]
+            control: ControlLane::default(),
         })
     }
 
@@ -350,6 +410,8 @@ impl<'a> PublicVideoScopedIce<'a> {
             local_candidates: None,
             remote_applied: false,
             path_verified: false,
+            #[cfg(feature = "v2-public-control")]
+            control: ControlLane::default(),
         })
     }
 
@@ -407,6 +469,8 @@ impl<'a> PublicVideoScopedIce<'a> {
             local_candidates: None,
             remote_applied: false,
             path_verified: false,
+            #[cfg(feature = "v2-public-control")]
+            control: ControlLane::default(),
         })
     }
 
@@ -423,6 +487,17 @@ impl<'a> PublicVideoScopedIce<'a> {
         let start = self.start.take().ok_or(DRIVER)?;
         let (gather_tx, gather_rx) = watch::channel(false);
         let runtime = self.runtime.clone();
+        #[cfg(feature = "v2-public-control")]
+        let control_events = self.proof.control_scope().map(|_| {
+            let (ready, incoming) = mpsc::channel(1);
+            self.control.incoming = Some(incoming);
+            ControlEvents {
+                host: self.proof.role() == SessionRole::Host,
+                claimed: AtomicBool::new(false),
+                ready,
+                runtime: runtime.clone(),
+            }
+        });
         let pc = timeout(self.wait(DRIVER_WAIT), async {
             let mut media = MediaEngine::default();
             let codec = RTCRtpCodec {
@@ -440,17 +515,23 @@ impl<'a> PublicVideoScopedIce<'a> {
                     RtpCodecKind::Video,
                 )
                 .map_err(|_| DRIVER)?;
+            let settings = SettingEngineBuilder::new()
+                .with_multicast_dns_mode(MulticastDnsMode::Disabled)
+                .with_network_types(vec![NetworkType::Udp4])
+                .with_include_loopback_candidate(false);
+            #[cfg(feature = "v2-public-control")]
+            let settings = if control_events.is_some() {
+                settings.with_sctp_max_message_size(SctpMaxMessageSize::Bounded(
+                    MAX_CONTROL_BYTES as u32,
+                ))
+            } else {
+                settings
+            };
             let pc = PeerConnectionBuilder::new()
                 .with_configuration(start.config)
                 .with_host_candidates(start.host_candidates)
                 .with_udp_addrs(vec![start.local])
-                .with_setting_engine(
-                    SettingEngineBuilder::new()
-                        .with_multicast_dns_mode(MulticastDnsMode::Disabled)
-                        .with_network_types(vec![NetworkType::Udp4])
-                        .with_include_loopback_candidate(false)
-                        .build(),
-                )
+                .with_setting_engine(settings.build())
                 .with_media_engine(media)
                 // The dedicated driver also terminates on PeerConnection drop
                 // if the caller cannot await the normal close path.
@@ -459,6 +540,8 @@ impl<'a> PublicVideoScopedIce<'a> {
                 .with_handler(Arc::new(DriverEvents {
                     gathered: gather_tx,
                     seen_track: self.seen_track.clone(),
+                    #[cfg(feature = "v2-public-control")]
+                    control: control_events,
                 }))
                 .build()
                 .await
@@ -494,6 +577,20 @@ impl<'a> PublicVideoScopedIce<'a> {
                     .await
                     .map_err(|_| DRIVER)?;
                 }
+            }
+            #[cfg(feature = "v2-public-control")]
+            if self.proof.control_scope().is_some() && self.proof.role() == SessionRole::Viewer {
+                self.control.channel = Some(
+                    pc.create_data_channel(
+                        CONTROL_LABEL,
+                        Some(RTCDataChannelInit {
+                            protocol: CONTROL_PROTOCOL.into(),
+                            ..Default::default()
+                        }),
+                    )
+                    .await
+                    .map_err(|_| CONTROL_IO)?,
+                );
             }
             Ok::<_, &'static str>(Arc::new(pc) as Arc<dyn PeerConnection>)
         })
@@ -536,7 +633,12 @@ impl<'a> PublicVideoScopedIce<'a> {
             pc.set_local_description(desc).await.map_err(|_| DRIVER)?;
             gathered.wait_for(|done| *done).await.map_err(|_| DRIVER)?;
             let desc = pc.local_description().await.ok_or(DRIVER)?;
-            redact_gathered_sdp(&desc.sdp)
+            let clean = redact_gathered_sdp(&desc.sdp)?;
+            #[cfg(feature = "v2-public-control")]
+            if self.proof.control_scope().is_some() {
+                return Ok::<_, &'static str>(clean.replace("a=ice-options:trickle\r\n", ""));
+            }
+            Ok(clean)
         })
         .await
         .map_err(|_| WAIT)??;
@@ -726,6 +828,96 @@ impl<'a> PublicVideoScopedIce<'a> {
         Ok(Some(packet))
     }
 
+    /// Poll for the one reliable device-bound control channel. A video-only
+    /// owner cannot create or claim it. The returned transport does not grant
+    /// consent; its lifetime shares the revocable video/ICE boundary.
+    #[cfg(feature = "v2-public-control")]
+    pub async fn open_control(
+        &mut self,
+        now: u64,
+    ) -> Result<Option<PublicControlTransport>, &'static str> {
+        let scope = self.proof.control_scope().ok_or(CONTROL_INVALID)?;
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        self.check_current(now)?;
+        if self.control.opened {
+            return Err(CONTROL_INVALID);
+        }
+        let ready = (|| {
+            if !self.remote_applied || self.local_candidates.is_none() {
+                return Ok(false);
+            }
+            if self.control.channel.is_none() {
+                match self.control.incoming.as_mut().ok_or(CONTROL_IO)?.try_recv() {
+                    Ok(channel) => self.control.channel = Some(channel),
+                    Err(mpsc::error::TryRecvError::Empty) => return Ok(false),
+                    Err(mpsc::error::TryRecvError::Disconnected) => return Err(CONTROL_IO),
+                }
+            }
+            Ok(true)
+        })()?;
+        if !ready {
+            guard.0 = None;
+            return Ok(None);
+        }
+        let channel = self.control.channel.as_ref().ok_or(CONTROL_IO)?;
+        let pc = self.pc.as_ref().ok_or(DRIVER)?;
+        let result = timeout(self.wait(PAIR_WAIT), async {
+            match channel.ready_state().await.map_err(|_| CONTROL_IO)? {
+                RTCDataChannelState::Connecting => return Ok(None),
+                RTCDataChannelState::Open => {}
+                _ => return Err(CONTROL_IO),
+            }
+            if channel.label().await.map_err(|_| CONTROL_IO)? != CONTROL_LABEL
+                || channel.protocol().await.map_err(|_| CONTROL_IO)? != CONTROL_PROTOCOL
+                || !channel.ordered().await.map_err(|_| CONTROL_IO)?
+                || channel.negotiated().await.map_err(|_| CONTROL_IO)?
+                || channel
+                    .max_retransmits()
+                    .await
+                    .map_err(|_| CONTROL_IO)?
+                    .is_some()
+                || channel
+                    .max_packet_life_time()
+                    .await
+                    .map_err(|_| CONTROL_IO)?
+                    .is_some()
+            {
+                return Err(CONTROL_INVALID);
+            }
+            let sctp = pc.sctp().await.ok_or(CONTROL_IO)?;
+            let local = self.local_candidates.as_ref().ok_or(PEER)?;
+            let pair = {
+                let remote = self.runtime.peers.read().map_err(|_| PEER)?;
+                let local = local.candidates();
+                let remote = remote.as_ref().ok_or(PEER)?.candidates();
+                let ([local], [remote]) = (local, remote) else {
+                    return Err(PEER);
+                };
+                (*local, *remote)
+            };
+            check_control_pair(&*sctp, pair).await?;
+            Ok(Some((sctp, pair)))
+        })
+        .await
+        .map_err(|_| CONTROL_IO)??;
+        self.check_current(now)?;
+        guard.0 = None;
+        let Some((sctp, pair)) = result else {
+            return Ok(None);
+        };
+        self.control.opened = true;
+        Ok(Some(PublicControlTransport {
+            role: self.proof.role(),
+            scope,
+            runtime: self.runtime.clone(),
+            issued_at: self.issued_at,
+            expires_at: self.expires_at,
+            channel: self.control.channel.take().ok_or(CONTROL_IO)?,
+            sctp,
+            pair,
+        }))
+    }
+
     /// Revoke first and wait for the local driver to shut down. This does
     /// not claim that a remote TURN allocation was released immediately.
     pub async fn close(&mut self) -> Result<(), &'static str> {
@@ -814,6 +1006,151 @@ impl Drop for PublicVideoScopedIce<'_> {
     }
 }
 
+#[cfg(feature = "v2-public-control")]
+async fn check_control_pair(
+    sctp: &dyn SctpTransport,
+    exact: (Candidate, Candidate),
+) -> Result<(), &'static str> {
+    let dtls = sctp.transport();
+    let ice = dtls.ice_transport();
+    let connected = async || -> Result<(), &'static str> {
+        if sctp.state().await.map_err(|_| CONTROL_IO)? != RTCSctpTransportState::Connected
+            || dtls.state().await.map_err(|_| CONTROL_IO)? != RTCDtlsTransportState::Connected
+            || !matches!(
+                ice.state().await.map_err(|_| CONTROL_IO)?,
+                RTCIceTransportState::Connected | RTCIceTransportState::Completed
+            )
+        {
+            return Err(CONTROL_IO);
+        }
+        Ok(())
+    };
+    connected().await?;
+    let pair = ice
+        .get_selected_candidate_pair()
+        .await
+        .map_err(|_| CONTROL_IO)?
+        .ok_or(CONTROL_IO)?;
+    let actual = (to_candidate(pair.local())?, to_candidate(pair.remote())?);
+    connected().await?;
+    if actual != exact
+        || exact.0.address == exact.1.address
+        || exact.0.kind != direct_policy::Kind::Relay
+        || exact.1.kind != direct_policy::Kind::Relay
+    {
+        return Err(PAIR_REJECTED);
+    }
+    Ok(())
+}
+
+/// The only native holder of this physical session's reliable control lane.
+/// No caller-supplied identity, candidate, alternate channel, or renewal.
+#[cfg(feature = "v2-public-control")]
+pub struct PublicControlTransport {
+    role: SessionRole,
+    scope: InputScope,
+    runtime: Arc<ScopedRuntime>,
+    issued_at: u64,
+    expires_at: u64,
+    channel: Arc<dyn DataChannel>,
+    sctp: Arc<dyn SctpTransport>,
+    pair: (Candidate, Candidate),
+}
+
+#[cfg(feature = "v2-public-control")]
+impl PublicControlTransport {
+    pub fn scope(&self) -> InputScope {
+        self.scope
+    }
+
+    pub fn role(&self) -> SessionRole {
+        self.role
+    }
+
+    pub fn deadline(&self) -> Instant {
+        self.runtime.deadline
+    }
+
+    fn current(&self) -> Result<(), &'static str> {
+        let now = crate::public_video_wss::wall_seconds()?;
+        if self.runtime.active() && (self.issued_at..self.expires_at).contains(&now) {
+            Ok(())
+        } else {
+            Err(CLOSED)
+        }
+    }
+
+    async fn check(&self) -> Result<(), &'static str> {
+        self.current()?;
+        let wait = self
+            .deadline()
+            .saturating_duration_since(Instant::now())
+            .min(PAIR_WAIT);
+        timeout(wait, check_control_pair(&*self.sctp, self.pair))
+            .await
+            .map_err(|_| CONTROL_IO)??;
+        self.current()
+    }
+
+    /// A fresh selected path, checked before and after I/O. Only an already
+    /// authorized native owner may make input/ACK decisions.
+    pub async fn send_text(&mut self, text: &str) -> Result<(), &'static str> {
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        if text.is_empty() || text.len() > MAX_CONTROL_BYTES || text.contains('\0') {
+            return Err(CONTROL_INVALID);
+        }
+        self.check().await?;
+        timeout(PAIR_WAIT, self.channel.try_send_text(text))
+            .await
+            .map_err(|_| CONTROL_IO)?
+            .map_err(|_| CONTROL_IO)?;
+        self.check().await?;
+        guard.0 = None;
+        Ok(())
+    }
+
+    /// Short nonterminal poll; unexpected binary, bad UTF-8, closure or path
+    /// loss is terminal. Callers must still enforce consent and typed syntax.
+    pub async fn recv_text(&mut self) -> Result<Option<bytes::Bytes>, &'static str> {
+        let mut guard = RevokeOnCancel(Some(self.runtime.clone()));
+        self.check().await?;
+        let packet = timeout(MEDIA_POLL, async {
+            loop {
+                match self.channel.poll().await {
+                    Some(DataChannelEvent::OnMessage(packet))
+                        if packet.is_string
+                            && !packet.data.is_empty()
+                            && packet.data.len() <= MAX_CONTROL_BYTES
+                            && std::str::from_utf8(&packet.data).is_ok()
+                            && !packet.data.contains(&0) =>
+                    {
+                        return Ok(packet.data.freeze())
+                    }
+                    Some(
+                        DataChannelEvent::OnOpen
+                        | DataChannelEvent::OnBufferedAmountHigh
+                        | DataChannelEvent::OnBufferedAmountLow,
+                    ) => {}
+                    Some(DataChannelEvent::OnMessage(_)) => return Err(CONTROL_INVALID),
+                    _ => return Err(CONTROL_IO),
+                }
+            }
+        })
+        .await;
+        let packet = packet.ok().transpose()?;
+        self.check().await?;
+        guard.0 = None;
+        Ok(packet)
+    }
+}
+
+#[cfg(feature = "v2-public-control")]
+impl Drop for PublicControlTransport {
+    fn drop(&mut self) {
+        self.runtime.stop();
+    }
+}
+
 // Strip only connection defaults and related-address metadata. The signed
 // SDP policy then rejects unknown fields and validates every exact candidate.
 fn redact_gathered_sdp(sdp: &str) -> Result<String, &'static str> {
@@ -859,6 +1196,10 @@ fn redact_gathered_sdp(sdp: &str) -> Result<String, &'static str> {
     }
     Ok(clean)
 }
+
+#[cfg(all(test, feature = "v2-public-control", target_os = "linux"))]
+#[path = "public_control_scoped_ice_tests.rs"]
+mod control_tests;
 
 #[cfg(test)]
 mod tests {

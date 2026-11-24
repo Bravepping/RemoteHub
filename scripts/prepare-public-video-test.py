@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare a short-lived, view-only RelayOnly test kit without any network I/O."""
+"""Prepare a short-lived RelayOnly test kit without any network I/O."""
 
 import argparse
 import base64
@@ -28,6 +28,8 @@ MAX_CA_FILE = 24 * 1024
 MIN_TTL, MAX_TTL = 180, 600
 DIR_FLAGS = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 FILES = ("host.json", "viewer.json", "wss.env")
+VIDEO = "public-video"
+CONTROL = "public-control"
 PRIVATE = tuple(map(ipaddress.IPv4Network, ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16")))
 NONPUBLIC = PRIVATE + tuple(
     map(ipaddress.IPv4Network, (
@@ -54,7 +56,7 @@ def parser():
         description=__doc__,
         epilog="Linux only. Prompts for the coturn REST secret without echo. "
         "Keep wss.env on the server and transfer only each PC's own JSON via a private channel. "
-        "These files do not start any listener or grant permission to view or capture. "
+        "These files do not start any listener or grant permission to view, capture, or control. "
         "Do not use them beyond the explicitly approved one-room test.",
         allow_abbrev=False,
     )
@@ -78,6 +80,9 @@ def parser():
     p.add_argument("--turn-config", help="Existing local coturn configuration. "
                    "Read the REST secret locally without echo; do not change the file.")
     p.add_argument("--ca-sha256", help="Require an independently verified lowercase SHA-256 of the CA's DER.")
+    p.add_argument("--purpose", choices=(VIDEO, CONTROL), default=VIDEO,
+                   help="Profile purpose (default: public-video). public-control is explicit and "
+                   "requires the separate enabled server and desktop build.")
     p.add_argument("--ttl", type=int, default=300, help="Lifetime in seconds (180–600; default 300).")
     p.add_argument("--self-test", action="store_true", help="Run standalone synthetic tests; use by itself.")
     return p
@@ -296,6 +301,13 @@ def make_kit(args, secret, now):
     nonce = random_bytes(32)
     host_token = random_bytes(32, (nonce,))
     viewer_token = random_bytes(32, (nonce, host_token))
+    purpose = args.purpose
+    if purpose not in (VIDEO, CONTROL):
+        raise Invalid("Profile purpose must be public-video or public-control.")
+    control = purpose == CONTROL
+    prefix = "rhctl1-" if control else ""
+    host_bearer = prefix + host_token.hex()
+    viewer_bearer = prefix + viewer_token.hex()
     expires = now + args.ttl
     username = f"{expires}:{room}"
     common = {
@@ -315,21 +327,24 @@ def make_kit(args, secret, now):
         "turn_credential": turn_credential(secret, username),
         "turn_expires_at": expires,
     }
+    if control:
+        common["purpose"] = CONTROL
     host = dict(common, role="host", local_ipv4=args.host_local_ip,
-                expected_peer_fingerprint=args.viewer_fingerprint, relay_token=host_token.hex())
+                expected_peer_fingerprint=args.viewer_fingerprint, relay_token=host_bearer)
     viewer = dict(common, role="viewer", local_ipv4=args.viewer_local_ip,
-                  expected_peer_fingerprint=args.host_fingerprint, relay_token=viewer_token.hex())
+                  expected_peer_fingerprint=args.host_fingerprint, relay_token=viewer_bearer)
+    profile_env = "REMOTEHUB_V2_PUBLIC_CONTROL" if control else "REMOTEHUB_V2_PUBLIC_VIDEO"
     env = {
-        "REMOTEHUB_V2_MODE": "public-video",
+        "REMOTEHUB_V2_MODE": purpose,
         "REMOTEHUB_V2_BIND": args.bind,
         "REMOTEHUB_V2_TLS_CERT": args.tls_cert,
         "REMOTEHUB_V2_TLS_KEY": args.tls_key,
-        "REMOTEHUB_V2_PUBLIC_VIDEO_ROOM": room.hex,
-        "REMOTEHUB_V2_PUBLIC_VIDEO_HOST_IP": args.host_egress_ip,
-        "REMOTEHUB_V2_PUBLIC_VIDEO_VIEWER_IP": args.viewer_egress_ip,
-        "REMOTEHUB_V2_PUBLIC_VIDEO_HOST_TOKEN": host_token.hex(),
-        "REMOTEHUB_V2_PUBLIC_VIDEO_VIEWER_TOKEN": viewer_token.hex(),
-        "REMOTEHUB_V2_PUBLIC_VIDEO_EXPIRES_AT": str(expires),
+        f"{profile_env}_ROOM": room.hex,
+        f"{profile_env}_HOST_IP": args.host_egress_ip,
+        f"{profile_env}_VIEWER_IP": args.viewer_egress_ip,
+        f"{profile_env}_HOST_TOKEN": host_bearer,
+        f"{profile_env}_VIEWER_TOKEN": viewer_bearer,
+        f"{profile_env}_EXPIRES_AT": str(expires),
     }
     encoded = {
         "host.json": (json.dumps(host, indent=2) + "\n").encode("ascii"),
@@ -525,6 +540,9 @@ def self_test():
                        for line in files["wss.env"].decode().splitlines()[1:])
             self.assertEqual(expires, 1_300)
             self.assertEqual(host["mode"], "relay_only")
+            self.assertNotIn("purpose", host)
+            self.assertNotIn("purpose", viewer)
+            self.assertRegex(host["relay_token"], r"^[0-9a-f]{64}$")
             self.assertEqual(viewer["turn_username"], f"1300:{host['room']}")
             self.assertEqual(host["turn_expires_at"], 1_300)
             self.assertEqual(len(base64.b64decode(host["turn_credential"])), 20)
@@ -555,6 +573,35 @@ def self_test():
                 output = Path(args.out_dir) / filename
                 self.assertEqual(stat.S_IMODE(output.stat().st_mode), 0o600)
                 self.assertEqual(output.read_bytes(), data)
+
+        def test_explicit_control_kit_uses_distinct_purpose_tokens_and_env(self):
+            args = normalize(self.args(purpose=CONTROL))
+            files, expires = make_kit(args, fake_secret, 1_000)
+            host, viewer = (json.loads(files[role + ".json"]) for role in ("host", "viewer"))
+            env = dict(shlex.split(line)[1].split("=", 1)
+                       for line in files["wss.env"].decode().splitlines()[1:])
+            self.assertEqual(env["REMOTEHUB_V2_MODE"], CONTROL)
+            self.assertEqual({key for key in env if key.startswith("REMOTEHUB_V2_PUBLIC_")}, {
+                f"REMOTEHUB_V2_PUBLIC_CONTROL_{name}" for name in
+                ("ROOM", "HOST_IP", "VIEWER_IP", "HOST_TOKEN", "VIEWER_TOKEN", "EXPIRES_AT")
+            })
+            self.assertEqual(env["REMOTEHUB_V2_PUBLIC_CONTROL_ROOM"], uuid.UUID(host["room"]).hex)
+            self.assertEqual(env["REMOTEHUB_V2_PUBLIC_CONTROL_HOST_IP"], args.host_egress_ip)
+            self.assertEqual(env["REMOTEHUB_V2_PUBLIC_CONTROL_VIEWER_IP"], args.viewer_egress_ip)
+            self.assertEqual(env["REMOTEHUB_V2_PUBLIC_CONTROL_EXPIRES_AT"], str(expires))
+            self.assertNotEqual(host["relay_token"], viewer["relay_token"])
+            for role, profile, other in (("host", host, viewer), ("viewer", viewer, host)):
+                self.assertEqual(profile["role"], role)
+                self.assertEqual(profile["purpose"], CONTROL)
+                self.assertEqual(profile["mode"], "relay_only")
+                self.assertRegex(profile["relay_token"], r"^rhctl1-[0-9a-f]{64}$")
+                self.assertNotEqual(profile["relay_token"][7:], profile["session_nonce"])
+                self.assertEqual(env[f"REMOTEHUB_V2_PUBLIC_CONTROL_{role.upper()}_TOKEN"], profile["relay_token"])
+                self.assertNotIn(other["relay_token"].encode(), files[role + ".json"])
+                self.assertNotIn(profile["turn_credential"].encode(), files["wss.env"])
+            self.assertEqual(host["turn_username"], f"{expires}:{host['room']}")
+            self.assertEqual(host["turn_credential"], viewer["turn_credential"])
+            self.assertFalse(any(fake_secret in data for data in files.values()))
 
         def test_failed_publication_leaves_no_partial_output_and_does_not_replace_race(self):
             args = normalize(self.args())

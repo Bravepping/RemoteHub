@@ -97,6 +97,9 @@ describe('public video viewer controller', () => {
         .fn<PublicVideoBridge['nextFrame']>()
         .mockResolvedValue(new ArrayBuffer(0)),
       stop: vi.fn<PublicVideoBridge['stop']>().mockResolvedValue(undefined),
+      sendInput: vi
+        .fn<NonNullable<PublicVideoBridge['sendInput']>>()
+        .mockResolvedValue(undefined),
     };
     const ingress = vi.fn(() => true);
     const renderer = { start: vi.fn(() => ingress), stop: vi.fn() };
@@ -108,17 +111,139 @@ describe('public video viewer controller', () => {
       },
     );
     const update = vi.fn();
-    const session = new PublicVideoSession(bridge, create, update);
+    const input = vi.fn();
+    const session = new PublicVideoSession(
+      bridge,
+      create,
+      update,
+      undefined,
+      input,
+    );
     return {
       bridge,
       renderer,
       create,
       ingress,
       update,
+      input,
       session,
       draw: () => draw(),
     };
   }
+
+  const keyA = { kind: 'key', key: 'KeyA', down: true } as const;
+  const allowed = {
+    phase: 'ready',
+    input_state: 'allowed',
+    profile_consumed: true,
+  };
+
+  it.each([
+    { role: 'host', feature: true, status: allowed },
+    { role: 'viewer', feature: false, status: allowed },
+    {
+      role: 'viewer',
+      feature: true,
+      status: { ...allowed, input_state: 'pending' },
+    },
+    {
+      role: 'viewer',
+      feature: true,
+      status: { ...allowed, input_state: 'denied' },
+    },
+    {
+      role: 'viewer',
+      feature: true,
+      status: { ...allowed, input_state: 'ALLOWED' },
+    },
+  ] as const)(
+    'rejects input absent an explicit current viewer grant ($role, $feature, $status.input_state)',
+    async ({ role, feature, status }) => {
+      const { bridge, session, draw } = harness();
+      bridge.status.mockResolvedValue(status);
+      session.start(role, feature);
+      await vi.advanceTimersByTimeAsync(0);
+      if (role === 'viewer') draw();
+      expect(session.enableInput()).toBe(false);
+      expect(session.sendInput(keyA)).toBe(false);
+      expect(bridge.sendInput).not.toHaveBeenCalled();
+      await session.stop();
+    },
+  );
+
+  it('allows only a painted viewer that explicitly enables input and releases in order on pause', async () => {
+    const { bridge, session, input, draw } = harness();
+    const pending = deferred<unknown>();
+    bridge.sendInput.mockReturnValueOnce(pending.promise);
+    bridge.status.mockResolvedValue(allowed);
+    session.start('viewer', true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.enableInput()).toBe(false);
+    draw();
+    expect(session.sendInput(keyA)).toBe(false);
+    expect(session.enableInput()).toBe(true);
+    expect(session.sendInput({ ...keyA, key: 'AltLeft' })).toBe(false);
+    expect(session.sendInput(keyA)).toBe(true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(session.sendInput({ ...keyA, key: 'KeyB' })).toBe(true);
+    session.pauseInput();
+    expect(input).toHaveBeenLastCalledWith('allowed', false, true);
+    expect(session.enableInput()).toBe(false);
+    expect(session.sendInput(keyA)).toBe(false);
+    expect(bridge.sendInput).toHaveBeenCalledExactlyOnceWith(
+      first,
+      '{"kind":"key","key":"KeyA","down":true}',
+    );
+    pending.resolve(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bridge.sendInput.mock.calls).toEqual([
+      [first, '{"kind":"key","key":"KeyA","down":true}'],
+      [first, '{"kind":"release_all"}'],
+    ]);
+    expect(input).toHaveBeenLastCalledWith('allowed', false, false);
+    await session.stop();
+  });
+
+  it('clears and stops on rejected release without exposing its error', async () => {
+    const { bridge, renderer, session, draw, update } = harness();
+    bridge.status.mockResolvedValue(allowed);
+    bridge.sendInput.mockRejectedValueOnce('secret');
+    session.start('viewer', true);
+    await vi.advanceTimersByTimeAsync(0);
+    draw();
+    expect(session.enableInput()).toBe(true);
+    session.pauseInput();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(renderer.stop).toHaveBeenCalledBefore(bridge.stop);
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    expect(update).toHaveBeenLastCalledWith(
+      'failed',
+      'PUBLIC_CONTROL_INPUT_IPC_FAILED',
+      { playbackMs: 0 },
+    );
+  });
+
+  it('clears immediately and invalidates queued input even when native input is still pending', async () => {
+    const { bridge, renderer, session, draw } = harness();
+    const pending = deferred<unknown>();
+    bridge.status.mockResolvedValue(allowed);
+    bridge.sendInput.mockReturnValueOnce(pending.promise);
+    session.start('viewer', true);
+    await vi.advanceTimersByTimeAsync(0);
+    draw();
+    expect(session.enableInput()).toBe(true);
+    session.sendInput(keyA);
+    await vi.advanceTimersByTimeAsync(0);
+    session.sendInput({ ...keyA, key: 'KeyB' });
+    const stopping = session.stop();
+    expect(renderer.stop).toHaveBeenCalledTimes(1);
+    expect(session.sendInput(keyA)).toBe(false);
+    await stopping;
+    expect(bridge.stop).toHaveBeenCalledExactlyOnceWith(first);
+    pending.resolve(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(bridge.sendInput).toHaveBeenCalledTimes(1);
+  });
 
   it('waits for native ready, has one frame pull, and reports watching only after a paint', async () => {
     const { bridge, create, ingress, update, session, draw } = harness();

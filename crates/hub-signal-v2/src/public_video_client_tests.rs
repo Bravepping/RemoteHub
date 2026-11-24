@@ -137,6 +137,97 @@ fn loopback_endpoint(listener: &TcpListener) -> PublicVideoEndpoint {
     PublicVideoEndpoint::with_clock(LOCALHOST, address, now + 10, now, Instant::now()).unwrap()
 }
 
+#[cfg(feature = "public-control")]
+#[test]
+fn video_and_control_bearers_and_public_endpoint_policy_are_separate() {
+    let raw = "a".repeat(64);
+    let control = format!("rhctl1-{raw}");
+    assert!(RelayToken::new(raw.clone()).is_ok());
+    assert!(RelayToken::new(control.clone()).is_err());
+    assert!(PublicControlToken::new(raw).is_err());
+    assert!(PublicControlToken::new(control).is_ok());
+    assert!(PublicControlToken::new(format!("rhctl1-{}", "0".repeat(64))).is_err());
+    assert!(PublicControlToken::new(format!("rhctl1-{}", "A".repeat(64))).is_err());
+    assert!(PublicControlEndpoint::new(
+        "192.168.2.3".parse().unwrap(),
+        "127.0.0.1:8443".parse().unwrap(),
+        110,
+        100,
+    )
+    .is_err());
+}
+
+#[cfg(feature = "public-control")]
+#[tokio::test]
+async fn control_wss_uses_only_its_exact_path_and_bearer_after_verified_tls() {
+    let (trust, tls) = tls_fixture("127.0.0.1");
+    let listener = TcpListener::bind((LOCALHOST, 0)).await.unwrap();
+    let endpoint = PublicControlEndpoint(loopback_endpoint(&listener));
+    let token_text = format!("rhctl1-{}", "a".repeat(64));
+    let token = PublicControlToken::new(token_text.clone()).unwrap();
+    let room_text = "b".repeat(32);
+    let room = RoomId::new(room_text.clone()).unwrap();
+    let server = async {
+        let (tcp, addr) = listener.accept().await.unwrap();
+        assert_eq!(addr.ip(), LOCALHOST);
+        let stream = tls.accept(tcp).await.unwrap();
+        let mut socket = accept_hdr_async(stream, move |request: &Request, response: Response| {
+            assert_eq!(
+                request.uri().path_and_query().unwrap().as_str(),
+                PUBLIC_CONTROL_PATH
+            );
+            assert!(request.headers()[header::AUTHORIZATION] == format!("Bearer {token_text}"));
+            Ok(response)
+        })
+        .await
+        .unwrap();
+        let hello = socket.next().await.unwrap().unwrap();
+        assert!(matches!(
+            wire::decode::<ClientFrame>(hello.to_text().unwrap()).unwrap(),
+            ClientFrame::Hello { version: VERSION, room, role: Role::Host } if room == room_text
+        ));
+        let waiting = wire::encode(&ServerFrame::Waiting {}).unwrap();
+        socket.send(Message::Text(waiting.into())).await.unwrap();
+        let paired = wire::encode(&ServerFrame::Paired {}).unwrap();
+        socket.send(Message::Text(paired.into())).await.unwrap();
+        // ICE trickle cannot be smuggled into the public control negotiation.
+        let ice = wire::encode(&ServerFrame::Signal {
+            from: Role::Viewer,
+            seq: 1,
+            signal: SignalKind::Ice,
+            data: "unexpected ice".into(),
+        })
+        .unwrap();
+        socket.send(Message::Text(ice.into())).await.unwrap();
+    };
+    let client = async {
+        let mut relay = connect_public_control_wss(endpoint, &token, room, Role::Host, &trust)
+            .await
+            .unwrap();
+        assert!(matches!(
+            relay.next_event(IO_TIMEOUT).await,
+            Ok(RelayEvent::Waiting)
+        ));
+        assert!(matches!(
+            relay.next_event(IO_TIMEOUT).await,
+            Ok(RelayEvent::Paired)
+        ));
+        assert!(matches!(
+            relay.next_event(IO_TIMEOUT).await,
+            Err(ClientError::Protocol)
+        ));
+        assert!(matches!(
+            relay.next_event(IO_TIMEOUT).await,
+            Err(ClientError::Closed)
+        ));
+    };
+    tokio::time::timeout(IO_TIMEOUT, async {
+        tokio::join!(server, client);
+    })
+    .await
+    .unwrap();
+}
+
 #[tokio::test]
 async fn verified_tls_precedes_bearer_and_uses_only_the_public_path_and_role() {
     let (trust, tls) = tls_fixture("127.0.0.1");

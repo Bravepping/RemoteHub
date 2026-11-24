@@ -47,6 +47,8 @@ use webrtc::{
 };
 
 pub use crate::authenticated_relay::{LoopbackTlsTrust, RelayToken, Role, SignalKind};
+#[cfg(feature = "v2-public-control")]
+pub use hub_signal_v2::PublicControlToken;
 
 const JOIN_WAIT: Duration = Duration::from_secs(5);
 const PUBLIC_HOST_PAIR_WAIT: Duration = Duration::from_secs(45);
@@ -123,6 +125,52 @@ pub struct PublicVideoNetworkConfig<'a> {
     pub ice_config: IceConfig,
 }
 
+/// The one-use signaling bearer for the control-only route. Neither this
+/// bearer nor the body of a profile grants host input permission.
+#[cfg(feature = "v2-public-control")]
+pub struct PublicControlWssInvitation {
+    room: Uuid,
+    role: Role,
+    expires_at: u64,
+    token: PublicControlToken,
+}
+
+#[cfg(feature = "v2-public-control")]
+impl PublicControlWssInvitation {
+    pub fn new(
+        room: Uuid,
+        role: Role,
+        expires_at: u64,
+        token: PublicControlToken,
+    ) -> Result<Self, &'static str> {
+        if room.is_nil() || expires_at == 0 {
+            return Err("PUBLIC_CONTROL_WSS_INVITATION");
+        }
+        Ok(Self {
+            room,
+            role,
+            expires_at,
+            token,
+        })
+    }
+}
+
+/// Native-only, independently pinned and approved inputs for the separate
+/// control signaling purpose. ICE and the input owner are not started here.
+#[cfg(feature = "v2-public-control")]
+pub struct PublicControlNetworkConfig<'a> {
+    pub invitation: PublicControlWssInvitation,
+    pub pairing_key: Arc<Key>,
+    pub wire_nonce: String,
+    pub session_nonce: [u8; 32],
+    pub ca_der: &'a [u8],
+    pub local_identity: &'a Identity,
+    pub peer: &'a VerifiedPeer,
+    pub scope: PublicVideoScope,
+    pub relay_grant: RelayGrant,
+    pub ice_config: IceConfig,
+}
+
 struct PreparedPublicVideoRoute {
     endpoint: PublicVideoEndpoint,
     trust: LoopbackTlsTrust,
@@ -156,11 +204,18 @@ impl<'a> PendingPublicNetworkVideoWss<'a> {
         } else {
             JOIN_WAIT
         };
+        #[cfg(feature = "v2-public-control")]
+        let control = self.wss.context.control;
         let (wire, proof) = timeout_at(deadline, self.wss.establish_proof(wait))
             .await
             .map_err(|_| TIMEOUT)??;
         let ice = PublicVideoScopedIce::new(proof, self.plan, wire.check()?)?;
-        Ok(ScopedPublicVideoWss { wire, ice })
+        Ok(ScopedPublicVideoWss {
+            wire,
+            ice,
+            #[cfg(feature = "v2-public-control")]
+            control,
+        })
     }
 
     pub async fn leave(self) -> Result<(), &'static str> {
@@ -207,6 +262,8 @@ struct ProofContext<'a> {
     peer: &'a VerifiedPeer,
     scope: PublicVideoScope,
     scope_deadline: Instant,
+    #[cfg(feature = "v2-public-control")]
+    control: bool,
 }
 
 pub struct PendingPublicVideoWss<'a> {
@@ -300,10 +357,89 @@ impl<'a> PublicVideoWss<'a> {
                     peer: cfg.peer,
                     scope: cfg.scope,
                     scope_deadline: route.deadline,
+                    #[cfg(feature = "v2-public-control")]
+                    control: false,
                 },
                 host_registered: false,
             },
             plan: route.plan,
+        })
+    }
+
+    /// Connect to the independently provisioned control-specific WSS route.
+    /// Preserves the same native pin, relay address and short lease checks,
+    /// but never tries the video-only path (even on failure).
+    #[cfg(feature = "v2-public-control")]
+    pub async fn connect_public_control_wss(
+        cfg: PublicControlNetworkConfig<'a>,
+    ) -> Result<PendingPublicNetworkVideoWss<'a>, &'static str> {
+        let now = wall_seconds()?;
+        let room = cfg.invitation.room;
+        let role = cfg.invitation.role;
+        let scope = cfg.scope;
+        if scope.mode != crate::ice_policy::IceMode::RelayOnly
+            || cfg.invitation.expires_at != scope.expires_at
+        {
+            return Err("PUBLIC_CONTROL_WSS_SCOPE");
+        }
+        scope.checked_mode(now)?;
+        cfg.peer
+            .session_binding(
+                &cfg.local_identity.public(),
+                session_role(role),
+                *room.as_bytes(),
+                cfg.session_nonce,
+            )
+            .map_err(|_| "PUBLIC_CONTROL_IDENTITY_MISMATCH")?;
+        if cfg.ca_der.is_empty()
+            || cfg.ca_der.len() > 64 * 1024
+            || <[u8; 32]>::from(Sha256::digest(cfg.ca_der)) != scope.ca_sha256
+        {
+            return Err("PUBLIC_CONTROL_WSS_CA_PIN");
+        }
+        let trust =
+            LoopbackTlsTrust::from_ca_der(cfg.ca_der).map_err(|_| "PUBLIC_CONTROL_WSS_CA_PIN")?;
+        let plan = PublicVideoIcePlan::prepare(scope, room, cfg.relay_grant, cfg.ice_config, now)?;
+        let deadline = Instant::now() + Duration::from_secs(plan.expires_at() - now);
+        let endpoint = hub_signal_v2::PublicControlEndpoint::new(
+            plan.local_ip(),
+            scope.wss,
+            plan.expires_at(),
+            now,
+        )
+        .map_err(|_| "PUBLIC_CONTROL_WSS_ENDPOINT")?;
+        let room_id = RoomId::new(room.simple().to_string()).map_err(relay_error)?;
+        let relay = timeout_at(
+            deadline,
+            AuthenticatedLoopbackRelay::connect_public_control_wss(
+                endpoint,
+                &cfg.invitation.token,
+                room_id,
+                role,
+                cfg.pairing_key,
+                cfg.wire_nonce,
+                &trust,
+            ),
+        )
+        .await
+        .map_err(|_| TIMEOUT)?
+        .map_err(public_connect_error)?;
+        Ok(PendingPublicNetworkVideoWss {
+            wss: PendingPublicVideoWss {
+                relay,
+                context: ProofContext {
+                    room,
+                    role,
+                    session_nonce: cfg.session_nonce,
+                    identity: cfg.local_identity,
+                    peer: cfg.peer,
+                    scope,
+                    scope_deadline: deadline,
+                    control: true,
+                },
+                host_registered: false,
+            },
+            plan,
         })
     }
 
@@ -350,6 +486,8 @@ impl<'a> PublicVideoWss<'a> {
                 peer: config.peer,
                 scope: config.scope,
                 scope_deadline,
+                #[cfg(feature = "v2-public-control")]
+                control: false,
             },
             host_registered: false,
         })
@@ -722,7 +860,12 @@ impl<'a> PendingPublicVideoWss<'a> {
     ) -> Result<ScopedPublicVideoWss<'a>, &'static str> {
         let (wire, proof) = self.establish_proof(JOIN_WAIT).await?;
         let ice = make_ice(proof, wire.check()?)?;
-        Ok(ScopedPublicVideoWss { wire, ice })
+        Ok(ScopedPublicVideoWss {
+            wire,
+            ice,
+            #[cfg(feature = "v2-public-control")]
+            control: false,
+        })
     }
 
     async fn establish_proof(
@@ -758,15 +901,34 @@ impl<'a> PendingPublicVideoWss<'a> {
             return Err(TIMEOUT);
         }
         let deadline = scope_deadline.min(monotonic_now + PROOF_TTL);
-        let proof = PublicVideoProof::prepare(
-            ctx.identity,
-            ctx.peer,
-            session_role(ctx.role),
-            ctx.room,
-            ctx.session_nonce,
-            ctx.scope,
-            now,
-        )?;
+        let prepare_video = || {
+            PublicVideoProof::prepare(
+                ctx.identity,
+                ctx.peer,
+                session_role(ctx.role),
+                ctx.room,
+                ctx.session_nonce,
+                ctx.scope,
+                now,
+            )
+        };
+        #[cfg(not(feature = "v2-public-control"))]
+        let proof = prepare_video()?;
+        #[cfg(feature = "v2-public-control")]
+        let proof = if ctx.control {
+            crate::public_video::PublicControlProof::prepare(
+                ctx.identity,
+                ctx.peer,
+                session_role(ctx.role),
+                ctx.room,
+                ctx.session_nonce,
+                ctx.scope,
+                now,
+            )?
+            .into_inner()
+        } else {
+            prepare_video()?
+        };
         let challenge = proof.challenge().ok_or(PROTOCOL)?;
         let data = serde_json::to_string(&[challenge.to_bytes().to_vec()]).map_err(|_| PROTOCOL)?;
         let peer_challenge = timeout_at(deadline, async {
@@ -837,6 +999,8 @@ pub enum ScopedWssEnd {
 pub struct ScopedPublicVideoWss<'a> {
     wire: ScopedWire,
     ice: PublicVideoScopedIce<'a>,
+    #[cfg(feature = "v2-public-control")]
+    control: bool,
 }
 
 impl ScopedWire {
@@ -967,6 +1131,10 @@ impl ScopedPublicVideoWss<'_> {
         state: watch::Sender<ScopedWssState>,
         mut media: Option<ScopedVideoMedia>,
     ) -> Result<ScopedWssEnd, &'static str> {
+        #[cfg(feature = "v2-public-control")]
+        if self.control {
+            return Err("PUBLIC_CONTROL_OWNER_REQUIRED");
+        }
         state.send_replace(ScopedWssState::Negotiating);
         let result = tokio::select! {
             biased;
@@ -992,19 +1160,9 @@ impl ScopedPublicVideoWss<'_> {
         state: &watch::Sender<ScopedWssState>,
         media: Option<&mut ScopedVideoMedia>,
     ) -> Result<ScopedWssEnd, &'static str> {
-        let now = self.wire.check_proof()?;
-        timeout_at(self.wire.proof_end, self.ice.start(now))
-            .await
-            .map_err(|_| TIMEOUT)??;
-        if self.wire.role == Role::Viewer {
-            if !self.publish_local().await? || !self.apply_remote().await? {
-                return Ok(ScopedWssEnd::PeerLeft);
-            }
-        } else if !self.apply_remote().await? || !self.publish_local().await? {
+        if !self.negotiate(state).await? {
             return Ok(ScopedWssEnd::PeerLeft);
         }
-        self.ice.check_current(self.wire.check()?)?;
-        state.send_replace(ScopedWssState::Established);
         if let Some(media) = media {
             // WSS I/O remains pending independently of frame processing.
             // Only terminal failure/stop cancels either side of this select.
@@ -1046,6 +1204,119 @@ impl ScopedPublicVideoWss<'_> {
                 Err(error) => return Err(relay_error(error)),
             }
         }
+    }
+
+    async fn negotiate(
+        &mut self,
+        state: &watch::Sender<ScopedWssState>,
+    ) -> Result<bool, &'static str> {
+        let now = self.wire.check_proof()?;
+        timeout_at(self.wire.proof_end, self.ice.start(now))
+            .await
+            .map_err(|_| TIMEOUT)??;
+        if self.wire.role == Role::Viewer {
+            if !self.publish_local().await? || !self.apply_remote().await? {
+                return Ok(false);
+            }
+        } else if !self.apply_remote().await? || !self.publish_local().await? {
+            return Ok(false);
+        }
+        self.ice.check_current(self.wire.check()?)?;
+        state.send_replace(ScopedWssState::Established);
+        Ok(true)
+    }
+
+    /// Run the authenticated video and control channel under the same
+    /// session. The native owner MUST still require separate input permission,
+    /// and return only after it has confirmed release of its own input state.
+    /// Reporting failure to stop is preferred to silently losing that result.
+    #[cfg(feature = "v2-public-control")]
+    pub async fn run_with_media_and_control<F, Owner>(
+        mut self,
+        mut stop: watch::Receiver<bool>,
+        state: watch::Sender<ScopedWssState>,
+        mut media: ScopedVideoMedia,
+        start_control: F,
+    ) -> Result<ScopedWssEnd, &'static str>
+    where
+        F: FnOnce(crate::public_video::PublicControlTransport, watch::Receiver<bool>) -> Owner,
+        Owner: std::future::Future<Output = Result<(), &'static str>>,
+    {
+        if !self.control || media.role() != self.wire.role {
+            return Err(PROTOCOL);
+        }
+        state.send_replace(ScopedWssState::Negotiating);
+        let result = 'session: {
+            let negotiated = tokio::select! {
+                biased;
+                () = stop_requested(&mut stop) => break 'session Ok(ScopedWssEnd::Stopped),
+                ready = self.negotiate(&state) => ready,
+            };
+            match negotiated {
+                Ok(true) => (),
+                Ok(false) => break 'session Ok(ScopedWssEnd::PeerLeft),
+                Err(error) => break 'session Err(error),
+            }
+            let wire = &mut self.wire;
+            let ice = &mut self.ice;
+            let end = (Instant::now() + SCOPED_PAIR_WAIT).min(wire.scope_end);
+            let start_wall = match wall_seconds() {
+                Ok(now) => now,
+                Err(error) => break 'session Err(error),
+            };
+            let open = async {
+                loop {
+                    let now = wall_seconds()?;
+                    if now < start_wall || Instant::now() >= end {
+                        return Err("PUBLIC_CONTROL_CHANNEL_TIMEOUT");
+                    }
+                    if let Some(transport) = ice.open_control(now).await? {
+                        return Ok(transport);
+                    }
+                    tokio::time::sleep(Duration::from_millis(20)).await;
+                }
+            };
+            // One continuously polled WSS watcher. Canceling a running read
+            // closes its socket, so do not start a replacement between phases.
+            let mut watcher = std::pin::pin!(wire.watch_after_negotiation());
+            let open = timeout_at(end, open);
+            let control = tokio::select! {
+                biased;
+                () = stop_requested(&mut stop) => break 'session Ok(ScopedWssEnd::Stopped),
+                end = &mut watcher => break 'session end,
+                ready = open => match ready {
+                    Ok(Ok(transport)) => transport,
+                    Ok(Err(error)) => break 'session Err(error),
+                    Err(_) => break 'session Err("PUBLIC_CONTROL_CHANNEL_TIMEOUT"),
+                },
+            };
+            let (owner_stop, owner_signal) = watch::channel(false);
+            let mut owner = std::pin::pin!(start_control(control, owner_signal));
+            let (terminal, owner_finished) = tokio::select! {
+                biased;
+                () = stop_requested(&mut stop) => (Ok(ScopedWssEnd::Stopped), false),
+                end = &mut watcher => (end, false),
+                end = media.pump(ice, &state) => (end.map(|()| ScopedWssEnd::Stopped), false),
+                end = &mut owner => (end.map(|()| ScopedWssEnd::Stopped), true),
+            };
+            owner_stop.send_replace(true);
+            if !owner_finished {
+                match timeout(Duration::from_secs(1), &mut owner).await {
+                    Ok(Ok(())) => (),
+                    Ok(Err(error)) => break 'session Err(error),
+                    Err(_) => break 'session Err("PUBLIC_CONTROL_RELEASE_UNCONFIRMED"),
+                }
+            }
+            terminal
+        };
+        media.revoke();
+        self.ice.stop();
+        let (closed, _) = tokio::join!(
+            self.ice.close(),
+            timeout(SCOPED_LEAVE, self.wire.relay.leave()),
+        );
+        state.send_replace(ScopedWssState::Closed);
+        result.and_then(|end| closed.map(|()| end))
     }
 
     async fn publish_local(&mut self) -> Result<bool, &'static str> {

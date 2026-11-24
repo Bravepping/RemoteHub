@@ -5,6 +5,10 @@
 
 use crate::lan_wire::{Codec, Key};
 use hub_signal_v2::{connect_private_lan_wss, wire, LoopbackRelay, PrivateLanRelay, RelayEvent};
+#[cfg(feature = "v2-public-control")]
+use hub_signal_v2::{
+    connect_public_control_wss, PublicControlEndpoint, PublicControlRelay, PublicControlToken,
+};
 #[cfg(feature = "v2-public-video-wss")]
 use hub_signal_v2::{connect_public_video_wss, PublicVideoRelay};
 use std::{net::SocketAddr, sync::Arc, time::Duration};
@@ -37,6 +41,8 @@ enum RelayConnection {
     PrivateLan(PrivateLanRelay),
     #[cfg(feature = "v2-public-video-wss")]
     PublicVideo(PublicVideoRelay),
+    #[cfg(feature = "v2-public-control")]
+    PublicControl(PublicControlRelay),
 }
 
 impl RelayConnection {
@@ -46,6 +52,8 @@ impl RelayConnection {
             Self::PrivateLan(relay) => relay.send_signal(kind, data).await,
             #[cfg(feature = "v2-public-video-wss")]
             Self::PublicVideo(relay) => relay.send_signal(kind, data).await,
+            #[cfg(feature = "v2-public-control")]
+            Self::PublicControl(relay) => relay.send_signal(kind, data).await,
         }
     }
 
@@ -55,6 +63,8 @@ impl RelayConnection {
             Self::PrivateLan(relay) => relay.next_event(wait).await,
             #[cfg(feature = "v2-public-video-wss")]
             Self::PublicVideo(relay) => relay.next_event(wait).await,
+            #[cfg(feature = "v2-public-control")]
+            Self::PublicControl(relay) => relay.next_event(wait).await,
         }
     }
 
@@ -64,6 +74,8 @@ impl RelayConnection {
             Self::PrivateLan(relay) => relay.leave().await,
             #[cfg(feature = "v2-public-video-wss")]
             Self::PublicVideo(relay) => relay.leave().await,
+            #[cfg(feature = "v2-public-control")]
+            Self::PublicControl(relay) => relay.leave().await,
         }
     }
 }
@@ -132,6 +144,25 @@ impl AuthenticatedLoopbackRelay {
         let relay = connect_public_video_wss(endpoint, token, room, role, trust).await?;
         Ok(Self {
             relay: Some(RelayConnection::PublicVideo(relay)),
+            codec,
+        })
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) async fn connect_public_control_wss(
+        endpoint: PublicControlEndpoint,
+        token: &PublicControlToken,
+        room: RoomId,
+        role: Role,
+        key: Arc<Key>,
+        nonce: String,
+        trust: &LoopbackTlsTrust,
+    ) -> Result<Self, ClientError> {
+        let codec = Codec::new_public_control(key, nonce, room.as_str(), role == Role::Host)
+            .map_err(|_| ClientError::Protocol)?;
+        let relay = connect_public_control_wss(endpoint, token, room, role, trust).await?;
+        Ok(Self {
+            relay: Some(RelayConnection::PublicControl(relay)),
             codec,
         })
     }

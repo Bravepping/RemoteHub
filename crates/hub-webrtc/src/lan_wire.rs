@@ -71,7 +71,13 @@ pub struct Frame {
 }
 enum Domain {
     LanV1,
-    RelayV2 { room: String },
+    RelayV2 {
+        room: String,
+    },
+    #[cfg(feature = "v2-public-control")]
+    PublicControl {
+        room: String,
+    },
 }
 
 impl Domain {
@@ -79,11 +85,13 @@ impl Domain {
         match self {
             Self::LanV1 => 1,
             Self::RelayV2 { .. } => 2,
+            #[cfg(feature = "v2-public-control")]
+            Self::PublicControl { .. } => 2,
         }
     }
 
     fn check_relay_size(&self, frame: &Frame) -> Result<(), String> {
-        if matches!(self, Self::RelayV2 { .. })
+        if self.version() == 2
             && serde_json::to_vec(frame)
                 .map_err(|_| "WIRE_SERIALIZE")?
                 .len()
@@ -127,6 +135,28 @@ impl Codec {
         Self::with_domain(key, nonce, host, Domain::RelayV2 { room: room.into() })
     }
 
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn new_public_control(
+        key: std::sync::Arc<Key>,
+        nonce: String,
+        room: &str,
+        host: bool,
+    ) -> Result<Self, String> {
+        if room.len() != 32
+            || !room
+                .bytes()
+                .all(|b| b.is_ascii_digit() || matches!(b, b'a'..=b'f'))
+        {
+            return Err("ROOM_FORMAT".into());
+        }
+        Self::with_domain(
+            key,
+            nonce,
+            host,
+            Domain::PublicControl { room: room.into() },
+        )
+    }
+
     fn with_domain(
         key: std::sync::Arc<Key>,
         nonce: String,
@@ -157,6 +187,17 @@ impl Codec {
             )),
             Domain::RelayV2 { room } => serde_json::to_vec(&(
                 "RemoteHub.Signaling.v2",
+                room,
+                frame.version,
+                &frame.direction,
+                &frame.nonce,
+                frame.seq,
+                &frame.kind,
+                &frame.payload,
+            )),
+            #[cfg(feature = "v2-public-control")]
+            Domain::PublicControl { room } => serde_json::to_vec(&(
+                "RemoteHub.Signaling.public-control.v1",
                 room,
                 frame.version,
                 &frame.direction,
@@ -250,6 +291,33 @@ pub async fn write<W: AsyncWrite + Unpin>(writer: &mut W, frame: Frame) -> Resul
 mod tests {
     use super::*;
     use std::sync::Arc;
+
+    #[cfg(feature = "v2-public-control")]
+    #[test]
+    fn product_control_mac_rejects_the_video_domain_even_with_the_same_key_and_room() {
+        let key = std::sync::Arc::new(Key::parse(&"ba".repeat(16)).unwrap());
+        let mut video_host =
+            Codec::new_v2(key.clone(), TEST_NONCE.into(), TEST_ROOM, true).unwrap();
+        let mut control_viewer =
+            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, false).unwrap();
+        let video = video_host
+            .encode("host_challenge", "fixed proof".into())
+            .unwrap();
+        assert!(control_viewer.accept(video).is_err());
+
+        let mut control_host =
+            Codec::new_public_control(key.clone(), TEST_NONCE.into(), TEST_ROOM, true).unwrap();
+        let mut video_viewer = Codec::new_v2(key, TEST_NONCE.into(), TEST_ROOM, false).unwrap();
+        let control = control_host
+            .encode("host_challenge", "fixed proof".into())
+            .unwrap();
+        let copy = serde_json::from_slice(&serde_json::to_vec(&control).unwrap()).unwrap();
+        assert!(video_viewer.accept(copy).is_err());
+        assert_eq!(
+            control_viewer.accept(control).unwrap(),
+            ("host_challenge".to_owned(), "fixed proof".to_owned())
+        );
+    }
 
     const TEST_ROOM: &str = "00112233445566778899aabbccddeeff";
     const OTHER_ROOM: &str = "00112233445566778899aabbccddeefe";

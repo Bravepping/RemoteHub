@@ -2,6 +2,8 @@
 //! and approved route context, not end-user consent or candidate eligibility.
 use crate::ice_policy::{public_v4, IceConfig, IceMode, RelayGrant};
 pub use crate::public_video_route::PublicVideoIcePlan;
+#[cfg(feature = "v2-public-control")]
+pub use crate::public_video_scoped_ice::PublicControlTransport;
 #[cfg(feature = "v2-public-video-wss")]
 pub use crate::public_video_scoped_ice::PublicVideoScopedIce;
 use hub_identity::{
@@ -22,6 +24,34 @@ const EXPIRED: &str = "PUBLIC_VIDEO_SCOPE_EXPIRED";
 const IDENTITY: &str = "PUBLIC_VIDEO_IDENTITY_MISMATCH";
 const SDP: &str = "PUBLIC_VIDEO_SDP_INVALID";
 const REJECTED: &str = "PUBLIC_VIDEO_PROOF_REJECTED";
+
+#[derive(Clone, Copy)]
+enum Purpose {
+    Video,
+    #[cfg(feature = "v2-public-control")]
+    Control,
+}
+
+impl Purpose {
+    fn domain(self) -> &'static [u8] {
+        match self {
+            Self::Video => b"RemoteHub.V2.public-video-only.sdp.v1\0",
+            #[cfg(feature = "v2-public-control")]
+            Self::Control => b"RemoteHub.V2.public-control-turn.sdp.v1\0",
+        }
+    }
+
+    fn check(self, scope: PublicVideoScope, now: u64) -> Result<u8, &'static str> {
+        let mode = scope.checked_mode(now)?;
+        match self {
+            #[cfg(feature = "v2-public-control")]
+            Self::Control if scope.mode != IceMode::RelayOnly => {
+                Err("PUBLIC_CONTROL_TURN_REQUIRED")
+            }
+            _ => Ok(mode),
+        }
+    }
+}
 
 /// Both devices must establish these values independently of the relay.
 /// No untrusted SDP or relay reply can select this scope for the caller.
@@ -61,18 +91,19 @@ impl PublicVideoScope {
 
     fn statement(
         self,
+        purpose: Purpose,
         role: SessionRole,
         offer: Option<[u8; 32]>,
         exact_sdp: &str,
         now: u64,
     ) -> Result<[u8; 32], &'static str> {
-        let mode = self.checked_mode(now)?;
+        let mode = purpose.check(self, now)?;
         if exact_sdp.is_empty() || exact_sdp.len() > MAX_SIGNAL_BYTES || exact_sdp.contains('\0') {
             return Err(SDP);
         }
         let mut hash = Sha256::new();
-        hash.update(b"RemoteHub.V2.public-video-only.sdp.v1\0");
-        // Viewer signs the offer, host signs the answer. There is no input variant.
+        hash.update(purpose.domain());
+        // Viewer signs the offer; host signs the answer for that exact offer.
         hash.update([role as u8, mode]);
         hash.update(self.wss.ip().octets());
         hash.update(self.wss.port().to_be_bytes());
@@ -92,6 +123,9 @@ impl PublicVideoScope {
 
 pub struct PublicVideoProof<'a> {
     local: &'a Identity,
+    purpose: Purpose,
+    #[cfg(feature = "v2-public-control")]
+    control_scope: Option<crate::input_approval::InputScope>,
     role: SessionRole,
     room: Uuid,
     scope: PublicVideoScope,
@@ -111,7 +145,30 @@ impl<'a> PublicVideoProof<'a> {
         scope: PublicVideoScope,
         now: u64,
     ) -> Result<Self, &'static str> {
-        scope.checked_mode(now)?;
+        Self::prepare_for(
+            local,
+            pinned_peer,
+            role,
+            room,
+            session_nonce,
+            scope,
+            now,
+            Purpose::Video,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn prepare_for(
+        local: &'a Identity,
+        pinned_peer: &VerifiedPeer,
+        role: SessionRole,
+        room: Uuid,
+        session_nonce: [u8; 32],
+        scope: PublicVideoScope,
+        now: u64,
+        purpose: Purpose,
+    ) -> Result<Self, &'static str> {
+        purpose.check(scope, now)?;
         let binding = pinned_peer
             .session_binding(&local.public(), role, *room.as_bytes(), session_nonce)
             .map_err(|_| IDENTITY)?;
@@ -120,6 +177,18 @@ impl<'a> PublicVideoProof<'a> {
             PendingSessionProof::issue(&binding, opposite(role), now, ttl).map_err(|_| REJECTED)?;
         Ok(Self {
             local,
+            purpose,
+            #[cfg(feature = "v2-public-control")]
+            control_scope: matches!(purpose, Purpose::Control).then(|| {
+                crate::input_approval::InputScope {
+                    room: *room.as_bytes(),
+                    generation: session_nonce,
+                    viewer_key: match role {
+                        SessionRole::Host => *pinned_peer.public_key(),
+                        SessionRole::Viewer => local.public().public_key,
+                    },
+                }
+            }),
             role,
             room,
             scope,
@@ -133,6 +202,25 @@ impl<'a> PublicVideoProof<'a> {
     #[cfg(feature = "v2-public-video-wss")]
     pub(crate) fn role(&self) -> SessionRole {
         self.role
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    pub(crate) fn control_scope(&self) -> Option<crate::input_approval::InputScope> {
+        self.control_scope
+    }
+
+    #[cfg(feature = "v2-public-video-wss")]
+    fn validate_exact_sdp(
+        &self,
+        sdp: &str,
+        answer: bool,
+        now: u64,
+    ) -> Result<Vec<crate::direct_policy::Candidate>, &'static str> {
+        match self.purpose {
+            Purpose::Video => crate::public_video_ice::validate(sdp, self.scope, answer, now),
+            #[cfg(feature = "v2-public-control")]
+            Purpose::Control => crate::public_control_sdp::validate(sdp, self.scope, answer, now),
+        }
     }
 
     /// Validate a native-issued route grant against exactly this proof's
@@ -166,12 +254,7 @@ impl<'a> PublicVideoProof<'a> {
         sdp: &str,
         now: u64,
     ) -> Result<([u8; 64], crate::direct_policy::VerifiedCandidates), &'static str> {
-        let values = crate::public_video_ice::validate(
-            sdp,
-            self.scope,
-            self.role == SessionRole::Host,
-            now,
-        )?;
+        let values = self.validate_exact_sdp(sdp, self.role == SessionRole::Host, now)?;
         let signature = self.seal(challenge, sdp, now)?;
         Ok((
             signature,
@@ -190,12 +273,7 @@ impl<'a> PublicVideoProof<'a> {
         now: u64,
     ) -> Result<crate::direct_policy::VerifiedCandidates, &'static str> {
         let sdp = self.open(sdp, signature, now)?;
-        let values = match crate::public_video_ice::validate(
-            sdp,
-            self.scope,
-            self.role == SessionRole::Viewer,
-            now,
-        ) {
+        let values = match self.validate_exact_sdp(sdp, self.role == SessionRole::Viewer, now) {
             Ok(values) => values,
             Err(error) => {
                 // The signed description was authenticated, not admitted.
@@ -227,9 +305,9 @@ impl<'a> PublicVideoProof<'a> {
         if !std::mem::take(&mut self.outgoing_available) {
             return Err(REJECTED);
         }
-        let statement = self
-            .scope
-            .statement(self.role, self.offer, exact_sdp, now)?;
+        let statement =
+            self.scope
+                .statement(self.purpose, self.role, self.offer, exact_sdp, now)?;
         let signature = self
             .local
             .sign_session_proof(&self.binding, self.role, peer_challenge, &statement, now)
@@ -247,9 +325,13 @@ impl<'a> PublicVideoProof<'a> {
         now: u64,
     ) -> Result<&'s str, &'static str> {
         let mut proof = self.incoming.take().ok_or(REJECTED)?;
-        let statement = self
-            .scope
-            .statement(opposite(self.role), self.offer, exact_sdp, now)?;
+        let statement = self.scope.statement(
+            self.purpose,
+            opposite(self.role),
+            self.offer,
+            exact_sdp,
+            now,
+        )?;
         proof
             .verify(signature, &statement, now)
             .map_err(|_| REJECTED)?;
@@ -257,6 +339,100 @@ impl<'a> PublicVideoProof<'a> {
             self.offer = Some(statement);
         }
         Ok(exact_sdp)
+    }
+}
+
+/// Authenticates only the separate TURN-only bundled video/control purpose.
+/// Does not grant capture, input consent or access to a DataChannel.
+#[cfg(feature = "v2-public-control")]
+pub struct PublicControlProof<'a>(PublicVideoProof<'a>);
+
+#[cfg(feature = "v2-public-control")]
+impl<'a> PublicControlProof<'a> {
+    pub fn prepare(
+        local: &'a Identity,
+        pinned_peer: &VerifiedPeer,
+        role: SessionRole,
+        room: Uuid,
+        generation: [u8; 32],
+        scope: PublicVideoScope,
+        now: u64,
+    ) -> Result<Self, &'static str> {
+        PublicVideoProof::prepare_for(
+            local,
+            pinned_peer,
+            role,
+            room,
+            generation,
+            scope,
+            now,
+            Purpose::Control,
+        )
+        .map(Self)
+    }
+
+    pub fn challenge(&self) -> Option<SessionChallenge> {
+        self.0.challenge()
+    }
+
+    pub fn seal(
+        &mut self,
+        challenge: SessionChallenge,
+        sdp: &str,
+        now: u64,
+    ) -> Result<[u8; 64], &'static str> {
+        if let Err(error) = crate::public_control_sdp::validate(
+            sdp,
+            self.0.scope,
+            self.0.role == SessionRole::Host,
+            now,
+        ) {
+            self.fail();
+            return Err(error);
+        }
+        self.0
+            .seal(challenge, sdp, now)
+            .inspect_err(|_| self.fail())
+    }
+
+    pub fn verify(
+        &mut self,
+        sdp: &str,
+        signature: &[u8; 64],
+        now: u64,
+    ) -> Result<(), &'static str> {
+        let result = (|| {
+            self.0.open(sdp, signature, now)?;
+            crate::public_control_sdp::validate(
+                sdp,
+                self.0.scope,
+                self.0.role == SessionRole::Viewer,
+                now,
+            )?;
+            Ok(())
+        })();
+        result.inspect_err(|_| self.fail())
+    }
+
+    /// Construct the shared scoped driver with the immutable control
+    /// purpose. This still does not start ICE or authorize video/input.
+    pub fn stage_ice(
+        self,
+        grant: RelayGrant,
+        config: IceConfig,
+        now: u64,
+    ) -> Result<PublicVideoScopedIce<'a>, &'static str> {
+        self.into_inner().stage_ice(grant, config, now)
+    }
+
+    pub(crate) fn into_inner(self) -> PublicVideoProof<'a> {
+        self.0
+    }
+
+    fn fail(&mut self) {
+        self.0.incoming = None;
+        self.0.outgoing_available = false;
+        self.0.offer = None;
     }
 }
 

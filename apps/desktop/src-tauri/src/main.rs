@@ -25,6 +25,8 @@ mod v2_pairing;
 #[cfg(all(feature = "v2-private-wss-lan", not(feature = "p006-relay")))]
 mod v2_private_wss;
 
+#[cfg(all(feature = "v2-public-control-desktop", not(feature = "p006-relay")))]
+mod public_control_desktop;
 #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
 mod public_video_capture;
 #[cfg(all(feature = "v2-public-video-desktop", not(feature = "p006-relay")))]
@@ -98,6 +100,8 @@ struct RuntimeInfo {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     public_video_available: bool,
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    public_control_available: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
     public_video_profile_consumed: bool,
     p004_enabled: bool,
     p004_lan_enabled: bool,
@@ -169,6 +173,19 @@ fn get_runtime_info(window: tauri::WebviewWindow) -> Result<RuntimeInfo, String>
                     .available()
             }
             #[cfg(not(all(feature = "v2-public-video-desktop", not(feature = "p006-relay"))))]
+            {
+                false
+            }
+        },
+        public_control_available: {
+            #[cfg(all(feature = "v2-public-control-desktop", not(feature = "p006-relay")))]
+            {
+                use tauri::Manager;
+                window
+                    .state::<std::sync::Arc<public_video_desktop::DesktopVideoState>>()
+                    .control_available()
+            }
+            #[cfg(not(all(feature = "v2-public-control-desktop", not(feature = "p006-relay"))))]
             {
                 false
             }
@@ -342,7 +359,9 @@ fn main() {
             #[cfg(feature = "v2-public-video-desktop")]
             public_video_desktop::public_video_next_frame,
             #[cfg(feature = "v2-public-video-desktop")]
-            public_video_desktop::public_video_stop
+            public_video_desktop::public_video_stop,
+            #[cfg(feature = "v2-public-control-desktop")]
+            public_video_desktop::public_control_send_input
         ])
         .on_window_event(p004_lan::on_window_event);
     #[cfg(feature = "p006-relay")]

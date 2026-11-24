@@ -7,6 +7,7 @@ license.workspace = true
 publish = false
 
 [features]
+public-control = []
 synthetic-admission = ["dep:sha2"]
 
 [dependencies]

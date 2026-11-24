@@ -1,6 +1,6 @@
-//! Explicitly approved short LAN sessions only. No arbitrary command/text execution.
+//! Explicitly approved, short native input sessions. No arbitrary command/text execution.
 use serde::Deserialize;
-#[cfg(windows)]
+#[cfg(all(windows, feature = "p3-lan"))]
 use std::collections::BTreeSet;
 use std::time::{Duration, Instant};
 pub const LABEL: &str = "remote-input.v1";
@@ -176,13 +176,13 @@ pub fn map_point(
         ((y * (ph - 1) as f64 - vy as f64) * 65535.0 / (vh - 1) as f64).round() as i32,
     ))
 }
-#[cfg(windows)]
+#[cfg(all(windows, feature = "p3-lan"))]
 #[derive(Default)]
 pub struct Injector {
     keys: BTreeSet<u16>,
     buttons: BTreeSet<u8>,
 }
-#[cfg(windows)]
+#[cfg(all(windows, feature = "p3-lan"))]
 impl Injector {
     fn send(input: windows_sys::Win32::UI::Input::KeyboardAndMouse::INPUT) -> Result<(), String> {
         use windows_sys::Win32::UI::Input::KeyboardAndMouse::*;
@@ -262,7 +262,7 @@ impl Injector {
         }
     }
 }
-#[cfg(windows)]
+#[cfg(all(windows, feature = "p3-lan"))]
 impl Sink for Injector {
     fn apply(&mut self, event: &Event) -> Result<(), String> {
         use windows_sys::Win32::UI::{
@@ -343,7 +343,11 @@ impl Sink for Injector {
         }
     }
 }
-#[cfg(all(windows, feature = "p3-lan-input-queue-test"))]
+#[cfg(all(
+    windows,
+    feature = "p3-lan",
+    any(feature = "p3-lan-input-queue-test", feature = "v2-public-control")
+))]
 impl crate::input_approval::SessionSink for Injector {
     type Event = Event;
 
@@ -356,7 +360,7 @@ impl crate::input_approval::SessionSink for Injector {
     }
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, feature = "p3-lan"))]
 impl Drop for Injector {
     fn drop(&mut self) {
         let _ = self.release();

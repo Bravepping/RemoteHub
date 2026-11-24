@@ -1,5 +1,7 @@
 //! Opt-in native-only public viewing. The webview can choose a role, pull one
 //! admitted AU, or stop; it cannot supply endpoints, keys, captures or input.
+#[cfg(feature = "v2-public-control-desktop")]
+use crate::public_control_desktop::{self, InputState};
 use crate::{
     public_video_capture::{self, CaptureEnd, CaptureOutcome},
     public_video_launch::LaunchMode,
@@ -20,6 +22,8 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tauri::{ipc::Response, Manager, WebviewWindow};
+#[cfg(feature = "v2-public-control-desktop")]
+use tokio::sync::mpsc;
 use tokio::sync::{watch, Mutex as AsyncMutex};
 use windows::{
     core::HSTRING,
@@ -52,6 +56,15 @@ impl DesktopVideoState {
     }
     pub(crate) fn available(&self) -> bool {
         self.launch.is_public_video()
+            && (!self.launch.is_control()
+                || cfg!(all(
+                    feature = "v2-public-control-desktop",
+                    not(feature = "v2-public-video-60s-test")
+                )))
+    }
+    #[cfg(feature = "v2-public-control-desktop")]
+    pub(crate) fn control_available(&self) -> bool {
+        self.available() && self.launch.is_control()
     }
     pub(crate) fn profile_consumed(&self) -> bool {
         self.used.load(Ordering::Acquire)
@@ -91,6 +104,9 @@ pub(crate) struct Status {
     phase: Phase,
     error: Option<&'static str>,
     profile_consumed: bool,
+    #[cfg(feature = "v2-public-control-desktop")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_state: Option<InputState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     end_reason: Option<EndReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -122,6 +138,8 @@ impl Status {
             phase: Phase::Closed,
             error,
             profile_consumed: false,
+            #[cfg(feature = "v2-public-control-desktop")]
+            input_state: None,
             end_reason: Some(reason),
             elapsed_ms,
         }
@@ -161,10 +179,22 @@ pub(crate) struct Session {
     stop: watch::Sender<bool>,
     status: watch::Sender<Status>,
     receiver: AsyncMutex<Option<ScopedVideoReceiver>>,
+    #[cfg(feature = "v2-public-control-desktop")]
+    control: bool,
+    #[cfg(feature = "v2-public-control-desktop")]
+    input_state: watch::Sender<InputState>,
+    #[cfg(feature = "v2-public-control-desktop")]
+    input_events: mpsc::Sender<String>,
+    #[cfg(feature = "v2-public-control-desktop")]
+    input_receiver: Mutex<Option<mpsc::Receiver<String>>>,
 }
 
 impl Session {
-    fn new(role: Role) -> Self {
+    fn new(role: Role, control_launch: bool) -> Self {
+        #[cfg(feature = "v2-public-control-desktop")]
+        let (input_events, input_receiver) = mpsc::channel(24);
+        #[cfg(not(feature = "v2-public-control-desktop"))]
+        let _ = control_launch;
         Self {
             id: uuid::Uuid::new_v4().simple().to_string(),
             role,
@@ -173,11 +203,21 @@ impl Session {
                 phase: Phase::Starting,
                 error: None,
                 profile_consumed: false,
+                #[cfg(feature = "v2-public-control-desktop")]
+                input_state: None,
                 end_reason: None,
                 elapsed_ms: None,
             })
             .0,
             receiver: AsyncMutex::new(None),
+            #[cfg(feature = "v2-public-control-desktop")]
+            control: control_launch,
+            #[cfg(feature = "v2-public-control-desktop")]
+            input_state: watch::channel(InputState::ViewOnly).0,
+            #[cfg(feature = "v2-public-control-desktop")]
+            input_events,
+            #[cfg(feature = "v2-public-control-desktop")]
+            input_receiver: Mutex::new(Some(input_receiver)),
         }
     }
 
@@ -282,7 +322,7 @@ pub(crate) fn public_video_start(window: WebviewWindow, role: String) -> Result<
     {
         return Err("PUBLIC_VIDEO_BUSY".into());
     }
-    let session = Arc::new(Session::new(role));
+    let session = Arc::new(Session::new(role, state.launch.is_control()));
     let id = session.id.clone();
     *active = Some(session.clone());
     drop(active);
@@ -306,7 +346,51 @@ pub(crate) fn public_video_status(
     let session = find(&window, &generation)?;
     let mut status = session.status.borrow().clone();
     status.profile_consumed = window.state::<Arc<DesktopVideoState>>().profile_consumed();
+    #[cfg(feature = "v2-public-control-desktop")]
+    if session.control {
+        status.input_state = Some(if status.phase == Phase::Closed {
+            InputState::Closed
+        } else {
+            *session.input_state.borrow()
+        });
+    }
     Ok(status)
+}
+
+#[cfg(feature = "v2-public-control-desktop")]
+#[tauri::command]
+pub(crate) fn public_control_send_input(
+    window: WebviewWindow,
+    generation: String,
+    event: String,
+) -> Result<(), String> {
+    let session = find(&window, &generation)?;
+    if !session.control
+        || session.role != Role::Viewer
+        || *session.stop.borrow()
+        || *session.input_state.borrow() != InputState::Allowed
+        || session.status.borrow().phase != Phase::Ready
+    {
+        return Err("PUBLIC_CONTROL_NOT_ALLOWED".into());
+    }
+    use hub_webrtc::remote_input::Event;
+    if event.is_empty()
+        || event.len() > 256
+        || !matches!(
+            serde_json::from_str::<Event>(&event),
+            Ok(Event::Move { .. }
+                | Event::Button { .. }
+                | Event::Key { .. }
+                | Event::Release { .. })
+        )
+    {
+        session.request_stop();
+        return Err("PUBLIC_CONTROL_EVENT_REJECTED".into());
+    }
+    session.input_events.try_send(event).map_err(|_| {
+        session.request_stop();
+        "PUBLIC_CONTROL_BACKPRESSURE".to_owned()
+    })
 }
 
 #[tauri::command]
@@ -405,7 +489,15 @@ async fn run(
         .state::<crate::v2_pairing::PairingState>()
         .current()
         .map_err(|_| "PUBLIC_VIDEO_VERIFY_PEER_FIRST")?;
+    let control_launch = state.launch.is_control();
     let (mut profile, identity) = tauri::async_runtime::spawn_blocking(move || {
+        #[cfg(feature = "v2-public-control-desktop")]
+        let profile = if control_launch {
+            PublicVideoProfile::load_control(&path, now()?)?
+        } else {
+            PublicVideoProfile::load(&path, now()?)?
+        };
+        #[cfg(not(feature = "v2-public-control-desktop"))]
         let profile = PublicVideoProfile::load(&path, now()?)?;
         let identity =
             hub_identity::open_existing_default().map_err(|_| "PUBLIC_VIDEO_IDENTITY")?;
@@ -429,12 +521,19 @@ async fn run(
     } else {
         "观看对方主屏，不含声音"
     };
+    let input_notice = if control_launch {
+        "这次连接不批准输入。共享端随后需要独立批准当前会话的键鼠操作。拒绝时仍可仅观看。"
+    } else {
+        "不允许键鼠或无人值守访问。"
+    };
     let message = format!(
-        "本次仅{action}，共享最多 {} 秒。只允许中继，不允许键鼠或无人值守访问。点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
+        "本次仅{action}，共享最多 {} 秒。只允许中继。{input_notice}点「停止」或关窗可结束。\n\n固定 WSS：{}\n固定 TURN：{}\n已核验对方指纹：\n{}\n\n是否同意本次连接？",
         public_video_capture::CAPTURE_WINDOW.as_secs(),
         approval.scope.wss, approval.scope.turn, peer.fingerprint(),
     );
-    let title = if cfg!(feature = "v2-public-video-60s-test") {
+    let title = if control_launch {
+        "RemoteHub · 公网短时会话：画面授权"
+    } else if cfg!(feature = "v2-public-video-60s-test") {
         "RemoteHub · 公网仅视频（60 秒测试版）"
     } else {
         "RemoteHub · 公网短时仅视频"
@@ -456,8 +555,6 @@ async fn run(
         return Err(CANCELLED);
     }
     crate::experiment_origin::origin(&window).map_err(|_| "PUBLIC_VIDEO_ORIGIN")?;
-    let config = profile.take_config(&identity, &peer, now()?, true)?;
-    state.used.store(true, Ordering::Release);
     let (phase_tx, mut phase_rx) = watch::channel(ScopedWssState::Negotiating);
     let watch_session = session.clone();
     let monitor = async move {
@@ -487,29 +584,88 @@ async fn run(
         }
     };
     let worker = async {
+        let connect = async {
+            #[cfg(feature = "v2-public-control-desktop")]
+            if control_launch {
+                let config = profile.take_control_config(&identity, &peer, now()?, true)?;
+                state.used.store(true, Ordering::Release);
+                return PublicVideoWss::connect_public_control_wss(config).await;
+            }
+            let config = profile.take_config(&identity, &peer, now()?, true)?;
+            state.used.store(true, Ordering::Release);
+            PublicVideoWss::connect_public_wss(config).await
+        };
         let pending = tokio::select! {
             biased;
             _ = stopped(&mut stop) => return Err(CANCELLED),
-            pending = PublicVideoWss::connect_public_wss(config) => pending?,
+            pending = connect => pending?,
         };
         let actor = tokio::select! {
             biased;
             _ = stopped(&mut stop) => return Err(CANCELLED),
             actor = pending.establish() => actor?,
         };
+        #[cfg(feature = "v2-public-control-desktop")]
+        let run_input = {
+            let owner = session.clone();
+            let fingerprint = peer.fingerprint().to_owned();
+            move |transport, input_stop| async move {
+                if owner.role == Role::Host {
+                    public_control_desktop::run_host(
+                        transport,
+                        input_stop,
+                        hwnd,
+                        fingerprint,
+                        owner.input_state.clone(),
+                    )
+                    .await
+                } else {
+                    let input_receiver = owner
+                        .input_receiver
+                        .lock()
+                        .map_err(|_| "PUBLIC_CONTROL_STATE")?
+                        .take()
+                        .ok_or("PUBLIC_CONTROL_STATE")?;
+                    public_control_desktop::run_viewer(
+                        transport,
+                        input_stop,
+                        input_receiver,
+                        owner.input_state.clone(),
+                    )
+                    .await
+                }
+            }
+        };
         if session.role == Role::Host {
             let (media, sender) = ScopedVideoMedia::host();
             let phase = phase_tx.subscribe();
-            let (actor_result, capture_result) = tokio::join!(
-                actor.run_with_media(stop.clone(), phase_tx, media),
-                public_video_capture::run(sender, stop, phase),
-            );
+            let actor_stop = stop.clone();
+            let run_actor = async {
+                #[cfg(feature = "v2-public-control-desktop")]
+                if control_launch {
+                    return actor
+                        .run_with_media_and_control(actor_stop, phase_tx, media, run_input)
+                        .await;
+                }
+                actor.run_with_media(actor_stop, phase_tx, media).await
+            };
+            let (actor_result, capture_result) =
+                tokio::join!(run_actor, public_video_capture::run(sender, stop, phase));
             let locally_stopped = *session.stop.borrow();
             Ok(host_outcome(actor_result, capture_result, locally_stopped))
         } else {
             let (media, receiver) = ScopedVideoMedia::viewer();
             *session.receiver.lock().await = Some(receiver);
-            let actor = actor.run_with_media(stop, phase_tx, media).await;
+            let actor = async {
+                #[cfg(feature = "v2-public-control-desktop")]
+                if control_launch {
+                    return actor
+                        .run_with_media_and_control(stop, phase_tx, media, run_input)
+                        .await;
+                }
+                actor.run_with_media(stop, phase_tx, media).await
+            }
+            .await;
             Ok(Outcome {
                 terminal: actor_terminal(actor),
                 elapsed_ms: None,
@@ -586,7 +742,7 @@ mod tests {
         assert_eq!(json["end_reason"], "peer_left");
         assert!(json.get("elapsed_ms").is_none());
 
-        let initial = serde_json::to_value(&*Session::new(Role::Host).status.borrow()).unwrap();
+        let initial = serde_json::to_value(&*Session::new(Role::Host, false).status.borrow()).unwrap();
         assert!(initial.get("end_reason").is_none());
         assert!(initial.get("elapsed_ms").is_none());
 

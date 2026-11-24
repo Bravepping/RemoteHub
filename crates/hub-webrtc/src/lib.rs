@@ -116,6 +116,10 @@ pub mod synthetic_admission_rtc;
 #[cfg(feature = "v2-synthetic-role-profile")]
 #[doc(hidden)]
 pub mod synthetic_role_profile;
+#[cfg(feature = "v2-public-control")]
+mod public_control_sdp;
+#[cfg(feature = "v2-public-control")]
+pub mod public_control_input;
 #[cfg(feature = "v2-public-video")]
 pub mod public_video;
 #[cfg(feature = "v2-public-video-wss")]
@@ -145,7 +149,7 @@ mod relay_config;
 mod relay_diagnostic;
 #[cfg(feature = "p006-turn-probe")]
 pub mod relay_runtime;
-#[cfg(feature = "p3-lan")]
+#[cfg(any(feature = "p3-lan", feature = "v2-public-control"))]
 pub mod remote_input;
 #[cfg(feature = "p006-turn-probe")]
 pub mod rendezvous_probe;

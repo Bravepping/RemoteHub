@@ -7,6 +7,8 @@ use super::{
     ServerFrame, SignalKind, SocketAddr, SocketPeer, State, StatusCode, WebSocket,
     WebSocketUpgrade, MAX_CONNECTIONS, MAX_WIRE, ROOM_LIFETIME, VERSION,
 };
+#[cfg(feature = "v2-public-control")]
+use axum::extract::OriginalUri;
 use axum::routing::get;
 use futures_util::{SinkExt, StreamExt};
 use hub_signal_v2::wire::PUBLIC_VIDEO_PATH;
@@ -29,9 +31,66 @@ const EXPIRED: &str = "V2_PUBLIC_VIDEO_EXPIRED";
 const DENIED: &str = "V2_PUBLIC_VIDEO_APPROVAL_INVALID";
 const CLOSED: &str = "V2_PUBLIC_VIDEO_ROOM_CLOSED";
 
+#[derive(Clone, Copy)]
+pub(super) enum Purpose {
+    Video,
+    #[cfg(feature = "v2-public-control")]
+    Control,
+}
+
+impl Purpose {
+    fn path(self) -> &'static str {
+        match self {
+            Self::Video => PUBLIC_VIDEO_PATH,
+            #[cfg(feature = "v2-public-control")]
+            Self::Control => signal_wire::PUBLIC_CONTROL_PATH,
+        }
+    }
+
+    fn profile_name(self) -> &'static str {
+        match self {
+            Self::Video => "VIDEO",
+            #[cfg(feature = "v2-public-control")]
+            Self::Control => "CONTROL",
+        }
+    }
+
+    fn validate_token(self, bearer: &str) -> bool {
+        match self {
+            Self::Video => valid_role_token(bearer),
+            #[cfg(feature = "v2-public-control")]
+            Self::Control => signal_wire::valid_public_control_token(bearer),
+        }
+    }
+
+    fn matches(self, expected: &str, supplied: &str) -> bool {
+        match self {
+            Self::Video => token_matches(expected, supplied),
+            #[cfg(feature = "v2-public-control")]
+            Self::Control => {
+                if !self.validate_token(supplied) {
+                    return false;
+                }
+                let context = b"RemoteHub.v2.PublicControlRelayToken";
+                let tag = ring::hmac::sign(
+                    &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, expected.as_bytes()),
+                    context,
+                );
+                ring::hmac::verify(
+                    &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, supplied.as_bytes()),
+                    context,
+                    tag.as_ref(),
+                )
+                .is_ok()
+            }
+        }
+    }
+}
+
 /// The address in ConnectInfo is the only source identity. Do not install
 /// this router on a plaintext listener or use proxy/forwarded headers.
 pub(super) struct PublicVideoApproval {
+    purpose: Purpose,
     room: Uuid,
     sources: PeerSources,
     host_token: Zeroizing<String>,
@@ -42,6 +101,7 @@ pub(super) struct PublicVideoApproval {
 
 impl PublicVideoApproval {
     fn new(
+        purpose: Purpose,
         room: Uuid,
         sources: PeerSources,
         host_token: Zeroizing<String>,
@@ -50,13 +110,14 @@ impl PublicVideoApproval {
         now: u64,
     ) -> Result<Self, &'static str> {
         if room.is_nil()
-            || !valid_role_token(&host_token)
-            || !valid_role_token(&viewer_token)
-            || token_matches(&host_token, &viewer_token)
+            || !purpose.validate_token(&host_token)
+            || !purpose.validate_token(&viewer_token)
+            || purpose.matches(&host_token, &viewer_token)
         {
             return Err(DENIED);
         }
         Ok(Self {
+            purpose,
             room,
             sources,
             host_token,
@@ -79,6 +140,7 @@ impl PublicVideoApproval {
             return Err(DENIED);
         }
         Self::new(
+            Purpose::Video,
             room,
             sources,
             Zeroizing::new(host_token),
@@ -106,8 +168,8 @@ impl PublicVideoApproval {
     fn permitted_role(&self, observed_ip: IpAddr, bearer: &str) -> Option<Role> {
         // Co-located NAT peers are acceptable: the separate token and
         // observed TCP source are both needed to identify the role.
-        let host = token_matches(&self.host_token, bearer);
-        let viewer = token_matches(&self.viewer_token, bearer);
+        let host = self.purpose.matches(&self.host_token, bearer);
+        let viewer = self.purpose.matches(&self.viewer_token, bearer);
         if host && observed_ip == IpAddr::V4(self.sources.host) {
             Some(Role::Host)
         } else if viewer && observed_ip == IpAddr::V4(self.sources.viewer) {
@@ -298,22 +360,28 @@ impl Drop for Joined<'_> {
 }
 
 pub(super) fn public_video_router(approval: PublicVideoApproval) -> Router {
+    let path = approval.purpose.path();
     let app = Arc::new(PublicVideoApp {
         approval,
         room: Mutex::new(OneRoom::default()),
         active: AtomicUsize::new(0),
     });
-    Router::new()
-        .route(PUBLIC_VIDEO_PATH, get(upgrade))
-        .with_state(app)
+    Router::new().route(path, get(upgrade)).with_state(app)
 }
 
 async fn upgrade(
     State(app): State<Arc<PublicVideoApp>>,
     peer: SocketPeer,
+    #[cfg(feature = "v2-public-control")] OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
+    #[cfg(feature = "v2-public-control")]
+    if matches!(app.approval.purpose, Purpose::Control)
+        && uri.path_and_query().map(|target| target.as_str()) != Some(app.approval.purpose.path())
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     if app.approval.deadline().is_err() || headers.contains_key(header::ORIGIN) {
         return StatusCode::FORBIDDEN.into_response();
     }
@@ -461,10 +529,16 @@ fn validate_public_bind(addr: SocketAddr, cert: &Path, key: &Path) -> Result<(),
     Ok(())
 }
 
-pub(super) async fn run_from_env() -> Result<(), &'static str> {
+pub(super) async fn run_from_env(purpose: Purpose) -> Result<(), &'static str> {
     fn env(name: &str) -> Result<String, &'static str> {
         std::env::var(name).map_err(|_| DENIED)
     }
+    let profile = |field: &str| {
+        env(&format!(
+            "REMOTEHUB_V2_PUBLIC_{}_{field}",
+            purpose.profile_name()
+        ))
+    };
 
     let addr = env("REMOTEHUB_V2_BIND")?
         .parse::<SocketAddr>()
@@ -476,16 +550,16 @@ pub(super) async fn run_from_env() -> Result<(), &'static str> {
         .map(PathBuf::from)
         .ok_or("V2_PUBLIC_VIDEO_TLS_REQUIRED")?;
     validate_public_bind(addr, &cert, &key)?;
-    let room = env("REMOTEHUB_V2_PUBLIC_VIDEO_ROOM")?;
+    let room = profile("ROOM")?;
     if !signal_wire::valid_room(&room) {
         return Err(DENIED);
     }
     let room = Uuid::try_parse(&room).map_err(|_| DENIED)?;
     let sources = PeerSources {
-        host: env("REMOTEHUB_V2_PUBLIC_VIDEO_HOST_IP")?
+        host: profile("HOST_IP")?
             .parse::<Ipv4Addr>()
             .map_err(|_| DENIED)?,
-        viewer: env("REMOTEHUB_V2_PUBLIC_VIDEO_VIEWER_IP")?
+        viewer: profile("VIEWER_IP")?
             .parse::<Ipv4Addr>()
             .map_err(|_| DENIED)?,
     };
@@ -493,13 +567,12 @@ pub(super) async fn run_from_env() -> Result<(), &'static str> {
         return Err(DENIED);
     }
     let approval = PublicVideoApproval::new(
+        purpose,
         room,
         sources,
-        Zeroizing::new(env("REMOTEHUB_V2_PUBLIC_VIDEO_HOST_TOKEN")?),
-        Zeroizing::new(env("REMOTEHUB_V2_PUBLIC_VIDEO_VIEWER_TOKEN")?),
-        env("REMOTEHUB_V2_PUBLIC_VIDEO_EXPIRES_AT")?
-            .parse::<u64>()
-            .map_err(|_| DENIED)?,
+        Zeroizing::new(profile("HOST_TOKEN")?),
+        Zeroizing::new(profile("VIEWER_TOKEN")?),
+        profile("EXPIRES_AT")?.parse::<u64>().map_err(|_| DENIED)?,
         now()?,
     )?;
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -552,6 +625,105 @@ mod tests {
             approval.permitted_role("::ffff:127.0.0.1".parse().unwrap(), &"a".repeat(64)),
             None
         );
+    }
+
+    #[cfg(feature = "v2-public-control")]
+    #[tokio::test]
+    async fn product_control_and_video_mount_only_their_own_path_and_tokens() {
+        use super::super::tls_smoke::{make_ca, start_tls_router};
+        use rustls::{ClientConfig, RootCertStore};
+        use tokio_tungstenite::{
+            client_async_tls_with_config,
+            tungstenite::{client::IntoClientRequest, Error as WsError},
+            Connector,
+        };
+        let raw_host = "a".repeat(64);
+        let raw_viewer = "b".repeat(64);
+        let control_host = format!("rhctl1-{raw_host}");
+        let control_viewer = format!("rhctl1-{raw_viewer}");
+        let ca = make_ca();
+        let mut roots = RootCertStore::empty();
+        roots.add(ca.der().clone()).unwrap();
+        let trust = Arc::new(
+            ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .unwrap()
+                .with_root_certificates(roots)
+                .with_no_client_auth(),
+        );
+
+        for (purpose, good, viewer, wrong, wrong_path) in [
+            (
+                Purpose::Video,
+                &raw_host,
+                &raw_viewer,
+                &control_host,
+                Purpose::Control.path(),
+            ),
+            (
+                Purpose::Control,
+                &control_host,
+                &control_viewer,
+                &raw_host,
+                Purpose::Video.path(),
+            ),
+        ] {
+            let now = now().unwrap();
+            let approval = PublicVideoApproval::new(
+                purpose,
+                Uuid::new_v4(),
+                PeerSources {
+                    host: Ipv4Addr::LOCALHOST,
+                    viewer: Ipv4Addr::LOCALHOST,
+                },
+                Zeroizing::new(good.to_owned()),
+                Zeroizing::new(viewer.to_owned()),
+                now + 15,
+                now,
+            )
+            .unwrap();
+            assert_eq!(
+                approval.permitted_role(Ipv4Addr::LOCALHOST.into(), wrong),
+                None
+            );
+            let (addr, server) =
+                start_tls_router(&ca, "127.0.0.1", public_video_router(approval)).await;
+            for (path, token, expected) in [
+                (wrong_path, good.as_str(), Some(StatusCode::NOT_FOUND)),
+                (
+                    purpose.path(),
+                    wrong.as_str(),
+                    Some(StatusCode::UNAUTHORIZED),
+                ),
+                (purpose.path(), good.as_str(), None),
+            ] {
+                let tcp = tokio::net::TcpStream::connect(addr).await.unwrap();
+                let mut request = format!("wss://{addr}{path}").into_client_request().unwrap();
+                request.headers_mut().insert(
+                    header::AUTHORIZATION,
+                    format!("Bearer {token}").parse().unwrap(),
+                );
+                let result = tokio::time::timeout(
+                    Duration::from_secs(3),
+                    client_async_tls_with_config(
+                        request,
+                        tcp,
+                        None,
+                        Some(Connector::Rustls(trust.clone())),
+                    ),
+                )
+                .await
+                .unwrap();
+                match expected {
+                    Some(status) => assert!(
+                        matches!(result, Err(WsError::Http(response)) if response.status() == status)
+                    ),
+                    None => assert!(result.is_ok()),
+                }
+            }
+            server.abort();
+            assert!(server.await.unwrap_err().is_cancelled());
+        }
     }
 
     #[test]

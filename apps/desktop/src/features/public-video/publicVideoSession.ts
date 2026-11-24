@@ -3,6 +3,11 @@ import type {
   VideoDisplayFailure,
   VideoFrameIngress,
 } from './canvasVideoAdapter';
+import {
+  publicControlEvent,
+  type PublicControlEvent,
+  type PublicInputState,
+} from './publicControlEvent';
 
 const FRAME_HEADER_BYTES = 24;
 const MAX_AU_BYTES = 1024 * 1024;
@@ -10,6 +15,9 @@ const MAX_SAFE_BIGINT = BigInt(Number.MAX_SAFE_INTEGER);
 const STATUS_INTERVAL_MS = 350;
 const EMPTY_FRAME_DELAY_MS = 33;
 const IPC_DEADLINE_MS = 3500;
+const INPUT_DEADLINE_MS = 1500;
+const MAX_INPUT_QUEUE = 8;
+const RELEASE_INPUT = '{"kind":"release_all"}';
 
 export type PublicVideoRole = 'host' | 'viewer';
 export type PublicVideoState =
@@ -87,6 +95,9 @@ const NATIVE_DIAGNOSTICS = [
 type NativeDiagnostic = (typeof NATIVE_DIAGNOSTICS)[number];
 const nativeDiagnostics: ReadonlySet<string> = new Set(NATIVE_DIAGNOSTICS);
 type PublicVideoError =
+  | 'PUBLIC_CONTROL_INPUT_IPC_FAILED'
+  | 'PUBLIC_CONTROL_INPUT_QUEUE_FULL'
+  | 'PUBLIC_CONTROL_INPUT_STATE_LOST'
   | 'PUBLIC_VIDEO_OP_FAILED'
   | 'PUBLIC_VIDEO_STATUS_IPC_FAILED'
   | 'PUBLIC_VIDEO_FRAME_IPC_FAILED'
@@ -101,6 +112,7 @@ export interface PublicVideoBridge {
   status(generation: string): Promise<unknown>;
   nextFrame(generation: string): Promise<unknown>;
   stop(generation: string): Promise<unknown>;
+  sendInput?(generation: string, event: string): Promise<unknown>;
 }
 
 export interface PublicVideoRenderer {
@@ -111,6 +123,13 @@ export interface PublicVideoRenderer {
 interface Run {
   readonly generation: Promise<string>;
   readonly role: PublicVideoRole;
+  readonly controlLaunch: boolean;
+  generationId?: string;
+  inputState: PublicInputState;
+  inputEnabled: boolean;
+  inputInFlight: boolean;
+  releasePending: boolean;
+  inputQueue: { movement: boolean; event: string }[];
   renderer?: PublicVideoRenderer;
   ingress?: VideoFrameIngress;
   firstPresentedAt?: number;
@@ -166,6 +185,7 @@ interface NativeStatus {
   error?: string;
   end?: PublicVideoEndDetail;
   profileConsumed?: boolean;
+  inputState?: PublicInputState;
 }
 
 function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
@@ -176,6 +196,7 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
     end_reason?: unknown;
     elapsed_ms?: unknown;
     profile_consumed?: unknown;
+    input_state?: unknown;
   };
   if (
     !Object.hasOwn(parsed, 'phase') ||
@@ -196,6 +217,17 @@ function parseStatus(value: unknown, role: PublicVideoRole): NativeStatus {
         ? parsed.profile_consumed
         : undefined,
   };
+  const input = Object.hasOwn(parsed, 'input_state')
+    ? parsed.input_state
+    : undefined;
+  if (
+    input === 'view_only' ||
+    input === 'pending' ||
+    input === 'allowed' ||
+    input === 'denied' ||
+    input === 'closed'
+  )
+    result.inputState = input;
   if (typeof parsed.error === 'string') result.error = parsed.error;
   if (
     result.error !== undefined ||
@@ -247,13 +279,16 @@ function errorCode(cause: unknown, phase: DiagnosticPhase): PublicVideoError {
   return 'PUBLIC_VIDEO_OP_FAILED';
 }
 
-async function withDeadline<T>(job: Promise<T>): Promise<T> {
+async function withDeadline<T>(
+  job: Promise<T>,
+  timeout = IPC_DEADLINE_MS,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     return await Promise.race([
       job,
       new Promise<never>((_, reject) => {
-        timer = setTimeout(() => reject(new IpcTimeout()), IPC_DEADLINE_MS);
+        timer = setTimeout(() => reject(new IpcTimeout()), timeout);
       }),
     ]);
   } finally {
@@ -281,12 +316,23 @@ export class PublicVideoSession {
     private readonly onProfileDisposition: (
       state: PublicVideoProfileDisposition,
     ) => void = () => {},
+    private readonly onInput: (
+      state: PublicInputState,
+      enabled: boolean,
+      releasing: boolean,
+    ) => void = () => {},
   ) {}
 
-  start(role: PublicVideoRole): void {
+  start(role: PublicVideoRole, controlLaunch = false): void {
     if (this.disposed || this.run || this.cleanupUnconfirmed) return;
     const run: Run = {
       role,
+      controlLaunch: controlLaunch === true,
+      inputState: 'view_only',
+      inputEnabled: false,
+      inputInFlight: false,
+      releasePending: false,
+      inputQueue: [],
       cancelled: false,
       generation: Promise.resolve()
         .then(() => {
@@ -296,6 +342,7 @@ export class PublicVideoSession {
         .then(parseGeneration),
     };
     this.run = run;
+    if (run.controlLaunch) this.reportInput(run);
     this.update('starting');
     void this.work(run);
   }
@@ -311,6 +358,132 @@ export class PublicVideoSession {
     void this.stop();
   }
 
+  enableInput(): boolean {
+    const run = this.run;
+    if (
+      !run ||
+      !this.active(run) ||
+      !run.controlLaunch ||
+      run.role !== 'viewer' ||
+      run.inputState !== 'allowed' ||
+      run.firstPresentedAt === undefined ||
+      run.releasePending ||
+      !this.bridge.sendInput
+    )
+      return false;
+    run.inputEnabled = true;
+    this.reportInput(run);
+    return true;
+  }
+
+  pauseInput(): void {
+    const run = this.run;
+    if (!run || !this.active(run) || !run.inputEnabled) return;
+    run.inputEnabled = false;
+    run.inputQueue.length = 0;
+    run.releasePending = true;
+    this.reportInput(run);
+    this.driveInput(run);
+  }
+
+  sendInput(value: PublicControlEvent): boolean {
+    const run = this.run;
+    if (
+      !run ||
+      !this.active(run) ||
+      !run.inputEnabled ||
+      run.inputState !== 'allowed'
+    )
+      return false;
+    const event = publicControlEvent(value);
+    if (!event) return false;
+    const movement = value.kind === 'mouse_move';
+    const item = { event, movement };
+    if (movement && run.inputQueue.at(-1)?.movement)
+      run.inputQueue[run.inputQueue.length - 1] = item;
+    else if (run.inputQueue.length >= MAX_INPUT_QUEUE) {
+      void this.retire(run, 'failed', 'PUBLIC_CONTROL_INPUT_QUEUE_FULL');
+      return false;
+    } else run.inputQueue.push(item);
+    this.driveInput(run);
+    return true;
+  }
+
+  private reportInput(run: Run): void {
+    if (!this.disposed && run.controlLaunch)
+      this.onInput(run.inputState, run.inputEnabled, run.releasePending);
+  }
+
+  private observeInput(run: Run, status: NativeStatus): boolean {
+    if (
+      !run.controlLaunch ||
+      run.inputState === 'closed' ||
+      run.inputState === 'denied'
+    )
+      return true;
+    const current = status.inputState ?? 'view_only';
+    if (current === 'allowed' && status.phase !== 'ready') return true;
+    if (current === run.inputState) return true;
+    if (
+      run.inputState === 'allowed' &&
+      (current === 'view_only' || current === 'pending')
+    ) {
+      void this.retire(run, 'failed', 'PUBLIC_CONTROL_INPUT_STATE_LOST');
+      return false;
+    }
+    run.inputState = current;
+    if (current === 'closed' || current === 'denied') {
+      run.inputEnabled = false;
+      run.releasePending = false;
+      run.inputQueue.length = 0;
+    }
+    this.reportInput(run);
+    return true;
+  }
+
+  private driveInput(run: Run): void {
+    if (
+      !this.active(run) ||
+      run.inputState !== 'allowed' ||
+      run.inputInFlight ||
+      !run.generationId ||
+      !this.bridge.sendInput
+    )
+      return;
+    const release = run.releasePending;
+    const event = release ? RELEASE_INPUT : run.inputQueue.shift()?.event;
+    if (!event) return;
+    const generation = run.generationId;
+    run.inputInFlight = true;
+    void withDeadline(
+      Promise.resolve().then(() => {
+        if (
+          !this.active(run) ||
+          run.inputState !== 'allowed' ||
+          (!release && !run.inputEnabled)
+        )
+          return;
+        return this.bridge.sendInput!(generation, event);
+      }),
+      INPUT_DEADLINE_MS,
+    ).then(
+      () => {
+        run.inputInFlight = false;
+        if (!this.active(run)) return;
+        if (release) {
+          run.releasePending = false;
+          this.reportInput(run);
+        }
+        this.driveInput(run);
+      },
+      () => {
+        run.inputInFlight = false;
+        if (this.active(run))
+          void this.retire(run, 'failed', 'PUBLIC_CONTROL_INPUT_IPC_FAILED');
+      },
+    );
+  }
+
   private active(run: Run) {
     return !this.disposed && this.run === run && !run.cancelled;
   }
@@ -319,6 +492,7 @@ export class PublicVideoSession {
     let diagnosticPhase: DiagnosticPhase = 'start';
     try {
       const generation = await withDeadline(run.generation);
+      run.generationId = generation;
       let statusAt = -Infinity;
       let ready = false;
       while (this.active(run)) {
@@ -341,9 +515,11 @@ export class PublicVideoSession {
             return;
           }
           if (current.phase === 'closed' || current.phase === 'stopping') {
+            run.inputState = 'closed';
             await this.retire(run, 'stopped', undefined, current.end);
             return;
           }
+          if (!this.observeInput(run, current)) return;
           if (ready && current.phase !== 'ready') throw new InvalidResponse();
           if (!ready && current.phase === 'ready') {
             ready = true;
@@ -481,6 +657,22 @@ export class PublicVideoSession {
     run.ingress = undefined;
     run.renderer?.stop();
     run.renderer = undefined;
+    const releaseOnStop =
+      run.inputState === 'allowed' &&
+      !run.inputInFlight &&
+      (run.inputEnabled || run.releasePending);
+    run.inputEnabled = false;
+    run.releasePending = false;
+    run.inputQueue.length = 0;
+    run.inputState = 'closed';
+    this.reportInput(run);
+    if (releaseOnStop && run.generationId && this.bridge.sendInput) {
+      const id = run.generationId;
+      // Native Stop is authoritative and is never delayed for this best effort.
+      void Promise.resolve()
+        .then(() => this.bridge.sendInput!(id, RELEASE_INPUT))
+        .catch(() => {});
+    }
     if (!this.disposed) this.update('stopping');
     const cleanup = async () => {
       const generation = await run.generation.catch((cause: unknown) => {
