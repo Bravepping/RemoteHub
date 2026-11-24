@@ -81,8 +81,16 @@ pub(crate) fn validate(
     answer: bool,
     now: u64,
 ) -> Result<Vec<Candidate>> {
-    if scope.checked_control_batch(now).is_err()
-        || sdp.len() > hub_identity::session::MAX_SIGNAL_BYTES
+    scope.checked_control_batch(now).map_err(|_| ERROR)?;
+    validate_shape(sdp, scope, answer)
+}
+
+pub(super) fn validate_shape(
+    sdp: &str,
+    scope: PublicVideoScope,
+    answer: bool,
+) -> Result<Vec<Candidate>> {
+    if sdp.len() > hub_identity::session::MAX_SIGNAL_BYTES
         || !sdp.is_ascii()
         || !sdp.starts_with("v=0\r\n")
     {
@@ -292,6 +300,128 @@ mod tests {
         ] {
             assert!(matches!(validate(&bad, scope(), false, NOW), Err(ERROR)));
         }
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    #[test]
+    fn sustained_proof_has_its_own_domain_and_fixed_bounded_scope() {
+        use crate::public_video::{
+            SUSTAINED_CONTROL_SCOPE_TTL_SECONDS, SUSTAINED_CONTROL_SESSION_SECONDS,
+        };
+        assert_eq!(SUSTAINED_CONTROL_SESSION_SECONDS, 1800);
+        let host = Identity::generate_ephemeral().unwrap();
+        let viewer = Identity::generate_ephemeral().unwrap();
+        let host_pin = host
+            .verify_peer(
+                &PairingCandidate::parse(&viewer.pairing_code()).unwrap(),
+                &viewer.public().fingerprint,
+            )
+            .unwrap();
+        let viewer_pin = viewer
+            .verify_peer(
+                &PairingCandidate::parse(&host.pairing_code()).unwrap(),
+                &host.public().fingerprint,
+            )
+            .unwrap();
+        let room = Uuid::new_v4();
+        let extended = PublicVideoScope {
+            expires_at: NOW + SUSTAINED_CONTROL_SCOPE_TTL_SECONDS,
+            ..scope()
+        };
+        let sustained_host = |scope| {
+            PublicControlProof::prepare_sustained(
+                &host,
+                &host_pin,
+                SessionRole::Host,
+                room,
+                GENERATION,
+                scope,
+                NOW,
+            )
+        };
+        let sustained_viewer = |scope| {
+            PublicControlProof::prepare_sustained(
+                &viewer,
+                &viewer_pin,
+                SessionRole::Viewer,
+                room,
+                GENERATION,
+                scope,
+                NOW,
+            )
+        };
+        assert!(sustained_host(PublicVideoScope {
+            expires_at: extended.expires_at + 1,
+            ..extended
+        })
+        .is_err());
+        assert!(sustained_host(PublicVideoScope {
+            expires_at: NOW,
+            ..extended
+        })
+        .is_err());
+        assert!(PublicControlProof::prepare_immediate_batch(
+            &host,
+            &host_pin,
+            SessionRole::Host,
+            room,
+            GENERATION,
+            extended,
+            NOW
+        )
+        .is_err());
+
+        let offer = description(false);
+        let answer = description(true);
+        let mut receiver = sustained_host(extended).unwrap();
+        let mut sender = sustained_viewer(extended).unwrap();
+        let signature = sender
+            .seal(receiver.challenge().unwrap(), &offer, NOW)
+            .unwrap();
+        receiver.verify(&offer, &signature, NOW).unwrap();
+        let response = receiver
+            .seal(sender.challenge().unwrap(), &answer, NOW)
+            .unwrap();
+        sender.verify(&answer, &response, NOW).unwrap();
+        assert!(sender.verify(&answer, &response, NOW).is_err());
+
+        // Overlapping expiry removes timing as the reason for rejecting an
+        // old-purpose signature. Exact bytes are identical.
+        let short = scope();
+        let mut new = sustained_host(short).unwrap();
+        let mut old = PublicControlProof::prepare_immediate_batch(
+            &viewer,
+            &viewer_pin,
+            SessionRole::Viewer,
+            room,
+            GENERATION,
+            short,
+            NOW,
+        )
+        .unwrap();
+        let old_sig = old.seal(new.challenge().unwrap(), &offer, NOW).unwrap();
+        assert!(new.verify(&offer, &old_sig, NOW).is_err());
+
+        let mut old = PublicControlProof::prepare(
+            &host,
+            &host_pin,
+            SessionRole::Host,
+            room,
+            GENERATION,
+            short,
+            NOW,
+        )
+        .unwrap();
+        let mut new = sustained_viewer(short).unwrap();
+        let new_sig = new.seal(old.challenge().unwrap(), &offer, NOW).unwrap();
+        assert!(old.verify(&offer, &new_sig, NOW).is_err());
+
+        let mut receiver = sustained_host(extended).unwrap();
+        let mut sender = sustained_viewer(extended).unwrap();
+        let signature = sender
+            .seal(receiver.challenge().unwrap(), &offer, NOW)
+            .unwrap();
+        assert!(receiver.verify(&offer, &signature, NOW + 15).is_err());
     }
 
     #[test]

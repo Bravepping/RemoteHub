@@ -18,6 +18,10 @@ use std::{net::SocketAddrV4, time::Duration};
 use uuid::Uuid;
 
 const MAX_SCOPE_TTL: u64 = 600;
+#[cfg(feature = "v2-public-control-sustained")]
+pub const SUSTAINED_CONTROL_SESSION_SECONDS: u64 = 1800;
+#[cfg(feature = "v2-public-control-sustained")]
+pub const SUSTAINED_CONTROL_SCOPE_TTL_SECONDS: u64 = 2400;
 const PROOF_TTL: u64 = 15;
 const INVALID_SCOPE: &str = "PUBLIC_VIDEO_SCOPE_INVALID";
 const EXPIRED: &str = "PUBLIC_VIDEO_SCOPE_EXPIRED";
@@ -32,9 +36,21 @@ enum Purpose {
     Control,
     #[cfg(feature = "v2-public-control")]
     ControlBatch,
+    #[cfg(feature = "v2-public-control-sustained")]
+    ControlSustained,
 }
 
 impl Purpose {
+    #[cfg(feature = "v2-public-control")]
+    fn has_control(self) -> bool {
+        match self {
+            Self::Control | Self::ControlBatch => true,
+            #[cfg(feature = "v2-public-control-sustained")]
+            Self::ControlSustained => true,
+            Self::Video => false,
+        }
+    }
+
     // Preserve legacy domains: the signed statement independently binds the route mode.
     fn domain(self) -> &'static [u8] {
         match self {
@@ -43,6 +59,8 @@ impl Purpose {
             Self::Control => b"RemoteHub.V2.public-control-turn.sdp.v1\0",
             #[cfg(feature = "v2-public-control")]
             Self::ControlBatch => b"RemoteHub.V2.public-control-turn.immediate-batch.sdp.v1\0",
+            #[cfg(feature = "v2-public-control-sustained")]
+            Self::ControlSustained => b"RemoteHub.V2.public-control-turn.sustained-1800.sdp.v1\0",
         }
     }
 
@@ -50,6 +68,8 @@ impl Purpose {
         match self {
             #[cfg(feature = "v2-public-control")]
             Self::ControlBatch => scope.checked_control_batch(now),
+            #[cfg(feature = "v2-public-control-sustained")]
+            Self::ControlSustained => scope.checked_control_sustained(now),
             _ => scope.checked_mode(now),
         }
     }
@@ -75,6 +95,11 @@ impl PublicVideoScope {
     #[cfg(feature = "v2-public-control")]
     pub(crate) fn checked_control_batch(self, now: u64) -> Result<u8, &'static str> {
         self.checked_mode_with_max(now, 1800)
+    }
+
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub(crate) fn checked_control_sustained(self, now: u64) -> Result<u8, &'static str> {
+        self.checked_mode_with_max(now, SUSTAINED_CONTROL_SCOPE_TTL_SECONDS)
     }
 
     fn checked_mode_with_max(self, now: u64, max_ttl: u64) -> Result<u8, &'static str> {
@@ -190,16 +215,16 @@ impl<'a> PublicVideoProof<'a> {
             local,
             purpose,
             #[cfg(feature = "v2-public-control")]
-            control_scope: matches!(purpose, Purpose::Control | Purpose::ControlBatch).then(|| {
-                crate::input_approval::InputScope {
+            control_scope: purpose
+                .has_control()
+                .then(|| crate::input_approval::InputScope {
                     room: *room.as_bytes(),
                     generation: session_nonce,
                     viewer_key: match role {
                         SessionRole::Host => *pinned_peer.public_key(),
                         SessionRole::Viewer => local.public().public_key,
                     },
-                }
-            }),
+                }),
             role,
             room,
             scope,
@@ -239,6 +264,11 @@ impl<'a> PublicVideoProof<'a> {
                 self.purpose.check(self.scope, now)?;
                 crate::public_control_sdp::validate(sdp, self.scope, answer, now)
             }
+            #[cfg(feature = "v2-public-control-sustained")]
+            Purpose::ControlSustained => {
+                self.purpose.check(self.scope, now)?;
+                crate::public_control_sdp::validate_shape(sdp, self.scope, answer)
+            }
         }
     }
 
@@ -250,6 +280,12 @@ impl<'a> PublicVideoProof<'a> {
         config: IceConfig,
         now: u64,
     ) -> Result<PublicVideoIcePlan, &'static str> {
+        #[cfg(feature = "v2-public-control-sustained")]
+        if matches!(self.purpose, Purpose::ControlSustained) {
+            // This signed contract is inert until the distinct sustained
+            // route and media deadline are wired end to end.
+            return Err("PUBLIC_CONTROL_SUSTAINED_STAGE_UNAVAILABLE");
+        }
         #[cfg(feature = "v2-public-control")]
         if self.is_immediate_control_batch() {
             return PublicVideoIcePlan::prepare_control_batch(
@@ -414,6 +450,31 @@ impl<'a> PublicControlProof<'a> {
             scope,
             now,
             Purpose::ControlBatch,
+        )
+        .map(Self)
+    }
+
+    /// Prepare only a device-signed proof for an independently selected
+    /// sustained invitation. This grants neither viewing nor keyboard input.
+    #[cfg(feature = "v2-public-control-sustained")]
+    pub fn prepare_sustained(
+        local: &'a Identity,
+        pinned_peer: &VerifiedPeer,
+        role: SessionRole,
+        room: Uuid,
+        generation: [u8; 32],
+        scope: PublicVideoScope,
+        now: u64,
+    ) -> Result<Self, &'static str> {
+        PublicVideoProof::prepare_for(
+            local,
+            pinned_peer,
+            role,
+            room,
+            generation,
+            scope,
+            now,
+            Purpose::ControlSustained,
         )
         .map(Self)
     }
