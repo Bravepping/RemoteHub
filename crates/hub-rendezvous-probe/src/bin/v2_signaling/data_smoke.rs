@@ -438,6 +438,11 @@ async fn verified_wss_loopback_sctp_declines_fake_input_without_applying() {
 #[tokio::test]
 #[ignore = "manual Windows prompt; select this exact test interactively"]
 async fn verified_wss_loopback_sctp_native_consent_fake_input() {
+    run_native_consent_loopback().await;
+}
+
+#[cfg(windows)]
+pub(super) async fn run_native_consent_loopback() {
     reusable_inline_round_trip(false, Some(data_smoke_input::Consent::Native)).await;
 }
 

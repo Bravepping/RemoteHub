@@ -6,7 +6,15 @@ rust-version.workspace = true
 license.workspace = true
 publish = false
 
+[[test]]
+name = "remotehub-native-wss-consent-check"
+path = "tests/native_wss_consent_check.rs"
+harness = false
+test = false
+required-features = ["v2-native-wss-consent-manual"]
+
 [features]
+v2-native-wss-consent-manual = []
 v2-synthetic-video = ["dep:hub-identity", "dep:hub-webrtc", "dep:rtc", "dep:async-trait", "dep:webrtc"]
 
 [dependencies]

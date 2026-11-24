@@ -576,6 +576,11 @@ async fn main() {
 #[path = "v2_signaling/data_smoke.rs"]
 mod data_smoke;
 
+#[cfg(all(test, windows, feature = "v2-native-wss-consent-manual"))]
+pub(super) async fn run_native_wss_consent_fixture() {
+    data_smoke::run_native_consent_loopback().await;
+}
+
 #[cfg(test)]
 #[path = "v2_signaling/tls_smoke.rs"]
 mod tls_smoke;
